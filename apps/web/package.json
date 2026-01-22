@@ -3,11 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-  "dev": "next dev",
-  "build": "next build",
-  "start": "next start -p $PORT"
-}
-
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -p $PORT",
     "lint": "eslint"
   },
   "dependencies": {
@@ -26,3 +24,4 @@
     "typescript": "^5"
   }
 }
+
