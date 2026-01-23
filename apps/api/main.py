@@ -25,8 +25,13 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
 # Render Postgres URLs can start with postgres://, but SQLAlchemy wants postgresql://
+# Render may give postgres:// ... but SQLAlchemy needs postgresql://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+# Force SQLAlchemy to use psycopg (v3), not psycopg2
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://black-within.onrender.com")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
