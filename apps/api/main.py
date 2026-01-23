@@ -1,8 +1,10 @@
 import os
-from datetime import datetime
-from typing import List, Optional
+import random
+import string
+from datetime import datetime, timedelta, timezone
+from typing import List
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import (
@@ -25,7 +27,6 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
 # Render Postgres URLs can start with postgres://, but SQLAlchemy wants postgresql://
-# Render may give postgres:// ... but SQLAlchemy needs postgresql://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -35,6 +36,8 @@ if DATABASE_URL.startswith("postgresql://"):
 
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://black-within.onrender.com")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
+
+LOGIN_CODE_TTL_MINUTES = int(os.getenv("LOGIN_CODE_TTL_MINUTES", "15"))
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
@@ -48,8 +51,18 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # simple string id
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # user id
+    email: Mapped[str | None] = mapped_column(String(320), unique=True, index=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LoginCode(Base):
+    __tablename__ = "login_codes"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    code: Mapped[str] = mapped_column(String(10))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class SavedProfile(Base):
@@ -57,7 +70,7 @@ class SavedProfile(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_saved_user_profile"),)
 
@@ -67,7 +80,7 @@ class Like(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
 
@@ -91,6 +104,15 @@ class IdListResponse(BaseModel):
     ids: List[str]
 
 
+class RequestCodePayload(BaseModel):
+    email: str
+
+
+class VerifyCodePayload(BaseModel):
+    email: str
+    code: str
+
+
 # -----------------------------
 # App
 # -----------------------------
@@ -108,6 +130,14 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _make_6_digit_code() -> str:
+    return "".join(random.choice(string.digits) for _ in range(6))
 
 
 def _ensure_user(user_id: str) -> str:
@@ -129,6 +159,80 @@ def _ensure_user(user_id: str) -> str:
 def me(user_id: str = Query(..., description="Client-generated user id")):
     user_id = _ensure_user(user_id)
     return MeResponse(user_id=user_id)
+
+
+# -----------------------------
+# Login (email code)
+# -----------------------------
+@app.post("/auth/request-code")
+def request_code(payload: RequestCodePayload):
+    email = (payload.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Please enter a valid email.")
+
+    code = _make_6_digit_code()
+    expires_at = _utcnow() + timedelta(minutes=LOGIN_CODE_TTL_MINUTES)
+
+    with Session(engine) as session:
+        session.add(
+            LoginCode(
+                id=str(random.randint(10**8, 10**9 - 1)),  # simple id
+                email=email,
+                code=code,
+                expires_at=expires_at,
+            )
+        )
+        session.commit()
+
+    # PREVIEW MODE:
+    # We return the code so you can test login before email sending is added.
+    return {
+        "ok": True,
+        "message": "Code created. Check your email (preview mode may show the code on-screen).",
+        "devCode": code,
+    }
+
+
+@app.post("/auth/verify-code")
+def verify_code(payload: VerifyCodePayload):
+    email = (payload.email or "").strip().lower()
+    code = (payload.code or "").strip()
+
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Please enter a valid email.")
+    if not code or len(code) != 6:
+        raise HTTPException(status_code=400, detail="Please enter the 6-digit code.")
+
+    with Session(engine) as session:
+        # newest matching code
+        row = (
+            session.execute(
+                select(LoginCode)
+                .where(LoginCode.email == email, LoginCode.code == code)
+                .order_by(LoginCode.created_at.desc())
+            )
+            .scalars()
+            .first()
+        )
+
+        if not row:
+            raise HTTPException(status_code=401, detail="That code is not correct.")
+        if row.expires_at < _utcnow():
+            raise HTTPException(status_code=401, detail="That code has expired. Please request a new one.")
+
+        # Find or create user by email
+        existing_user = (
+            session.execute(select(User).where(User.email == email)).scalars().first()
+        )
+
+        if existing_user:
+            return {"ok": True, "userId": existing_user.id}
+
+        # Create new user id (simple random string)
+        new_user_id = str(random.randint(10**10, 10**11 - 1))
+        session.add(User(id=new_user_id, email=email))
+        session.commit()
+        return {"ok": True, "userId": new_user_id}
 
 
 # -----------------------------
@@ -154,7 +258,6 @@ def save_profile(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        # insert if not exists (UniqueConstraint prevents duplicates)
         try:
             session.add(SavedProfile(user_id=user_id, profile_id=profile_id))
             session.commit()
@@ -189,9 +292,7 @@ def get_likes(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        rows = session.execute(
-            select(Like.profile_id).where(Like.user_id == user_id)
-        ).all()
+        rows = session.execute(select(Like.profile_id).where(Like.user_id == user_id)).all()
         ids = [r[0] for r in rows]
         return IdListResponse(ids=ids)
 
