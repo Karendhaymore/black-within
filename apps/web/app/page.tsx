@@ -77,7 +77,19 @@ export default async function Home() {
         fontSize: 14,
       }}
     >
-      /auth
+     <a
+  href="/auth"
+  style={{
+    padding: "0.6rem 1.2rem",
+    borderRadius: "6px",
+    border: "1px solid #ccc",
+    textDecoration: "none",
+    color: "inherit",
+  }}
+>
+  Sign Up / Log In
+</a>
+
 
     </a>
 
