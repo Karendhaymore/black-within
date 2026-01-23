@@ -62,7 +62,35 @@ export default function SavedPage() {
               <div key={p.id} style={{ border: "1px solid #e5e5e5", borderRadius: 14, overflow: "hidden" }}>
                 <div style={{ width: "100%", aspectRatio: "4 / 3", background: "#f3f3f3" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.photo} alt={p.displayName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                 {p.photo ? (
+  // eslint-disable-next-line @next/next/no-img-element
+  <img
+    src={p.photo}
+    alt={p.displayName}
+    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+  />
+) : (
+  <div
+    style={{
+      width: "100%",
+      height: "100%",
+      display: "grid",
+      placeItems: "center",
+      background: "#f2f2f2",
+      color: "#555",
+      fontSize: "1.5rem",
+      fontWeight: 600,
+    }}
+  >
+    {p.displayName
+      .split(" ")
+      .map((w) => w[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase()}
+  </div>
+)}
+
                 </div>
 
                 <div style={{ padding: "1rem" }}>
