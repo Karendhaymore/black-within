@@ -59,7 +59,7 @@ class User(Base):
 
 class SavedProfile(Base):
     __tablename__ = "saved_profiles"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # generate ourselves
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -69,7 +69,7 @@ class SavedProfile(Base):
 
 class Like(Base):
     __tablename__ = "likes"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # generate ourselves
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -79,15 +79,17 @@ class Like(Base):
 
 class LoginCode(Base):
     """
-    IMPORTANT:
-    Your DB currently requires id NOT NULL but it's not auto-incrementing.
-    So we generate a string id ourselves.
+    Your DB requires:
+      - id NOT NULL
+      - created_at NOT NULL
+    So we generate id and set created_at ourselves.
     """
     __tablename__ = "login_codes"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # generate ourselves
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
     email: Mapped[str] = mapped_column(String(320), index=True, unique=True)
     code: Mapped[str] = mapped_column(String(10))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 Base.metadata.create_all(engine)
@@ -147,7 +149,6 @@ def _make_user_id_from_email(email: str) -> str:
 
 
 def _new_id() -> str:
-    # 40 chars max for our String(40) ids
     return secrets.token_hex(20)[:40]
 
 
@@ -179,6 +180,7 @@ def request_code(payload: RequestCodePayload):
 
     code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = datetime.utcnow() + timedelta(minutes=AUTH_CODE_TTL_MINUTES)
+    now = datetime.utcnow()
 
     with Session(engine) as session:
         existing = session.execute(
@@ -188,8 +190,17 @@ def request_code(payload: RequestCodePayload):
         if existing:
             existing.code = code
             existing.expires_at = expires_at
+            existing.created_at = now
         else:
-            session.add(LoginCode(id=_new_id(), email=email, code=code, expires_at=expires_at))
+            session.add(
+                LoginCode(
+                    id=_new_id(),
+                    email=email,
+                    code=code,
+                    expires_at=expires_at,
+                    created_at=now,
+                )
+            )
 
         session.commit()
 
@@ -223,7 +234,6 @@ def verify_code(payload: VerifyCodePayload):
         if row.code != code:
             raise HTTPException(status_code=401, detail="Invalid or expired code")
 
-        # success: consume the code
         session.execute(delete(LoginCode).where(LoginCode.email == email))
         session.commit()
 
@@ -254,7 +264,14 @@ def save_profile(payload: ProfileAction):
 
     with Session(engine) as session:
         try:
-            session.add(SavedProfile(id=_new_id(), user_id=user_id, profile_id=profile_id))
+            session.add(
+                SavedProfile(
+                    id=_new_id(),
+                    user_id=user_id,
+                    profile_id=profile_id,
+                    created_at=datetime.utcnow(),
+                )
+            )
             session.commit()
         except Exception:
             session.rollback()
@@ -299,7 +316,14 @@ def like(payload: ProfileAction):
 
     with Session(engine) as session:
         try:
-            session.add(Like(id=_new_id(), user_id=user_id, profile_id=profile_id))
+            session.add(
+                Like(
+                    id=_new_id(),
+                    user_id=user_id,
+                    profile_id=profile_id,
+                    created_at=datetime.utcnow(),
+                )
+            )
             session.commit()
         except Exception:
             session.rollback()
