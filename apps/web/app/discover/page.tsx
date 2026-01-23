@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SAMPLE_PROFILES, type Profile } from "../lib/sampleProfiles";
+import { DEMO_PROFILES, type Profile } from "../lib/sampleProfiles";
 import {
   addNotification,
   cleanupSavedIds,
