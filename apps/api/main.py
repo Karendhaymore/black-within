@@ -27,11 +27,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
-# Render sometimes provides postgres://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Force SQLAlchemy to use psycopg (v3)
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
@@ -132,10 +130,10 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _normalize_email(email: str) -> str:
-    e = (email or "").strip().lower()
-    if not e or not EMAIL_RE.match(e):
+    email = (email or "").strip().lower()
+    if not email or not EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="A valid email is required")
-    return e
+    return email
 
 
 def _make_user_id_from_email(email: str) -> str:
@@ -145,8 +143,8 @@ def _make_user_id_from_email(email: str) -> str:
 
 def _ensure_user(user_id: str) -> str:
     with Session(engine) as session:
-        existing = session.get(User, user_id)
-        if existing:
+        user = session.get(User, user_id)
+        if user:
             return user_id
         session.add(User(id=user_id))
         session.commit()
@@ -168,7 +166,15 @@ def request_code(payload: RequestCodePayload):
     expires_at = datetime.utcnow() + timedelta(minutes=AUTH_CODE_TTL_MINUTES)
 
     with Session(engine) as session:
-        try:
+        existing = session.execute(
+            select(LoginCode).where(LoginCode.email == email)
+        ).scalar_one_or_none()
+
+        if existing:
+            existing.code = code
+            existing.expires_at = expires_at
+            existing.created_at = datetime.utcnow()
+        else:
             session.add(
                 LoginCode(
                     email=email,
@@ -177,27 +183,9 @@ def request_code(payload: RequestCodePayload):
                     created_at=datetime.utcnow(),
                 )
             )
-            session.commit()
-        except IntegrityError:
-            session.rollback()
-            existing = session.execute(
-                select(LoginCode).where(LoginCode.email == email)
-            ).scalar_one_or_none()
-            existing.code = code
-            existing.expires_at = expires_at
-            existing.created_at = datetime.utcnow()
-            session.commit()
 
-   else:
-    session.add(
-        LoginCode(
-            email=email,
-            code=code,
-            expires_at=expires_at,
-            created_at=datetime.utcnow(),
-        )
-    )
-    session.commit() 
+        session.commit()
+
     if AUTH_PREVIEW_MODE:
         return {"ok": True, "devCode": code}
 
@@ -250,6 +238,9 @@ def save_profile(payload: ProfileAction):
     return {"ok": True}
 
 
+# -----------------------------
+# Likes
+# -----------------------------
 @app.get("/likes", response_model=IdListResponse)
 def get_likes(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
