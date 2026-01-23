@@ -192,12 +192,12 @@ def request_code(payload: RequestCodePayload):
     expires_at = datetime.utcnow() + timedelta(minutes=AUTH_CODE_TTL_MINUTES)
 
     with Session(engine) as session:
-    stmt = insert(LoginCode).values(
-        email=email,
-        code=code,
-        expires_at=expires_at,
-        created_at=datetime.utcnow(),
-    ).on_conflict_do_update(
+        stmt = insert(LoginCode).values(
+            email=email,
+            code=code,
+            expires_at=expires_at,
+            created_at=datetime.utcnow(),
+      ).on_conflict_do_update(
         index_elements=[LoginCode.email],
         set_={
             "code": code,
