@@ -60,10 +60,13 @@ export default function AlignmentPage() {
       <div style={{ width: "100%", maxWidth: 820 }}>
         <div style={{ marginBottom: "1rem", color: "#666" }}>Step 4 of 6</div>
 
-        <h1 style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>Cultural &amp; Spiritual Grounding</h1>
-        <p style={{ color: "#555", marginBottom: "1.5rem" }}>
-          Select what shapes how you see the world. You can update this anytime.
-        </p>
+        <h1 style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>
+  Cultural &amp; Spiritual Grounding
+</h1>
+<p style={{ color: "#555", marginBottom: "1.5rem" }}>
+  Select your spiritual identity and the traditions that guide how you move through the world.
+</p>
+
 
         <div style={{ display: "grid", gap: "1rem" }}>
           <div
