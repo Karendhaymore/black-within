@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
 
+
 # -----------------------------
 # Config
 # -----------------------------
@@ -37,11 +38,8 @@ if DATABASE_URL.startswith("postgresql://"):
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://black-within.onrender.com")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 
-# Auth settings
 AUTH_CODE_TTL_MINUTES = int(os.getenv("AUTH_CODE_TTL_MINUTES", "15"))
 AUTH_PREVIEW_MODE = os.getenv("AUTH_PREVIEW_MODE", "true").lower() in ("1", "true", "yes")
-
-# Used to make user IDs stable across logins/devices (recommended)
 AUTH_USERID_PEPPER = os.getenv("AUTH_USERID_PEPPER", "")
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
@@ -56,7 +54,7 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # stable string id
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -81,9 +79,6 @@ class Like(Base):
 
 
 class LoginCode(Base):
-    """
-    Stores one active code per email. Requesting a new code overwrites the old one.
-    """
     __tablename__ = "login_codes"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(320), index=True, unique=True)
@@ -144,20 +139,11 @@ def _normalize_email(email: str) -> str:
 
 
 def _make_user_id_from_email(email: str) -> str:
-    """
-    Stable user id derived from email so it works across devices.
-    Uses a server "pepper" if provided (recommended).
-    """
-    # If you set AUTH_USERID_PEPPER in Render env vars, this is non-guessable.
     raw = f"{AUTH_USERID_PEPPER}:{email}".encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()[:40]  # fits String(40)
+    return hashlib.sha256(raw).hexdigest()[:40]
 
 
 def _ensure_user(user_id: str) -> str:
-    user_id = (user_id or "").strip()
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id is required")
-
     with Session(engine) as session:
         existing = session.get(User, user_id)
         if existing:
@@ -167,91 +153,65 @@ def _ensure_user(user_id: str) -> str:
         return user_id
 
 
-@app.get("/")
-def root():
-    return {"name": "Black Within API", "status": "ok", "docs": "/docs", "health": "/health"}
-
-
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
-@app.get("/me", response_model=MeResponse)
-def me(user_id: str = Query(..., description="Client-generated user id")):
-    user_id = _ensure_user(user_id)
-    return MeResponse(user_id=user_id)
-
-
 # -----------------------------
-# AUTH (Preview mode)
+# AUTH
 # -----------------------------
 @app.post("/auth/request-code")
 def request_code(payload: RequestCodePayload):
     email = _normalize_email(payload.email)
-
-    # Generate 6-digit code
     code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = datetime.utcnow() + timedelta(minutes=AUTH_CODE_TTL_MINUTES)
 
-    # Postgres UPSERT to avoid race-condition 500s
     with Session(engine) as session:
-        stmt = insert(LoginCode.__table__).values(
-            email=email,
-            code=code,
-            expires_at=expires_at,
-            created_at=datetime.utcnow(),
-        ).on_conflict_do_update(
-            index_elements=[LoginCode.__table__.c.email],
-            set_={
-                "code": code,
-                "expires_at": expires_at,
-                "created_at": datetime.utcnow(),
-            },
-        )
-        session.execute(stmt)
-        session.commit()
+        try:
+            session.add(
+                LoginCode(
+                    email=email,
+                    code=code,
+                    expires_at=expires_at,
+                    created_at=datetime.utcnow(),
+                )
+            )
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            existing = session.execute(
+                select(LoginCode).where(LoginCode.email == email)
+            ).scalar_one()
+            existing.code = code
+            existing.expires_at = expires_at
+            existing.created_at = datetime.utcnow()
+            session.commit()
 
-    # In preview mode we return the code so you can keep building without SendGrid
     if AUTH_PREVIEW_MODE:
         return {"ok": True, "devCode": code}
 
-    # If you later add SendGrid, you would send the code here and return ok:true
     return {"ok": True}
 
 
 @app.post("/auth/verify-code")
 def verify_code(payload: VerifyCodePayload):
     email = _normalize_email(payload.email)
-    code = (payload.code or "").strip()
-
-    if not code or len(code) != 6:
-        raise HTTPException(status_code=400, detail="A 6-digit code is required")
+    code = payload.code.strip()
 
     with Session(engine) as session:
-    try:
-        # First try to create a new row
-        session.add(LoginCode(email=email, code=code, expires_at=expires_at, created_at=datetime.utcnow()))
+        row = session.execute(
+            select(LoginCode).where(LoginCode.email == email)
+        ).scalar_one_or_none()
+
+        if not row or row.code != code or datetime.utcnow() > row.expires_at:
+            raise HTTPException(status_code=401, detail="Invalid or expired code")
+
+        session.execute(delete(LoginCode).where(LoginCode.email == email))
         session.commit()
-    except IntegrityError:
-        # If it already exists (or a double-click caused a collision), update instead
-        session.rollback()
-        existing = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
-        if existing:
-            existing.code = code
-            existing.expires_at = expires_at
-            existing.created_at = datetime.utcnow()
-            session.commit()
-        else:
-            # Rare edge case: try insert once more
-            session.add(LoginCode(email=email, code=code, expires_at=expires_at, created_at=datetime.utcnow()))
-            session.commit()
 
-
-    # Stable user id and ensure user exists
     user_id = _make_user_id_from_email(email)
     _ensure_user(user_id)
-
     return {"ok": True, "userId": user_id}
 
 
@@ -261,73 +221,42 @@ def verify_code(payload: VerifyCodePayload):
 @app.get("/saved", response_model=IdListResponse)
 def get_saved(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
-
     with Session(engine) as session:
         rows = session.execute(
             select(SavedProfile.profile_id).where(SavedProfile.user_id == user_id)
         ).all()
-        ids = [r[0] for r in rows]
-        return IdListResponse(ids=ids)
+        return IdListResponse(ids=[r[0] for r in rows])
 
 
 @app.post("/saved")
 def save_profile(payload: ProfileAction):
     user_id = _ensure_user(payload.user_id)
-    profile_id = (payload.profile_id or "").strip()
-    if not profile_id:
-        raise HTTPException(status_code=400, detail="profile_id is required")
-
     with Session(engine) as session:
         try:
-            session.add(SavedProfile(user_id=user_id, profile_id=profile_id))
+            session.add(SavedProfile(user_id=user_id, profile_id=payload.profile_id))
             session.commit()
         except Exception:
             session.rollback()
-        return {"ok": True}
+    return {"ok": True}
 
 
-@app.delete("/saved")
-def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
-    user_id = _ensure_user(user_id)
-    profile_id = (profile_id or "").strip()
-    if not profile_id:
-        raise HTTPException(status_code=400, detail="profile_id is required")
-
-    with Session(engine) as session:
-        session.execute(
-            delete(SavedProfile).where(
-                SavedProfile.user_id == user_id,
-                SavedProfile.profile_id == profile_id,
-            )
-        )
-        session.commit()
-        return {"ok": True}
-
-
-# -----------------------------
-# Likes
-# -----------------------------
 @app.get("/likes", response_model=IdListResponse)
 def get_likes(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
-
     with Session(engine) as session:
-        rows = session.execute(select(Like.profile_id).where(Like.user_id == user_id)).all()
-        ids = [r[0] for r in rows]
-        return IdListResponse(ids=ids)
+        rows = session.execute(
+            select(Like.profile_id).where(Like.user_id == user_id)
+        ).all()
+        return IdListResponse(ids=[r[0] for r in rows])
 
 
 @app.post("/likes")
 def like(payload: ProfileAction):
     user_id = _ensure_user(payload.user_id)
-    profile_id = (payload.profile_id or "").strip()
-    if not profile_id:
-        raise HTTPException(status_code=400, detail="profile_id is required")
-
     with Session(engine) as session:
         try:
-            session.add(Like(user_id=user_id, profile_id=profile_id))
+            session.add(Like(user_id=user_id, profile_id=payload.profile_id))
             session.commit()
         except Exception:
             session.rollback()
-        return {"ok": True}
+    return {"ok": True}
