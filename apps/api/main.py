@@ -31,7 +31,7 @@ if DATABASE_URL.startswith("postgres://"):
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://black-within.onrender.com")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
 
 # -----------------------------
