@@ -2,31 +2,88 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DEMO_PROFILES, type Profile } from "../lib/sampleProfiles";
-import { getOrCreateUserId } from "../lib/user";
-import {
-  addNotification,
-  cleanupSavedIds,
-  getLikes,
-  getSavedIds,
-  likeProfile,
-  removeSavedId,
-  saveProfileId,
-} from "../lib/storage";
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL || "https://black-within-api.onrender.com";
+
+// -----------------------------
+// tiny helpers (kept local to avoid dependency confusion)
+// -----------------------------
+function getOrCreateUserId() {
+  if (typeof window === "undefined") return "server";
+  const key = "bw_user_id";
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `bw_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+
+  window.localStorage.setItem(key, id);
+  return id;
+}
+
+function addNotificationLocal(message: string) {
+  try {
+    const key = "bw_notifications";
+    const existing = JSON.parse(window.localStorage.getItem(key) || "[]") as any[];
+    existing.unshift({
+      id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Date.now()),
+      type: "like",
+      message,
+      createdAt: new Date().toISOString(),
+    });
+    window.localStorage.setItem(key, JSON.stringify(existing.slice(0, 200)));
+  } catch {
+    // ignore
+  }
+}
+
+async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${txt || res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
+type IdListResponse = { ids: string[] };
 
 export default function DiscoverPage() {
+  const [userId, setUserId] = useState<string>("");
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
-  // Filters
+  // NEW: filters
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
+
+  // For broken images → fallback to initials
+  const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
   const availableProfiles = useMemo(
     () => DEMO_PROFILES.filter((p) => p.isAvailable),
     []
   );
 
+  const availableProfileIds = useMemo(
+    () => new Set(availableProfiles.map((p) => p.id)),
+    [availableProfiles]
+  );
+
+  // Build dropdown options
   const intentionOptions = useMemo(() => {
     const set = new Set<string>();
     availableProfiles.forEach((p) => set.add(p.intention));
@@ -39,6 +96,7 @@ export default function DiscoverPage() {
     return ["All", ...Array.from(set).sort()];
   }, [availableProfiles]);
 
+  // Apply filters
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
       const intentionMatch =
@@ -50,55 +108,9 @@ export default function DiscoverPage() {
     });
   }, [availableProfiles, intentionFilter, tagFilter]);
 
-  // Load saved + liked from the database
-  useEffect(() => {
-    const userId = getOrCreateUserId();
-
-    (async () => {
-      const saved = await getSavedIds(userId);
-      const liked = await getLikes(userId);
-
-      // Keep only saved ids that still exist in preview profiles
-      const cleaned = cleanupSavedIds(availableProfiles, saved);
-
-      setSavedIds(cleaned);
-      setLikedIds(liked);
-    })();
-  }, [availableProfiles]);
-
   function showToast(msg: string) {
     setToast(msg);
-    window.setTimeout(() => setToast(null), 2000);
-  }
-
-  async function onSave(p: Profile) {
-    const userId = getOrCreateUserId();
-    await saveProfileId(userId, p.id);
-    setSavedIds(await getSavedIds(userId));
-    showToast("Saved. You can view it later in Saved Profiles.");
-  }
-
-  async function onUnsave(p: Profile) {
-    const userId = getOrCreateUserId();
-    await removeSavedId(userId, p.id);
-    setSavedIds(await getSavedIds(userId));
-    showToast("Removed from Saved Profiles.");
-  }
-
-  async function onLike(p: Profile) {
-    const userId = getOrCreateUserId();
-    await likeProfile(userId, p.id);
-    setLikedIds(await getLikes(userId));
-
-    // Local MVP notification (not cross-device yet)
-    addNotification({
-      id: crypto.randomUUID(),
-      type: "like",
-      message: `Someone liked your profile.`,
-      createdAt: new Date().toISOString(),
-    });
-
-    showToast("Like sent. They’ll be notified.");
+    window.setTimeout(() => setToast(null), 2200);
   }
 
   function getInitials(displayName: string) {
@@ -109,6 +121,99 @@ export default function DiscoverPage() {
       .join("")
       .slice(0, 2)
       .toUpperCase();
+  }
+
+  async function refreshSavedAndLikes(uid: string) {
+    const [saved, likes] = await Promise.all([
+      apiJson<IdListResponse>(`/saved?user_id=${encodeURIComponent(uid)}`),
+      apiJson<IdListResponse>(`/likes?user_id=${encodeURIComponent(uid)}`),
+    ]);
+
+    // If any saved profiles are no longer available, remove them from DB
+    const savedStillValid = saved.ids.filter((id) => availableProfileIds.has(id));
+    const removed = saved.ids.filter((id) => !availableProfileIds.has(id));
+
+    setSavedIds(savedStillValid);
+    setLikedIds(likes.ids);
+
+    if (removed.length > 0) {
+      // best-effort cleanup so Saved page stays “only saved preview profiles”
+      await Promise.allSettled(
+        removed.map((profileId) =>
+          apiJson(`/saved?user_id=${encodeURIComponent(uid)}&profile_id=${encodeURIComponent(profileId)}`, {
+            method: "DELETE",
+          })
+        )
+      );
+    }
+  }
+
+  useEffect(() => {
+    const uid = getOrCreateUserId();
+    setUserId(uid);
+
+    (async () => {
+      try {
+        setApiError(null);
+
+        // Ensure user exists server-side
+        await apiJson(`/me?user_id=${encodeURIComponent(uid)}`);
+
+        await refreshSavedAndLikes(uid);
+      } catch (e: any) {
+        setApiError(e?.message || "Could not connect to the API.");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableProfileIds]);
+
+  async function onSave(p: Profile) {
+    try {
+      if (!userId) return;
+      await apiJson(`/saved`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId, profile_id: p.id }),
+      });
+      await refreshSavedAndLikes(userId);
+      showToast("Saved. You can view it later in Saved Profiles.");
+    } catch (e: any) {
+      showToast("Could not save right now. Please try again.");
+      setApiError(e?.message || "Save failed.");
+    }
+  }
+
+  async function onUnsave(p: Profile) {
+    try {
+      if (!userId) return;
+      await apiJson(
+        `/saved?user_id=${encodeURIComponent(userId)}&profile_id=${encodeURIComponent(p.id)}`,
+        { method: "DELETE" }
+      );
+      await refreshSavedAndLikes(userId);
+      showToast("Removed from Saved Profiles.");
+    } catch (e: any) {
+      showToast("Could not remove right now. Please try again.");
+      setApiError(e?.message || "Unsave failed.");
+    }
+  }
+
+  async function onLike(p: Profile) {
+    try {
+      if (!userId) return;
+      await apiJson(`/likes`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId, profile_id: p.id }),
+      });
+      await refreshSavedAndLikes(userId);
+
+      // Local notification (until you build real “recipient notifications”)
+      addNotificationLocal("Someone liked your profile.");
+
+      showToast("Like sent. They’ll be notified.");
+    } catch (e: any) {
+      showToast("Could not like right now. Please try again.");
+      setApiError(e?.message || "Like failed.");
+    }
   }
 
   return (
@@ -149,6 +254,22 @@ export default function DiscoverPage() {
               You’re viewing preview profiles while Black Within opens
               intentionally.
             </div>
+
+            {apiError && (
+              <div
+                style={{
+                  marginTop: "0.75rem",
+                  padding: "0.85rem",
+                  borderRadius: 12,
+                  border: "1px solid #f0c9c9",
+                  background: "#fff7f7",
+                  color: "#7a2d2d",
+                  maxWidth: 720,
+                }}
+              >
+                <b>API notice:</b> {apiError}
+              </div>
+            )}
           </div>
 
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
@@ -218,7 +339,11 @@ export default function DiscoverPage() {
           <div style={{ display: "grid", gap: "0.35rem" }}>
             <label style={{ fontSize: "0.9rem", color: "#555" }}>
               Cultural & Spiritual Grounding
+              <div style={{ fontSize: "0.85rem", color: "#777", marginTop: "0.15rem" }}>
+                Select your spiritual identity...
+              </div>
             </label>
+
             <select
               value={tagFilter}
               onChange={(e) => setTagFilter(e.target.value)}
@@ -255,9 +380,7 @@ export default function DiscoverPage() {
             Clear Filters
           </button>
 
-          <div
-            style={{ marginLeft: "auto", color: "#666", marginTop: "1.35rem" }}
-          >
+          <div style={{ marginLeft: "auto", color: "#666", marginTop: "1.35rem" }}>
             Showing <b>{filteredProfiles.length}</b> profiles
           </div>
         </div>
@@ -287,6 +410,7 @@ export default function DiscoverPage() {
           {filteredProfiles.map((p) => {
             const isSaved = savedIds.includes(p.id);
             const isLiked = likedIds.includes(p.id);
+            const showFallback = !p.photo || brokenImages[p.id];
 
             return (
               <div
@@ -304,18 +428,7 @@ export default function DiscoverPage() {
                     background: "#f3f3f3",
                   }}
                 >
-                  {p.photo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={p.photo}
-                      alt={p.displayName}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                      }}
-                    />
-                  ) : (
+                  {showFallback ? (
                     <div
                       style={{
                         width: "100%",
@@ -330,11 +443,31 @@ export default function DiscoverPage() {
                     >
                       {getInitials(p.displayName)}
                     </div>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={p.photo}
+                      alt={p.displayName}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                      }}
+                      onError={() =>
+                        setBrokenImages((prev) => ({ ...prev, [p.id]: true }))
+                      }
+                    />
                   )}
                 </div>
 
                 <div style={{ padding: "1rem" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "0.75rem",
+                    }}
+                  >
                     <div>
                       <div style={{ fontSize: "1.15rem", fontWeight: 600 }}>
                         {p.displayName}
@@ -366,7 +499,14 @@ export default function DiscoverPage() {
                     {p.identityPreview}
                   </div>
 
-                  <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      marginTop: "0.75rem",
+                      display: "flex",
+                      gap: "0.4rem",
+                      flexWrap: "wrap",
+                    }}
+                  >
                     {p.tags.slice(0, 3).map((t) => (
                       <span
                         key={t}
@@ -383,7 +523,14 @@ export default function DiscoverPage() {
                     ))}
                   </div>
 
-                  <div style={{ marginTop: "1rem", display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      marginTop: "1rem",
+                      display: "flex",
+                      gap: "0.6rem",
+                      flexWrap: "wrap",
+                    }}
+                  >
                     <a
                       href={`/profiles/${p.id}`}
                       style={{
@@ -400,14 +547,24 @@ export default function DiscoverPage() {
                     {isSaved ? (
                       <button
                         onClick={() => onUnsave(p)}
-                        style={{ padding: "0.6rem 0.9rem", borderRadius: 10, border: "1px solid #ccc", cursor: "pointer" }}
+                        style={{
+                          padding: "0.6rem 0.9rem",
+                          borderRadius: 10,
+                          border: "1px solid #ccc",
+                          cursor: "pointer",
+                        }}
                       >
                         Unsave
                       </button>
                     ) : (
                       <button
                         onClick={() => onSave(p)}
-                        style={{ padding: "0.6rem 0.9rem", borderRadius: 10, border: "1px solid #ccc", cursor: "pointer" }}
+                        style={{
+                          padding: "0.6rem 0.9rem",
+                          borderRadius: 10,
+                          border: "1px solid #ccc",
+                          cursor: "pointer",
+                        }}
                       >
                         Save
                       </button>
@@ -428,8 +585,15 @@ export default function DiscoverPage() {
                     </button>
                   </div>
 
-                  <div style={{ marginTop: "0.75rem", color: "#777", fontSize: "0.9rem" }}>
-                    Messaging opens later. Likes notify, but conversations remain locked.
+                  <div
+                    style={{
+                      marginTop: "0.75rem",
+                      color: "#777",
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    Messaging opens later. Likes notify, but conversations remain
+                    locked.
                   </div>
                 </div>
               </div>
@@ -438,7 +602,8 @@ export default function DiscoverPage() {
         </div>
 
         <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
-          Launch note: these are preview profiles used to demonstrate the experience while Black Within opens intentionally.
+          Launch note: these are preview profiles used to demonstrate the
+          experience while Black Within opens intentionally.
         </div>
       </div>
     </main>
