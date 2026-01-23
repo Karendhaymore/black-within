@@ -61,10 +61,41 @@ export default async function Home() {
         </p>
 
         <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-          <p style={{ margin: 0, fontSize: 14, opacity: 0.75 }}>
-            MVP is live. Profiles and messaging are coming next.
-          </p>
-        </div>
+  <p style={{ margin: 0, fontSize: 14, opacity: 0.75 }}>
+    MVP is live. Profiles and messaging are coming next.
+  </p>
+
+  <div style={{ marginTop: 16, display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
+    <a
+      href="mailto:karendhaymore@gmail.com?subject=Black%20Within%20Waitlist"
+      style={{
+        padding: "10px 14px",
+        borderRadius: 10,
+        textDecoration: "none",
+        border: "1px solid rgba(0,0,0,0.12)",
+        background: "rgba(0,0,0,0.06)",
+        fontSize: 14,
+      }}
+    >
+      Join the Waitlist
+    </a>
+
+    <a
+      href="mailto:karendhaymore@gmail.com?subject=Black%20Within%20Support"
+      style={{
+        padding: "10px 14px",
+        borderRadius: 10,
+        textDecoration: "none",
+        border: "1px solid rgba(0,0,0,0.12)",
+        background: "white",
+        fontSize: 14,
+      }}
+    >
+      Contact
+    </a>
+  </div>
+</div>
+
       </div>
     </main>
   );
