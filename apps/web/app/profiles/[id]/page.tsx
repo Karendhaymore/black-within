@@ -48,7 +48,35 @@ export default function ProfileViewPage() {
         <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, overflow: "hidden" }}>
           <div style={{ width: "100%", aspectRatio: "16 / 9", background: "#f3f3f3" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={profile.photo} alt={profile.displayName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+           {profile.photo ? (
+  // eslint-disable-next-line @next/next/no-img-element
+  <img
+    src={profile.photo}
+    alt={profile.displayName}
+    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+  />
+) : (
+  <div
+    style={{
+      width: "100%",
+      height: "100%",
+      display: "grid",
+      placeItems: "center",
+      background: "#f2f2f2",
+      color: "#555",
+      fontSize: "2rem",
+      fontWeight: 600,
+    }}
+  >
+    {profile.displayName
+      .split(" ")
+      .map((w) => w[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase()}
+  </div>
+)}
+ 
           </div>
 
           <div style={{ padding: "1.25rem" }}>
