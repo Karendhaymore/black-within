@@ -77,7 +77,8 @@ export default async function Home() {
         fontSize: 14,
       }}
     >
-      Join the Waitlist
+      /auth
+
     </a>
 
     <a
