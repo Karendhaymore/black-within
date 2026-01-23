@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DEMO_PROFILES, type Profile } from "../lib/sampleProfiles";
+import { getOrCreateUserId } from "../lib/user";
 import {
   addNotification,
   cleanupSavedIds,
@@ -17,7 +18,7 @@ export default function DiscoverPage() {
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
 
-  // NEW: filters
+  // Filters
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
 
@@ -26,7 +27,7 @@ export default function DiscoverPage() {
     []
   );
 
-  // NEW: build dropdown options from profiles
+  // Dropdown options
   const intentionOptions = useMemo(() => {
     const set = new Set<string>();
     availableProfiles.forEach((p) => set.add(p.intention));
@@ -39,24 +40,32 @@ export default function DiscoverPage() {
     return ["All", ...Array.from(set).sort()];
   }, [availableProfiles]);
 
-  // NEW: apply filters
+  // Apply filters
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
       const intentionMatch =
         intentionFilter === "All" || p.intention === intentionFilter;
 
-      const tagMatch =
-        tagFilter === "All" || p.tags.includes(tagFilter);
+      const tagMatch = tagFilter === "All" || p.tags.includes(tagFilter);
 
       return intentionMatch && tagMatch;
     });
   }, [availableProfiles, intentionFilter, tagFilter]);
 
+  // Load saved + liked from database (so it persists)
   useEffect(() => {
-    // Clean up saved profiles if any became unavailable
-    cleanupSavedIds(availableProfiles);
-    setSavedIds(getSavedIds());
-    setLikedIds(getLikes());
+    const userId = getOrCreateUserId();
+
+    (async () => {
+      const saved = await getSavedIds(userId);
+      const liked = await getLikes(userId);
+
+      // Remove any saved ids that no longer exist in the preview list
+      const cleaned = cleanupSavedIds(availableProfiles, saved);
+
+      setSavedIds(cleaned);
+      setLikedIds(liked);
+    })();
   }, [availableProfiles]);
 
   function showToast(msg: string) {
@@ -64,22 +73,26 @@ export default function DiscoverPage() {
     window.setTimeout(() => setToast(null), 2000);
   }
 
-  function onSave(p: Profile) {
-    saveProfileId(p.id);
-    setSavedIds(getSavedIds());
+  async function onSave(p: Profile) {
+    const userId = getOrCreateUserId();
+    await saveProfileId(userId, p.id);
+    setSavedIds(await getSavedIds(userId));
     showToast("Saved. You can view it later in Saved Profiles.");
   }
 
-  function onUnsave(p: Profile) {
-    removeSavedId(p.id);
-    setSavedIds(getSavedIds());
+  async function onUnsave(p: Profile) {
+    const userId = getOrCreateUserId();
+    await removeSavedId(userId, p.id);
+    setSavedIds(await getSavedIds(userId));
     showToast("Removed from Saved Profiles.");
   }
 
-  function onLike(p: Profile) {
-    likeProfile(p.id);
-    setLikedIds(getLikes());
+  async function onLike(p: Profile) {
+    const userId = getOrCreateUserId();
+    await likeProfile(userId, p.id);
+    setLikedIds(await getLikes(userId));
 
+    // Local MVP notification (not cross-device yet)
     addNotification({
       id: crypto.randomUUID(),
       type: "like",
@@ -169,7 +182,7 @@ export default function DiscoverPage() {
           </div>
         </div>
 
-        {/* NEW: filter bar */}
+        {/* Filter bar */}
         <div
           style={{
             marginTop: "1.25rem",
@@ -244,7 +257,9 @@ export default function DiscoverPage() {
             Clear Filters
           </button>
 
-          <div style={{ marginLeft: "auto", color: "#666", marginTop: "1.35rem" }}>
+          <div
+            style={{ marginLeft: "auto", color: "#666", marginTop: "1.35rem" }}
+          >
             Showing <b>{filteredProfiles.length}</b> profiles
           </div>
         </div>
@@ -445,8 +460,15 @@ export default function DiscoverPage() {
                     </button>
                   </div>
 
-                  <div style={{ marginTop: "0.75rem", color: "#777", fontSize: "0.9rem" }}>
-                    Messaging opens later. Likes notify, but conversations remain locked.
+                  <div
+                    style={{
+                      marginTop: "0.75rem",
+                      color: "#777",
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    Messaging opens later. Likes notify, but conversations remain
+                    locked.
                   </div>
                 </div>
               </div>
@@ -455,7 +477,8 @@ export default function DiscoverPage() {
         </div>
 
         <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
-          Launch note: these are preview profiles used to demonstrate the experience while Black Within opens intentionally.
+          Launch note: these are preview profiles used to demonstrate the
+          experience while Black Within opens intentionally.
         </div>
       </div>
     </main>
