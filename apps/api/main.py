@@ -154,6 +154,14 @@ def _ensure_user(user_id: str) -> str:
         session.commit()
         return user_id
 
+@app.get("/")
+def root():
+    return {
+        "name": "Black Within API",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 @app.get("/me", response_model=MeResponse)
 def me(user_id: str = Query(..., description="Client-generated user id")):
