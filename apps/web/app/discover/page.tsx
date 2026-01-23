@@ -17,7 +17,10 @@ export default function DiscoverPage() {
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
 
-  const availableProfiles = useMemo(() => SAMPLE_PROFILES.filter((p) => p.isAvailable), []);
+  const availableProfiles = useMemo(
+    () => DEMO_PROFILES.filter((p) => p.isAvailable),
+    []
+  );
 
   useEffect(() => {
     // Clean up saved profiles if any became unavailable
@@ -47,6 +50,7 @@ export default function DiscoverPage() {
     likeProfile(p.id);
     setLikedIds(getLikes());
 
+    // Local MVP notification (placeholder for real notifications later)
     addNotification({
       id: crypto.randomUUID(),
       type: "like",
@@ -58,12 +62,44 @@ export default function DiscoverPage() {
   }
 
   return (
-    <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "2rem",
+        display: "grid",
+        placeItems: "start center",
+      }}
+    >
       <div style={{ width: "100%", maxWidth: 1100 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "1rem",
+            flexWrap: "wrap",
+          }}
+        >
           <div>
-            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>Discover</h1>
-            <p style={{ color: "#555" }}>Browse intentionally. Save what resonates. Alignment over volume.</p>
+            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
+              Discover
+            </h1>
+            <p style={{ color: "#555" }}>
+              Browse intentionally. Save what resonates. Alignment over volume.
+            </p>
+
+            {/* Preview banner */}
+            <div
+              style={{
+                marginTop: "1rem",
+                padding: "0.85rem",
+                borderRadius: 12,
+                border: "1px solid #eee",
+                color: "#555",
+              }}
+            >
+              You’re viewing preview profiles while Black Within opens
+              intentionally.
+            </div>
           </div>
 
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
@@ -96,7 +132,15 @@ export default function DiscoverPage() {
         </div>
 
         {toast && (
-          <div style={{ marginTop: "1rem", padding: "0.75rem", borderRadius: 10, border: "1px solid #cfe7cf", background: "#f6fff6" }}>
+          <div
+            style={{
+              marginTop: "1rem",
+              padding: "0.75rem",
+              borderRadius: 10,
+              border: "1px solid #cfe7cf",
+              background: "#f6fff6",
+            }}
+          >
             {toast}
           </div>
         )}
@@ -114,25 +158,77 @@ export default function DiscoverPage() {
             const isLiked = likedIds.includes(p.id);
 
             return (
-              <div key={p.id} style={{ border: "1px solid #e5e5e5", borderRadius: 14, overflow: "hidden" }}>
-                <div style={{ width: "100%", aspectRatio: "4 / 3", background: "#f3f3f3" }}>
+              <div
+                key={p.id}
+                style={{
+                  border: "1px solid #e5e5e5",
+                  borderRadius: 14,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    aspectRatio: "4 / 3",
+                    background: "#f3f3f3",
+                  }}
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.photo} alt={p.displayName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <img
+                    src={p.photo}
+                    alt={p.displayName}
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
                 </div>
 
                 <div style={{ padding: "1rem" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "0.75rem",
+                    }}
+                  >
                     <div>
-                      <div style={{ fontSize: "1.15rem", fontWeight: 600 }}>{p.displayName}</div>
-                      <div style={{ color: "#666" }}>
+                      <div style={{ fontSize: "1.15rem", fontWeight: 600 }}>
+                        {p.displayName}
+                      </div>
+
+                      {/* Preview badge */}
+                      {p.isDemo && (
+                        <div style={{ marginTop: "0.35rem" }}>
+                          <span
+                            style={{
+                              fontSize: "0.8rem",
+                              padding: "0.2rem 0.5rem",
+                              border: "1px solid #ddd",
+                              borderRadius: 999,
+                              color: "#666",
+                            }}
+                          >
+                            Preview Profile
+                          </span>
+                        </div>
+                      )}
+
+                      <div style={{ color: "#666", marginTop: "0.4rem" }}>
                         {p.age} • {p.city}, {p.stateUS}
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ marginTop: "0.75rem", color: "#555" }}>{p.identityPreview}</div>
+                  <div style={{ marginTop: "0.75rem", color: "#555" }}>
+                    {p.identityPreview}
+                  </div>
 
-                  <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      marginTop: "0.75rem",
+                      display: "flex",
+                      gap: "0.4rem",
+                      flexWrap: "wrap",
+                    }}
+                  >
                     {p.tags.slice(0, 3).map((t) => (
                       <span
                         key={t}
@@ -149,7 +245,14 @@ export default function DiscoverPage() {
                     ))}
                   </div>
 
-                  <div style={{ marginTop: "1rem", display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      marginTop: "1rem",
+                      display: "flex",
+                      gap: "0.6rem",
+                      flexWrap: "wrap",
+                    }}
+                  >
                     <a
                       href={`/profiles/${p.id}`}
                       style={{
@@ -166,14 +269,24 @@ export default function DiscoverPage() {
                     {isSaved ? (
                       <button
                         onClick={() => onUnsave(p)}
-                        style={{ padding: "0.6rem 0.9rem", borderRadius: 10, border: "1px solid #ccc", cursor: "pointer" }}
+                        style={{
+                          padding: "0.6rem 0.9rem",
+                          borderRadius: 10,
+                          border: "1px solid #ccc",
+                          cursor: "pointer",
+                        }}
                       >
                         Unsave
                       </button>
                     ) : (
                       <button
                         onClick={() => onSave(p)}
-                        style={{ padding: "0.6rem 0.9rem", borderRadius: 10, border: "1px solid #ccc", cursor: "pointer" }}
+                        style={{
+                          padding: "0.6rem 0.9rem",
+                          borderRadius: 10,
+                          border: "1px solid #ccc",
+                          cursor: "pointer",
+                        }}
                       >
                         Save
                       </button>
@@ -204,7 +317,7 @@ export default function DiscoverPage() {
         </div>
 
         <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
-          MVP note: these are sample profiles. Next we’ll connect this grid to real user profiles from the backend.
+          Launch note: these are preview profiles used to demonstrate the experience while Black Within opens intentionally.
         </div>
       </div>
     </main>
