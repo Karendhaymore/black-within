@@ -17,7 +17,6 @@ from sqlalchemy import (
     delete,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
-from sqlalchemy.exc import IntegrityError
 
 
 # -----------------------------
@@ -60,7 +59,7 @@ class User(Base):
 
 class SavedProfile(Base):
     __tablename__ = "saved_profiles"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # generate ourselves
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -70,7 +69,7 @@ class SavedProfile(Base):
 
 class Like(Base):
     __tablename__ = "likes"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # generate ourselves
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -80,12 +79,12 @@ class Like(Base):
 
 class LoginCode(Base):
     """
-    Matches the existing DB table structure:
-    email, code, expires_at
-    (No created_at column to avoid schema mismatch 500s.)
+    IMPORTANT:
+    Your DB currently requires id NOT NULL but it's not auto-incrementing.
+    So we generate a string id ourselves.
     """
     __tablename__ = "login_codes"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # generate ourselves
     email: Mapped[str] = mapped_column(String(320), index=True, unique=True)
     code: Mapped[str] = mapped_column(String(10))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
@@ -147,7 +146,16 @@ def _make_user_id_from_email(email: str) -> str:
     return hashlib.sha256(raw).hexdigest()[:40]
 
 
+def _new_id() -> str:
+    # 40 chars max for our String(40) ids
+    return secrets.token_hex(20)[:40]
+
+
 def _ensure_user(user_id: str) -> str:
+    user_id = (user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
     with Session(engine) as session:
         user = session.get(User, user_id)
         if user:
@@ -169,7 +177,6 @@ def health():
 def request_code(payload: RequestCodePayload):
     email = _normalize_email(payload.email)
 
-    # Generate 6-digit code
     code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = datetime.utcnow() + timedelta(minutes=AUTH_CODE_TTL_MINUTES)
 
@@ -182,11 +189,10 @@ def request_code(payload: RequestCodePayload):
             existing.code = code
             existing.expires_at = expires_at
         else:
-            session.add(LoginCode(email=email, code=code, expires_at=expires_at))
+            session.add(LoginCode(id=_new_id(), email=email, code=code, expires_at=expires_at))
 
         session.commit()
 
-    # Preview mode returns the code (so you can test without SendGrid)
     if AUTH_PREVIEW_MODE:
         return {"ok": True, "devCode": code}
 
@@ -242,9 +248,13 @@ def get_saved(user_id: str = Query(...)):
 @app.post("/saved")
 def save_profile(payload: ProfileAction):
     user_id = _ensure_user(payload.user_id)
+    profile_id = (payload.profile_id or "").strip()
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
     with Session(engine) as session:
         try:
-            session.add(SavedProfile(user_id=user_id, profile_id=payload.profile_id))
+            session.add(SavedProfile(id=_new_id(), user_id=user_id, profile_id=profile_id))
             session.commit()
         except Exception:
             session.rollback()
@@ -283,9 +293,13 @@ def get_likes(user_id: str = Query(...)):
 @app.post("/likes")
 def like(payload: ProfileAction):
     user_id = _ensure_user(payload.user_id)
+    profile_id = (payload.profile_id or "").strip()
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
     with Session(engine) as session:
         try:
-            session.add(Like(user_id=user_id, profile_id=payload.profile_id))
+            session.add(Like(id=_new_id(), user_id=user_id, profile_id=profile_id))
             session.commit()
         except Exception:
             session.rollback()
