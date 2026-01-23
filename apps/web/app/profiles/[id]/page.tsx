@@ -2,22 +2,20 @@
 
 import { useMemo } from "react";
 import { useParams } from "next/navigation";
-import { SAMPLE_PROFILES } from "../../lib/sampleProfiles";
+import { DEMO_PROFILES } from "../../lib/sampleProfiles";
 
 export default function ProfileViewPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id;
 
-  const profile = useMemo(() => SAMPLE_PROFILES.find((p) => p.id === id), [id]);
+  const profile = useMemo(() => DEMO_PROFILES.find((p) => p.id === id), [id]);
 
   if (!profile || !profile.isAvailable) {
     return (
       <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "2rem" }}>
         <div style={{ textAlign: "center", maxWidth: 600 }}>
           <h1 style={{ fontSize: "2rem", marginBottom: "0.75rem" }}>Profile Not Available</h1>
-          <p style={{ color: "#555", marginBottom: "1.5rem" }}>
-            This profile is no longer available.
-          </p>
+          <p style={{ color: "#555", marginBottom: "1.5rem" }}>This profile is no longer available.</p>
           <a
             href="/discover"
             style={{ padding: "0.65rem 1rem", border: "1px solid #ccc", borderRadius: 10, textDecoration: "none", color: "inherit" }}
@@ -34,7 +32,15 @@ export default function ProfileViewPage() {
       <div style={{ width: "100%", maxWidth: 900 }}>
         <a
           href="/discover"
-          style={{ display: "inline-block", marginBottom: "1rem", padding: "0.65rem 1rem", border: "1px solid #ccc", borderRadius: 10, textDecoration: "none", color: "inherit" }}
+          style={{
+            display: "inline-block",
+            marginBottom: "1rem",
+            padding: "0.65rem 1rem",
+            border: "1px solid #ccc",
+            borderRadius: 10,
+            textDecoration: "none",
+            color: "inherit",
+          }}
         >
           Back to Discover
         </a>
@@ -47,6 +53,15 @@ export default function ProfileViewPage() {
 
           <div style={{ padding: "1.25rem" }}>
             <h1 style={{ fontSize: "2rem", marginBottom: "0.25rem" }}>{profile.displayName}</h1>
+
+            {profile.isDemo && (
+              <div style={{ marginBottom: "0.75rem" }}>
+                <span style={{ fontSize: "0.85rem", padding: "0.25rem 0.6rem", border: "1px solid #ddd", borderRadius: 999, color: "#666" }}>
+                  Preview Profile
+                </span>
+              </div>
+            )}
+
             <div style={{ color: "#666", marginBottom: "1rem" }}>
               {profile.age} • {profile.city}, {profile.stateUS}
             </div>
