@@ -27,7 +27,6 @@ export default function DiscoverPage() {
     []
   );
 
-  // Dropdown options
   const intentionOptions = useMemo(() => {
     const set = new Set<string>();
     availableProfiles.forEach((p) => set.add(p.intention));
@@ -40,7 +39,6 @@ export default function DiscoverPage() {
     return ["All", ...Array.from(set).sort()];
   }, [availableProfiles]);
 
-  // Apply filters
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
       const intentionMatch =
@@ -52,7 +50,7 @@ export default function DiscoverPage() {
     });
   }, [availableProfiles, intentionFilter, tagFilter]);
 
-  // Load saved + liked from database (so it persists)
+  // Load saved + liked from the database
   useEffect(() => {
     const userId = getOrCreateUserId();
 
@@ -60,7 +58,7 @@ export default function DiscoverPage() {
       const saved = await getSavedIds(userId);
       const liked = await getLikes(userId);
 
-      // Remove any saved ids that no longer exist in the preview list
+      // Keep only saved ids that still exist in preview profiles
       const cleaned = cleanupSavedIds(availableProfiles, saved);
 
       setSavedIds(cleaned);
@@ -336,13 +334,7 @@ export default function DiscoverPage() {
                 </div>
 
                 <div style={{ padding: "1rem" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: "0.75rem",
-                    }}
-                  >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem" }}>
                     <div>
                       <div style={{ fontSize: "1.15rem", fontWeight: 600 }}>
                         {p.displayName}
@@ -374,14 +366,7 @@ export default function DiscoverPage() {
                     {p.identityPreview}
                   </div>
 
-                  <div
-                    style={{
-                      marginTop: "0.75rem",
-                      display: "flex",
-                      gap: "0.4rem",
-                      flexWrap: "wrap",
-                    }}
-                  >
+                  <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
                     {p.tags.slice(0, 3).map((t) => (
                       <span
                         key={t}
@@ -398,14 +383,7 @@ export default function DiscoverPage() {
                     ))}
                   </div>
 
-                  <div
-                    style={{
-                      marginTop: "1rem",
-                      display: "flex",
-                      gap: "0.6rem",
-                      flexWrap: "wrap",
-                    }}
-                  >
+                  <div style={{ marginTop: "1rem", display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
                     <a
                       href={`/profiles/${p.id}`}
                       style={{
@@ -422,24 +400,14 @@ export default function DiscoverPage() {
                     {isSaved ? (
                       <button
                         onClick={() => onUnsave(p)}
-                        style={{
-                          padding: "0.6rem 0.9rem",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          cursor: "pointer",
-                        }}
+                        style={{ padding: "0.6rem 0.9rem", borderRadius: 10, border: "1px solid #ccc", cursor: "pointer" }}
                       >
                         Unsave
                       </button>
                     ) : (
                       <button
                         onClick={() => onSave(p)}
-                        style={{
-                          padding: "0.6rem 0.9rem",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          cursor: "pointer",
-                        }}
+                        style={{ padding: "0.6rem 0.9rem", borderRadius: 10, border: "1px solid #ccc", cursor: "pointer" }}
                       >
                         Save
                       </button>
@@ -460,15 +428,8 @@ export default function DiscoverPage() {
                     </button>
                   </div>
 
-                  <div
-                    style={{
-                      marginTop: "0.75rem",
-                      color: "#777",
-                      fontSize: "0.9rem",
-                    }}
-                  >
-                    Messaging opens later. Likes notify, but conversations remain
-                    locked.
+                  <div style={{ marginTop: "0.75rem", color: "#777", fontSize: "0.9rem" }}>
+                    Messaging opens later. Likes notify, but conversations remain locked.
                   </div>
                 </div>
               </div>
@@ -477,8 +438,7 @@ export default function DiscoverPage() {
         </div>
 
         <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
-          Launch note: these are preview profiles used to demonstrate the
-          experience while Black Within opens intentionally.
+          Launch note: these are preview profiles used to demonstrate the experience while Black Within opens intentionally.
         </div>
       </div>
     </main>
