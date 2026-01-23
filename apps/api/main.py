@@ -182,12 +182,22 @@ def request_code(payload: RequestCodePayload):
             session.rollback()
             existing = session.execute(
                 select(LoginCode).where(LoginCode.email == email)
-            ).scalar_one()
+            ).scalar_one_or_none()
             existing.code = code
             existing.expires_at = expires_at
             existing.created_at = datetime.utcnow()
             session.commit()
 
+   else:
+    session.add(
+        LoginCode(
+            email=email,
+            code=code,
+            expires_at=expires_at,
+            created_at=datetime.utcnow(),
+        )
+    )
+    session.commit() 
     if AUTH_PREVIEW_MODE:
         return {"ok": True, "devCode": code}
 
