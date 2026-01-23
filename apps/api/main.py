@@ -17,6 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
+from sqlalchemy.dialects.postgresql import insert
 
 # -----------------------------
 # Config
@@ -191,14 +192,22 @@ def request_code(payload: RequestCodePayload):
     expires_at = datetime.utcnow() + timedelta(minutes=AUTH_CODE_TTL_MINUTES)
 
     with Session(engine) as session:
-        existing = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
-        if existing:
-            existing.code = code
-            existing.expires_at = expires_at
-            existing.created_at = datetime.utcnow()
-        else:
-            session.add(LoginCode(email=email, code=code, expires_at=expires_at))
-        session.commit()
+    stmt = insert(LoginCode).values(
+        email=email,
+        code=code,
+        expires_at=expires_at,
+        created_at=datetime.utcnow(),
+    ).on_conflict_do_update(
+        index_elements=[LoginCode.email],
+        set_={
+            "code": code,
+            "expires_at": expires_at,
+            "created_at": datetime.utcnow(),
+        },
+    )
+    session.execute(stmt)
+    session.commit()
+
 
     # In preview mode we return the code so you can keep building without SendGrid
     if AUTH_PREVIEW_MODE:
