@@ -27,9 +27,11 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
+# Render sometimes provides postgres://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# Force SQLAlchemy to use psycopg (v3)
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
@@ -77,12 +79,16 @@ class Like(Base):
 
 
 class LoginCode(Base):
+    """
+    Matches the existing DB table structure:
+    email, code, expires_at
+    (No created_at column to avoid schema mismatch 500s.)
+    """
     __tablename__ = "login_codes"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(320), index=True, unique=True)
     code: Mapped[str] = mapped_column(String(10))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 Base.metadata.create_all(engine)
@@ -162,6 +168,8 @@ def health():
 @app.post("/auth/request-code")
 def request_code(payload: RequestCodePayload):
     email = _normalize_email(payload.email)
+
+    # Generate 6-digit code
     code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = datetime.utcnow() + timedelta(minutes=AUTH_CODE_TTL_MINUTES)
 
@@ -173,19 +181,12 @@ def request_code(payload: RequestCodePayload):
         if existing:
             existing.code = code
             existing.expires_at = expires_at
-            existing.created_at = datetime.utcnow()
         else:
-            session.add(
-                LoginCode(
-                    email=email,
-                    code=code,
-                    expires_at=expires_at,
-                    created_at=datetime.utcnow(),
-                )
-            )
+            session.add(LoginCode(email=email, code=code, expires_at=expires_at))
 
         session.commit()
 
+    # Preview mode returns the code (so you can test without SendGrid)
     if AUTH_PREVIEW_MODE:
         return {"ok": True, "devCode": code}
 
@@ -195,16 +196,28 @@ def request_code(payload: RequestCodePayload):
 @app.post("/auth/verify-code")
 def verify_code(payload: VerifyCodePayload):
     email = _normalize_email(payload.email)
-    code = payload.code.strip()
+    code = (payload.code or "").strip()
+
+    if not code or len(code) != 6:
+        raise HTTPException(status_code=400, detail="A 6-digit code is required")
 
     with Session(engine) as session:
         row = session.execute(
             select(LoginCode).where(LoginCode.email == email)
         ).scalar_one_or_none()
 
-        if not row or row.code != code or datetime.utcnow() > row.expires_at:
+        if not row:
             raise HTTPException(status_code=401, detail="Invalid or expired code")
 
+        if datetime.utcnow() > row.expires_at:
+            session.execute(delete(LoginCode).where(LoginCode.email == email))
+            session.commit()
+            raise HTTPException(status_code=401, detail="Invalid or expired code")
+
+        if row.code != code:
+            raise HTTPException(status_code=401, detail="Invalid or expired code")
+
+        # success: consume the code
         session.execute(delete(LoginCode).where(LoginCode.email == email))
         session.commit()
 
@@ -238,6 +251,24 @@ def save_profile(payload: ProfileAction):
     return {"ok": True}
 
 
+@app.delete("/saved")
+def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+    profile_id = (profile_id or "").strip()
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
+    with Session(engine) as session:
+        session.execute(
+            delete(SavedProfile).where(
+                SavedProfile.user_id == user_id,
+                SavedProfile.profile_id == profile_id,
+            )
+        )
+        session.commit()
+    return {"ok": True}
+
+
 # -----------------------------
 # Likes
 # -----------------------------
@@ -245,9 +276,7 @@ def save_profile(payload: ProfileAction):
 def get_likes(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
-        rows = session.execute(
-            select(Like.profile_id).where(Like.user_id == user_id)
-        ).all()
+        rows = session.execute(select(Like.profile_id).where(Like.user_id == user_id)).all()
         return IdListResponse(ids=[r[0] for r in rows])
 
 
