@@ -1,8 +1,41 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL || "https://black-within-api.onrender.com";
+
+function getOrCreateUserId() {
+  if (typeof window === "undefined") return "server";
+  const key = "bw_user_id";
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `bw_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+
+  window.localStorage.setItem(key, id);
+  return id;
+}
+
+async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+    cache: "no-store",
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as any)?.detail || "Request failed.");
+  }
+  return data as T;
+}
 
 export default function AuthPage() {
   const [step, setStep] = useState<"email" | "code">("email");
@@ -11,63 +44,155 @@ export default function AuthPage() {
 
   const [status, setStatus] = useState<string | null>(null);
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string>("");
+
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const uid = getOrCreateUserId();
+    setUserId(uid);
+
+    // best-effort: ensure user exists in DB
+    apiJson(`/me?user_id=${encodeURIComponent(uid)}`).catch(() => {
+      // ignore; UI still works, but saved/likes will fail until API is reachable
+    });
+  }, []);
 
   async function requestCode() {
     setStatus(null);
     setDevCode(null);
 
-    const res = await fetch(`${API_URL}/auth/request-code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      setStatus(data?.detail || "Could not send a code. Please try again.");
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !normalizedEmail.includes("@")) {
+      setStatus("Please enter a valid email address.");
+      return;
+    }
+    if (!userId) {
+      setStatus("Missing user id. Please refresh and try again.");
       return;
     }
 
-    // Preview mode: API returns devCode so you can keep building without email setup
-    if (data?.devCode) setDevCode(data.devCode);
+    setLoading(true);
+    try {
+      const data = await apiJson<{ ok: boolean; message?: string; dev_code?: string }>(
+        `/auth/request-code`,
+        {
+          method: "POST",
+          body: JSON.stringify({ user_id: userId, email: normalizedEmail }),
+        }
+      );
 
-    setStep("code");
-    setStatus("A one-time code was created. Enter it below.");
+      if (data?.dev_code) setDevCode(data.dev_code);
+
+      setEmail(normalizedEmail);
+      setStep("code");
+      setStatus(data?.message || "A one-time code was created. Enter it below.");
+    } catch (e: any) {
+      setStatus(e?.message || "Could not send a code. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function verifyCode() {
     setStatus(null);
 
-    const res = await fetch(`${API_URL}/auth/verify-code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, code }),
-    });
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedCode = code.trim();
 
-    const data = await res.json();
-
-    if (!res.ok) {
-      setStatus(data?.detail || "That code didn’t work. Try again.");
+    if (!normalizedCode || normalizedCode.length < 4) {
+      setStatus("Enter the code you received.");
+      return;
+    }
+    if (!userId) {
+      setStatus("Missing user id. Please refresh and try again.");
       return;
     }
 
-    // Save the “real user id” so Saved + Likes work across devices
-    localStorage.setItem("bw_user_id", data.userId);
+    setLoading(true);
+    try {
+      const data = await apiJson<{
+        ok: boolean;
+        token: string;
+        user_id: string;
+        email: string;
+      }>(`/auth/verify-code`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: userId,
+          email: normalizedEmail,
+          code: normalizedCode,
+        }),
+      });
 
-    window.location.href = "/discover";
+      // Keep bw_user_id as the stable client id (already saved)
+      // Store token separately for future authenticated endpoints
+      localStorage.setItem("bw_session_token", data.token);
+      localStorage.setItem("bw_email", data.email);
+
+      window.location.href = "/discover";
+    } catch (e: any) {
+      setStatus(e?.message || "That code didn’t work. Try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
+  const cardStyle: React.CSSProperties = {
+    width: "100%",
+    maxWidth: 520,
+    border: "1px solid #eee",
+    borderRadius: 16,
+    padding: "1.5rem",
+  };
+
+  const buttonPrimary: React.CSSProperties = {
+    padding: "0.75rem",
+    borderRadius: 12,
+    border: "1px solid #111",
+    background: "#111",
+    color: "white",
+    cursor: loading ? "not-allowed" : "pointer",
+    opacity: loading ? 0.65 : 1,
+  };
+
+  const buttonSecondary: React.CSSProperties = {
+    padding: "0.75rem",
+    borderRadius: 12,
+    border: "1px solid #ccc",
+    background: "white",
+    cursor: loading ? "not-allowed" : "pointer",
+    opacity: loading ? 0.65 : 1,
+  };
+
   return (
-    <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "center" }}>
-      <div style={{ width: "100%", maxWidth: 520, border: "1px solid #eee", borderRadius: 16, padding: "1.5rem" }}>
-        <h1 style={{ fontSize: "1.9rem", marginBottom: "0.25rem" }}>Sign Up / Log In</h1>
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "2rem",
+        display: "grid",
+        placeItems: "center",
+      }}
+    >
+      <div style={cardStyle}>
+        <h1 style={{ fontSize: "1.9rem", marginBottom: "0.25rem" }}>
+          Sign Up / Log In
+        </h1>
         <p style={{ color: "#555", marginTop: 0 }}>
-          Account creation is opening soon. Black Within is being released intentionally to honor depth, safety, and alignment.
+          Black Within is being released intentionally—to honor depth, safety, and
+          alignment.
         </p>
 
         {status && (
-          <div style={{ marginTop: "1rem", padding: "0.75rem", borderRadius: 12, border: "1px solid #eee", color: "#444" }}>
+          <div
+            style={{
+              marginTop: "1rem",
+              padding: "0.75rem",
+              borderRadius: 12,
+              border: "1px solid #eee",
+              color: "#444",
+            }}
+          >
             {status}
           </div>
         )}
@@ -79,18 +204,28 @@ export default function AuthPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@email.com"
-              style={{ padding: "0.75rem", borderRadius: 12, border: "1px solid #ccc" }}
+              autoComplete="email"
+              style={{
+                padding: "0.75rem",
+                borderRadius: 12,
+                border: "1px solid #ccc",
+              }}
             />
 
-            <button
-              onClick={requestCode}
-              style={{ padding: "0.75rem", borderRadius: 12, border: "1px solid #111", background: "#111", color: "white", cursor: "pointer" }}
-            >
-              Send me a code
+            <button onClick={requestCode} disabled={loading} style={buttonPrimary}>
+              {loading ? "Sending..." : "Send me a code"}
             </button>
 
             <div style={{ color: "#777", fontSize: "0.9rem" }}>
               This is a one-time code. No passwords.
+            </div>
+
+            <div style={{ color: "#999", fontSize: "0.85rem" }}>
+              (Preview profiles + saved/likes are tied to your device id for now:
+              <span style={{ marginLeft: 6, fontFamily: "monospace" }}>
+                {userId || "—"}
+              </span>
+              )
             </div>
           </div>
         )}
@@ -102,25 +237,36 @@ export default function AuthPage() {
             </div>
 
             {devCode && (
-              <div style={{ padding: "0.75rem", borderRadius: 12, border: "1px solid #cfe7cf", background: "#f6fff6" }}>
+              <div
+                style={{
+                  padding: "0.75rem",
+                  borderRadius: 12,
+                  border: "1px solid #cfe7cf",
+                  background: "#f6fff6",
+                }}
+              >
                 <b>Preview Mode Code:</b> {devCode}
               </div>
             )}
 
-            <label style={{ color: "#555", fontSize: "0.95rem" }}>6-digit code</label>
+            <label style={{ color: "#555", fontSize: "0.95rem" }}>
+              6-digit code
+            </label>
             <input
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="123456"
+              inputMode="numeric"
               maxLength={6}
-              style={{ padding: "0.75rem", borderRadius: 12, border: "1px solid #ccc" }}
+              style={{
+                padding: "0.75rem",
+                borderRadius: 12,
+                border: "1px solid #ccc",
+              }}
             />
 
-            <button
-              onClick={verifyCode}
-              style={{ padding: "0.75rem", borderRadius: 12, border: "1px solid #111", background: "#111", color: "white", cursor: "pointer" }}
-            >
-              Enter Black Within
+            <button onClick={verifyCode} disabled={loading} style={buttonPrimary}>
+              {loading ? "Verifying..." : "Enter Black Within"}
             </button>
 
             <button
@@ -130,7 +276,8 @@ export default function AuthPage() {
                 setDevCode(null);
                 setStatus(null);
               }}
-              style={{ padding: "0.75rem", borderRadius: 12, border: "1px solid #ccc", background: "white", cursor: "pointer" }}
+              disabled={loading}
+              style={buttonSecondary}
             >
               Use a different email
             </button>
