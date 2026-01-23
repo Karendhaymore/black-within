@@ -1,6 +1,7 @@
 import os
 import re
 import secrets
+import hashlib
 from datetime import datetime, timedelta
 from typing import List
 
@@ -16,8 +17,8 @@ from sqlalchemy import (
     delete,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
-
 from sqlalchemy.dialects.postgresql import insert
+
 
 # -----------------------------
 # Config
@@ -41,6 +42,9 @@ origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 AUTH_CODE_TTL_MINUTES = int(os.getenv("AUTH_CODE_TTL_MINUTES", "15"))
 AUTH_PREVIEW_MODE = os.getenv("AUTH_PREVIEW_MODE", "true").lower() in ("1", "true", "yes")
 
+# Used to make user IDs stable across logins/devices (recommended)
+AUTH_USERID_PEPPER = os.getenv("AUTH_USERID_PEPPER", "")
+
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
 
@@ -53,7 +57,7 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # simple string id
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # stable string id
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -130,7 +134,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -143,11 +146,12 @@ def _normalize_email(email: str) -> str:
 
 def _make_user_id_from_email(email: str) -> str:
     """
-    Stable-ish user id derived from email so it works across devices.
-    (We can upgrade to real auth tokens later.)
+    Stable user id derived from email so it works across devices.
+    Uses a server "pepper" if provided (recommended).
     """
-    # 20 chars, letters+digits (safe as primary key)
-    return secrets.token_hex(10)
+    # If you set AUTH_USERID_PEPPER in Render env vars, this is non-guessable.
+    raw = f"{AUTH_USERID_PEPPER}:{email}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:40]  # fits String(40)
 
 
 def _ensure_user(user_id: str) -> str:
@@ -191,23 +195,23 @@ def request_code(payload: RequestCodePayload):
     code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = datetime.utcnow() + timedelta(minutes=AUTH_CODE_TTL_MINUTES)
 
+    # Postgres UPSERT to avoid race-condition 500s
     with Session(engine) as session:
-        stmt = insert(LoginCode).values(
+        stmt = insert(LoginCode.__table__).values(
             email=email,
             code=code,
             expires_at=expires_at,
             created_at=datetime.utcnow(),
-      ).on_conflict_do_update(
-        index_elements=[LoginCode.email],
-        set_={
-            "code": code,
-            "expires_at": expires_at,
-            "created_at": datetime.utcnow(),
-        },
-    )
-    session.execute(stmt)
-    session.commit()
-
+        ).on_conflict_do_update(
+            index_elements=[LoginCode.__table__.c.email],
+            set_={
+                "code": code,
+                "expires_at": expires_at,
+                "created_at": datetime.utcnow(),
+            },
+        )
+        session.execute(stmt)
+        session.commit()
 
     # In preview mode we return the code so you can keep building without SendGrid
     if AUTH_PREVIEW_MODE:
@@ -243,7 +247,7 @@ def verify_code(payload: VerifyCodePayload):
         session.execute(delete(LoginCode).where(LoginCode.email == email))
         session.commit()
 
-    # Create a real user id and ensure user exists
+    # Stable user id and ensure user exists
     user_id = _make_user_id_from_email(email)
     _ensure_user(user_id)
 
