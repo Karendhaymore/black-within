@@ -17,8 +17,7 @@ from sqlalchemy import (
     delete,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
-from sqlalchemy.dialects.postgresql import insert
-
+from sqlalchemy.exc import IntegrityError
 
 # -----------------------------
 # Config
@@ -230,22 +229,24 @@ def verify_code(payload: VerifyCodePayload):
         raise HTTPException(status_code=400, detail="A 6-digit code is required")
 
     with Session(engine) as session:
-        row = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
-        if not row:
-            raise HTTPException(status_code=401, detail="Invalid or expired code")
-
-        if datetime.utcnow() > row.expires_at:
-            # delete expired code
-            session.execute(delete(LoginCode).where(LoginCode.email == email))
-            session.commit()
-            raise HTTPException(status_code=401, detail="Invalid or expired code")
-
-        if row.code != code:
-            raise HTTPException(status_code=401, detail="Invalid or expired code")
-
-        # success: consume the code
-        session.execute(delete(LoginCode).where(LoginCode.email == email))
+    try:
+        # First try to create a new row
+        session.add(LoginCode(email=email, code=code, expires_at=expires_at, created_at=datetime.utcnow()))
         session.commit()
+    except IntegrityError:
+        # If it already exists (or a double-click caused a collision), update instead
+        session.rollback()
+        existing = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
+        if existing:
+            existing.code = code
+            existing.expires_at = expires_at
+            existing.created_at = datetime.utcnow()
+            session.commit()
+        else:
+            # Rare edge case: try insert once more
+            session.add(LoginCode(email=email, code=code, expires_at=expires_at, created_at=datetime.utcnow()))
+            session.commit()
+
 
     # Stable user id and ensure user exists
     user_id = _make_user_id_from_email(email)
