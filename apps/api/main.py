@@ -1,6 +1,6 @@
 import os
+import re
 import secrets
-import hashlib
 from datetime import datetime, timedelta
 from typing import List
 
@@ -11,7 +11,6 @@ from sqlalchemy import (
     create_engine,
     String,
     DateTime,
-    Boolean,
     UniqueConstraint,
     select,
     delete,
@@ -26,7 +25,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
-# Render Postgres URLs can start with postgres://, but SQLAlchemy wants postgresql://
+# Render sometimes provides postgres://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -37,11 +36,9 @@ if DATABASE_URL.startswith("postgresql://"):
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://black-within.onrender.com")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 
-# Preview auth mode: returns devCode instead of actually emailing it
-# (Turn off later when SendGrid/real email is wired)
-PREVIEW_AUTH = os.getenv("PREVIEW_AUTH", "true").lower() in ("1", "true", "yes", "on")
-
+# Auth settings
 AUTH_CODE_TTL_MINUTES = int(os.getenv("AUTH_CODE_TTL_MINUTES", "15"))
+AUTH_PREVIEW_MODE = os.getenv("AUTH_PREVIEW_MODE", "true").lower() in ("1", "true", "yes")
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
@@ -55,42 +52,40 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # stable userId
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # simple string id
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class AuthCode(Base):
-    __tablename__ = "auth_codes"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(320), index=True)
-    code: Mapped[str] = mapped_column(String(10))  # MVP: store plain 6-digit
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    expires_at: Mapped[datetime] = mapped_column(DateTime)
-    used: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
 
 class SavedProfile(Base):
     __tablename__ = "saved_profiles"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "profile_id", name="uq_saved_user_profile"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_saved_user_profile"),)
 
 
 class Like(Base):
     __tablename__ = "likes"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
+
+
+class LoginCode(Base):
+    """
+    Stores one active code per email. Requesting a new code overwrites the old one.
+    """
+    __tablename__ = "login_codes"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(320), index=True, unique=True)
+    code: Mapped[str] = mapped_column(String(10))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 Base.metadata.create_all(engine)
@@ -116,25 +111,15 @@ class RequestCodePayload(BaseModel):
     email: str
 
 
-class RequestCodeResponse(BaseModel):
-    ok: bool
-    devCode: str | None = None
-
-
 class VerifyCodePayload(BaseModel):
     email: str
     code: str
 
 
-class VerifyCodeResponse(BaseModel):
-    ok: bool
-    userId: str
-
-
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI()
+app = FastAPI(title="Black Within API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -145,31 +130,23 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-def root():
-    return {"name": "Black Within API", "status": "ok", "docs": "/docs", "health": "/health"}
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-# -----------------------------
-# Helpers
-# -----------------------------
 def _normalize_email(email: str) -> str:
     e = (email or "").strip().lower()
-    if "@" not in e or "." not in e.split("@")[-1]:
-        raise HTTPException(status_code=400, detail="Please enter a valid email.")
+    if not e or not EMAIL_RE.match(e):
+        raise HTTPException(status_code=400, detail="A valid email is required")
     return e
 
 
-def _stable_user_id_from_email(email: str) -> str:
-    # Stable across devices: same email -> same userId
-    # (We can change strategy later, but this is perfect for MVP.)
-    digest = hashlib.sha256(email.encode("utf-8")).hexdigest()
-    return f"u_{digest[:40]}"
+def _make_user_id_from_email(email: str) -> str:
+    """
+    Stable-ish user id derived from email so it works across devices.
+    (We can upgrade to real auth tokens later.)
+    """
+    # 20 chars, letters+digits (safe as primary key)
+    return secrets.token_hex(10)
 
 
 def _ensure_user(user_id: str) -> str:
@@ -186,6 +163,16 @@ def _ensure_user(user_id: str) -> str:
         return user_id
 
 
+@app.get("/")
+def root():
+    return {"name": "Black Within API", "status": "ok", "docs": "/docs", "health": "/health"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.get("/me", response_model=MeResponse)
 def me(user_id: str = Query(..., description="Client-generated user id")):
     user_id = _ensure_user(user_id)
@@ -193,74 +180,65 @@ def me(user_id: str = Query(..., description="Client-generated user id")):
 
 
 # -----------------------------
-# Auth (Preview code login)
+# AUTH (Preview mode)
 # -----------------------------
-@app.post("/auth/request-code", response_model=RequestCodeResponse)
+@app.post("/auth/request-code")
 def request_code(payload: RequestCodePayload):
     email = _normalize_email(payload.email)
 
-    # 6-digit code
+    # Generate 6-digit code
     code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = datetime.utcnow() + timedelta(minutes=AUTH_CODE_TTL_MINUTES)
 
     with Session(engine) as session:
-        # Invalidate old unused codes for this email (optional but clean)
-        session.execute(
-            delete(AuthCode).where(AuthCode.email == email)
-        )
-        session.add(
-            AuthCode(
-                email=email,
-                code=code,
-                expires_at=expires_at,
-                used=False,
-            )
-        )
+        existing = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
+        if existing:
+            existing.code = code
+            existing.expires_at = expires_at
+            existing.created_at = datetime.utcnow()
+        else:
+            session.add(LoginCode(email=email, code=code, expires_at=expires_at))
         session.commit()
 
-    # For now: always return devCode in preview mode
-    if PREVIEW_AUTH:
-        return RequestCodeResponse(ok=True, devCode=code)
+    # In preview mode we return the code so you can keep building without SendGrid
+    if AUTH_PREVIEW_MODE:
+        return {"ok": True, "devCode": code}
 
-    # Later: send via SendGrid, and do NOT return code
-    return RequestCodeResponse(ok=True, devCode=None)
+    # If you later add SendGrid, you would send the code here and return ok:true
+    return {"ok": True}
 
 
-@app.post("/auth/verify-code", response_model=VerifyCodeResponse)
+@app.post("/auth/verify-code")
 def verify_code(payload: VerifyCodePayload):
     email = _normalize_email(payload.email)
     code = (payload.code or "").strip()
 
-    if not code or len(code) != 6 or not code.isdigit():
-        raise HTTPException(status_code=400, detail="Enter the 6-digit code.")
+    if not code or len(code) != 6:
+        raise HTTPException(status_code=400, detail="A 6-digit code is required")
 
     with Session(engine) as session:
-        row = session.execute(
-            select(AuthCode)
-            .where(AuthCode.email == email)
-            .order_by(AuthCode.created_at.desc())
-        ).scalars().first()
-
+        row = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
         if not row:
-            raise HTTPException(status_code=400, detail="Invalid or expired code.")
-
-        if row.used:
-            raise HTTPException(status_code=400, detail="Invalid or expired code.")
+            raise HTTPException(status_code=401, detail="Invalid or expired code")
 
         if datetime.utcnow() > row.expires_at:
-            raise HTTPException(status_code=400, detail="Invalid or expired code.")
+            # delete expired code
+            session.execute(delete(LoginCode).where(LoginCode.email == email))
+            session.commit()
+            raise HTTPException(status_code=401, detail="Invalid or expired code")
 
         if row.code != code:
-            raise HTTPException(status_code=400, detail="Invalid or expired code.")
+            raise HTTPException(status_code=401, detail="Invalid or expired code")
 
-        # Mark used
-        row.used = True
+        # success: consume the code
+        session.execute(delete(LoginCode).where(LoginCode.email == email))
         session.commit()
 
-    user_id = _stable_user_id_from_email(email)
+    # Create a real user id and ensure user exists
+    user_id = _make_user_id_from_email(email)
     _ensure_user(user_id)
 
-    return VerifyCodeResponse(ok=True, userId=user_id)
+    return {"ok": True, "userId": user_id}
 
 
 # -----------------------------
