@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SAMPLE_PROFILES } from "../lib/sampleProfiles";
+import { DEMO_PROFILES } from "../lib/sampleProfiles";
 import { cleanupSavedIds, getSavedIds, removeSavedId } from "../lib/storage";
 
 export default function SavedPage() {
   const [savedIds, setSavedIds] = useState<string[]>([]);
 
-  const availableProfiles = useMemo(() => SAMPLE_PROFILES.filter((p) => p.isAvailable), []);
+  const availableProfiles = useMemo(() => DEMO_PROFILES.filter((p) => p.isAvailable), []);
 
   useEffect(() => {
     cleanupSavedIds(availableProfiles);
@@ -67,7 +67,16 @@ export default function SavedPage() {
 
                 <div style={{ padding: "1rem" }}>
                   <div style={{ fontSize: "1.15rem", fontWeight: 600 }}>{p.displayName}</div>
-                  <div style={{ color: "#666" }}>
+
+                  {p.isDemo && (
+                    <div style={{ marginTop: "0.35rem" }}>
+                      <span style={{ fontSize: "0.8rem", padding: "0.2rem 0.5rem", border: "1px solid #ddd", borderRadius: 999, color: "#666" }}>
+                        Preview Profile
+                      </span>
+                    </div>
+                  )}
+
+                  <div style={{ color: "#666", marginTop: "0.4rem" }}>
                     {p.age} • {p.city}, {p.stateUS}
                   </div>
 
