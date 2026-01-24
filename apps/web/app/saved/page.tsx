@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { DEMO_PROFILES, type Profile } from "../lib/sampleProfiles";
-import { getOrCreateUserId } from "../lib/user";
-import { getSavedIds, removeSavedId } from "../lib/storage";
+import { getSavedIds, removeSavedId, getCurrentUserId } from "../lib/storage";
 
 export default function SavedPage() {
+  const router = useRouter();
+
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   // Only show profiles that are available + saved
   const savedProfiles = useMemo(() => {
@@ -16,13 +19,19 @@ export default function SavedPage() {
   }, [savedIds]);
 
   useEffect(() => {
-    const userId = getOrCreateUserId();
+    const userId = getCurrentUserId();
+    if (!userId) {
+      router.push("/auth/login");
+      return;
+    }
 
     (async () => {
+      setLoading(true);
       const saved = await getSavedIds(userId);
       setSavedIds(saved);
+      setLoading(false);
     })();
-  }, []);
+  }, [router]);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -30,7 +39,12 @@ export default function SavedPage() {
   }
 
   async function onRemove(p: Profile) {
-    const userId = getOrCreateUserId();
+    const userId = getCurrentUserId();
+    if (!userId) {
+      router.push("/auth/login");
+      return;
+    }
+
     await removeSavedId(userId, p.id);
     setSavedIds(await getSavedIds(userId));
     showToast("Removed from Saved Profiles.");
@@ -129,7 +143,19 @@ export default function SavedPage() {
           You’re viewing saved preview profiles while Black Within opens intentionally.
         </div>
 
-        {savedProfiles.length === 0 ? (
+        {loading ? (
+          <div
+            style={{
+              marginTop: "1.5rem",
+              padding: "1.25rem",
+              borderRadius: 14,
+              border: "1px solid #eee",
+              color: "#555",
+            }}
+          >
+            Loading your saved profiles…
+          </div>
+        ) : savedProfiles.length === 0 ? (
           <div
             style={{
               marginTop: "1.5rem",
@@ -305,7 +331,7 @@ export default function SavedPage() {
 
         <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
           MVP note: Saved Profiles are stored in the database so they survive refresh and redeploys.
-          Full cross-device syncing will be automatic once we add login.
+          Full cross-device syncing will be automatic once login is fully wired.
         </div>
       </div>
     </main>
