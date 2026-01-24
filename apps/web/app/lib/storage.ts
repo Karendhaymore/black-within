@@ -9,24 +9,18 @@ function requireApi() {
   return API.replace(/\/+$/, "");
 }
 
-// -------------------------
-// Local user identity helpers
-// -------------------------
+// -----------------------------
+// Current user (localStorage)
+// -----------------------------
 const USER_ID_KEY = "bw_user_id";
-const ANON_KEY = "bw_anon_user_id";
 const EMAIL_KEY = "bw_email";
-
-function safeParse<T>(raw: string | null): T | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
 
 export function getCurrentUserId(): string | null {
   return localStorage.getItem(USER_ID_KEY);
+}
+
+export function getCurrentEmail(): string | null {
+  return localStorage.getItem(EMAIL_KEY);
 }
 
 export function setCurrentUser(userId: string, email?: string) {
@@ -37,12 +31,11 @@ export function setCurrentUser(userId: string, email?: string) {
 export function clearCurrentUser() {
   localStorage.removeItem(USER_ID_KEY);
   localStorage.removeItem(EMAIL_KEY);
-  localStorage.removeItem(ANON_KEY);
 }
 
-// -------------------------
+// -----------------------------
 // Notifications (local only)
-// -------------------------
+// -----------------------------
 export type Notification = {
   id: string;
   type: "like";
@@ -51,6 +44,15 @@ export type Notification = {
 };
 
 const NOTIFS_KEY = "bw_notifications";
+
+function safeParse<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
 
 export function getNotifications(): Notification[] {
   return safeParse<Notification[]>(localStorage.getItem(NOTIFS_KEY)) || [];
@@ -61,9 +63,9 @@ export function addNotification(n: Notification) {
   localStorage.setItem(NOTIFS_KEY, JSON.stringify([n, ...current]));
 }
 
-// -------------------------
+// -----------------------------
 // DB-backed Saved + Likes
-// -------------------------
+// -----------------------------
 export async function getSavedIds(userId: string): Promise<string[]> {
   const res = await fetch(`${requireApi()}/saved?user_id=${encodeURIComponent(userId)}`);
   if (!res.ok) return [];
