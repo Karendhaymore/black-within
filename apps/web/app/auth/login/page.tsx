@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { setCurrentUser } from "../../lib/storage";
 
 type RequestCodeResponse = {
   ok: boolean;
@@ -10,14 +11,14 @@ type RequestCodeResponse = {
 
 type VerifyCodeResponse = {
   ok: boolean;
-  userId: string;
+  userId?: string; // what your API returns
+  user_id?: string; // tolerate snake_case just in case
 };
 
 function getApiBaseUrl() {
-  // 1) Prefer NEXT_PUBLIC_API_BASE_URL if you set it in Render env vars
-  // 2) Fallback to your Render API URL
+  // ✅ Use the SAME env var as storage.ts
   return (
-    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ||
+    process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ||
     "https://black-within-api.onrender.com"
   );
 }
@@ -34,7 +35,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Preview mode convenience: show the dev code returned by API (optional)
   const [devCode, setDevCode] = useState<string | null>(null);
 
   async function requestCode(e: React.FormEvent) {
@@ -63,9 +63,7 @@ export default function LoginPage() {
 
       const data = (await res.json()) as RequestCodeResponse;
 
-      if (!data.ok) {
-        throw new Error("Could not request code. Please try again.");
-      }
+      if (!data.ok) throw new Error("Could not request code. Please try again.");
 
       if (data.devCode) setDevCode(data.devCode);
       setStep("code");
@@ -107,13 +105,13 @@ export default function LoginPage() {
 
       const data = (await res.json()) as VerifyCodeResponse;
 
-      if (!data.ok || !data.userId) {
+      const userId = data.userId || data.user_id;
+      if (!data.ok || !userId) {
         throw new Error("Invalid code. Please request a new one and try again.");
       }
 
-      // Store userId for the rest of the app (saved/likes endpoints need it)
-      localStorage.setItem("bw_user_id", data.userId);
-      localStorage.setItem("bw_email", cleanEmail);
+      // ✅ Store user for the rest of the app
+      setCurrentUser(userId, cleanEmail);
 
       router.push("/discover");
     } catch (err: any) {
@@ -124,18 +122,9 @@ export default function LoginPage() {
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: "2rem",
-      }}
-    >
+    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "2rem" }}>
       <div style={{ width: "100%", maxWidth: 520 }}>
-        <h1 style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>
-          Log In
-        </h1>
+        <h1 style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>Log In</h1>
         <p style={{ color: "#555", marginBottom: "1.5rem" }}>
           Enter gently. This space is designed to move at the speed of trust.
         </p>
@@ -148,23 +137,12 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                style={{
-                  padding: "0.7rem",
-                  borderRadius: 8,
-                  border: "1px solid #ccc",
-                }}
+                style={{ padding: "0.7rem", borderRadius: 8, border: "1px solid #ccc" }}
               />
             </label>
 
             {error && (
-              <div
-                style={{
-                  padding: "0.75rem",
-                  borderRadius: 8,
-                  border: "1px solid #f2c2c2",
-                  background: "#fff7f7",
-                }}
-              >
+              <div style={{ padding: "0.75rem", borderRadius: 8, border: "1px solid #f2c2c2", background: "#fff7f7" }}>
                 {error}
               </div>
             )}
@@ -212,27 +190,13 @@ export default function LoginPage() {
             </label>
 
             {devCode && (
-              <div
-                style={{
-                  padding: "0.75rem",
-                  borderRadius: 8,
-                  border: "1px solid #cde7d1",
-                  background: "#f3fff5",
-                }}
-              >
+              <div style={{ padding: "0.75rem", borderRadius: 8, border: "1px solid #cde7d1", background: "#f3fff5" }}>
                 <b>Dev code (preview mode):</b> {devCode}
               </div>
             )}
 
             {error && (
-              <div
-                style={{
-                  padding: "0.75rem",
-                  borderRadius: 8,
-                  border: "1px solid #f2c2c2",
-                  background: "#fff7f7",
-                }}
-              >
+              <div style={{ padding: "0.75rem", borderRadius: 8, border: "1px solid #f2c2c2", background: "#fff7f7" }}>
                 {error}
               </div>
             )}
