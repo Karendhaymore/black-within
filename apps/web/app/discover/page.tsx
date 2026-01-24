@@ -2,75 +2,52 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DEMO_PROFILES, type Profile } from "../lib/sampleProfiles";
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "https://black-within-api.onrender.com";
+import { getOrCreateUserId } from "../lib/user";
+import {
+  getSavedIds,
+  saveProfileId,
+  removeSavedId,
+  getLikes,
+  likeProfile,
+} from "../lib/storage";
 
 // -----------------------------
-// tiny helpers (kept local to avoid dependency confusion)
+// local-only notifications (kept here for now)
 // -----------------------------
-function getOrCreateUserId() {
-  if (typeof window === "undefined") return "server";
-  const key = "bw_user_id";
-  const existing = window.localStorage.getItem(key);
-  if (existing) return existing;
-
-  const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `bw_${Math.random().toString(16).slice(2)}_${Date.now()}`;
-
-  window.localStorage.setItem(key, id);
-  return id;
-}
-
 function addNotificationLocal(message: string) {
   try {
     const key = "bw_notifications";
-    const existing = JSON.parse(window.localStorage.getItem(key) || "[]") as any[];
+    const existing = JSON.parse(
+      window.localStorage.getItem(key) || "[]"
+    ) as any[];
+
     existing.unshift({
-      id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Date.now()),
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : String(Date.now()),
       type: "like",
       message,
       createdAt: new Date().toISOString(),
     });
+
     window.localStorage.setItem(key, JSON.stringify(existing.slice(0, 200)));
   } catch {
     // ignore
   }
 }
 
-async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${txt || res.statusText}`);
-  }
-  return (await res.json()) as T;
-}
-
-type IdListResponse = { ids: string[] };
-
 export default function DiscoverPage() {
-  const [userId, setUserId] = useState<string>("");
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  // NEW: filters
+  // Filters
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
 
-  // For broken images → fallback to initials
+  // Broken image fallback
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
   const availableProfiles = useMemo(
@@ -83,7 +60,7 @@ export default function DiscoverPage() {
     [availableProfiles]
   );
 
-  // Build dropdown options
+  // Dropdown options
   const intentionOptions = useMemo(() => {
     const set = new Set<string>();
     availableProfiles.forEach((p) => set.add(p.intention));
@@ -123,43 +100,34 @@ export default function DiscoverPage() {
       .toUpperCase();
   }
 
-  async function refreshSavedAndLikes(uid: string) {
+  async function refreshSavedAndLikes() {
+    const uid = getOrCreateUserId();
+
     const [saved, likes] = await Promise.all([
-      apiJson<IdListResponse>(`/saved?user_id=${encodeURIComponent(uid)}`),
-      apiJson<IdListResponse>(`/likes?user_id=${encodeURIComponent(uid)}`),
+      getSavedIds(uid),
+      getLikes(uid),
     ]);
 
-    // If any saved profiles are no longer available, remove them from DB
-    const savedStillValid = saved.ids.filter((id) => availableProfileIds.has(id));
-    const removed = saved.ids.filter((id) => !availableProfileIds.has(id));
+    // Keep only profiles that still exist in the preview set
+    const savedStillValid = saved.filter((id) => availableProfileIds.has(id));
+    const removed = saved.filter((id) => !availableProfileIds.has(id));
 
     setSavedIds(savedStillValid);
-    setLikedIds(likes.ids);
+    setLikedIds(likes);
 
+    // Best-effort cleanup for removed profiles
     if (removed.length > 0) {
-      // best-effort cleanup so Saved page stays “only saved preview profiles”
       await Promise.allSettled(
-        removed.map((profileId) =>
-          apiJson(`/saved?user_id=${encodeURIComponent(uid)}&profile_id=${encodeURIComponent(profileId)}`, {
-            method: "DELETE",
-          })
-        )
+        removed.map((profileId) => removeSavedId(uid, profileId))
       );
     }
   }
 
   useEffect(() => {
-    const uid = getOrCreateUserId();
-    setUserId(uid);
-
     (async () => {
       try {
         setApiError(null);
-
-        // Ensure user exists server-side
-        await apiJson(`/me?user_id=${encodeURIComponent(uid)}`);
-
-        await refreshSavedAndLikes(uid);
+        await refreshSavedAndLikes();
       } catch (e: any) {
         setApiError(e?.message || "Could not connect to the API.");
       }
@@ -169,12 +137,15 @@ export default function DiscoverPage() {
 
   async function onSave(p: Profile) {
     try {
-      if (!userId) return;
-      await apiJson(`/saved`, {
-        method: "POST",
-        body: JSON.stringify({ user_id: userId, profile_id: p.id }),
-      });
-      await refreshSavedAndLikes(userId);
+      setApiError(null);
+      const uid = getOrCreateUserId();
+
+      await saveProfileId(uid, p.id);
+
+      // Optimistic UI update (fast), then refresh to stay source-of-truth
+      setSavedIds((prev) => (prev.includes(p.id) ? prev : [p.id, ...prev]));
+      await refreshSavedAndLikes();
+
       showToast("Saved. You can view it later in Saved Profiles.");
     } catch (e: any) {
       showToast("Could not save right now. Please try again.");
@@ -184,12 +155,14 @@ export default function DiscoverPage() {
 
   async function onUnsave(p: Profile) {
     try {
-      if (!userId) return;
-      await apiJson(
-        `/saved?user_id=${encodeURIComponent(userId)}&profile_id=${encodeURIComponent(p.id)}`,
-        { method: "DELETE" }
-      );
-      await refreshSavedAndLikes(userId);
+      setApiError(null);
+      const uid = getOrCreateUserId();
+
+      await removeSavedId(uid, p.id);
+
+      setSavedIds((prev) => prev.filter((id) => id !== p.id));
+      await refreshSavedAndLikes();
+
       showToast("Removed from Saved Profiles.");
     } catch (e: any) {
       showToast("Could not remove right now. Please try again.");
@@ -199,16 +172,15 @@ export default function DiscoverPage() {
 
   async function onLike(p: Profile) {
     try {
-      if (!userId) return;
-      await apiJson(`/likes`, {
-        method: "POST",
-        body: JSON.stringify({ user_id: userId, profile_id: p.id }),
-      });
-      await refreshSavedAndLikes(userId);
+      setApiError(null);
+      const uid = getOrCreateUserId();
 
-      // Local notification (until you build real “recipient notifications”)
+      await likeProfile(uid, p.id);
+
+      setLikedIds((prev) => (prev.includes(p.id) ? prev : [p.id, ...prev]));
+      await refreshSavedAndLikes();
+
       addNotificationLocal("Someone liked your profile.");
-
       showToast("Like sent. They’ll be notified.");
     } catch (e: any) {
       showToast("Could not like right now. Please try again.");
