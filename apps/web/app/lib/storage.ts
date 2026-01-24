@@ -1,54 +1,20 @@
+"use client";
+
 import type { Profile } from "./sampleProfiles";
 
-//
-// IMPORTANT:
-// Set this in Render (web service env vars):
-// NEXT_PUBLIC_API_BASE_URL = https://black-within-api.onrender.com
-//
-const API_BASE =
-  (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
+const API = process.env.NEXT_PUBLIC_API_URL;
 
-function requireApiBase() {
-  if (!API_BASE) throw new Error("NEXT_PUBLIC_API_BASE_URL is not set");
-  return API_BASE;
+function requireApi() {
+  if (!API) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  return API.replace(/\/+$/, "");
 }
 
-function qs(params: Record<string, string>) {
-  const usp = new URLSearchParams(params);
-  return usp.toString();
-}
-
-export type Notification = {
-  id: string;
-  type: "like";
-  message: string;
-  createdAt: string;
-};
-
-// Notifications can stay local for now (not cross-device yet)
-const NOTIFS_KEY = "bw_notifications";
-
+// -------------------------
+// Local user identity helpers
+// -------------------------
 const USER_ID_KEY = "bw_user_id";
+const ANON_KEY = "bw_anon_user_id";
 const EMAIL_KEY = "bw_email";
-
-export function setCurrentUser(userId: string, email?: string) {
-  localStorage.setItem(USER_ID_KEY, userId);
-  if (email) localStorage.setItem(EMAIL_KEY, email);
-}
-
-export function getCurrentUserId(): string | null {
-  return localStorage.getItem(USER_ID_KEY);
-}
-
-export function getCurrentEmail(): string | null {
-  return localStorage.getItem(EMAIL_KEY);
-}
-
-export function clearCurrentUser() {
-  localStorage.removeItem(USER_ID_KEY);
-  localStorage.removeItem(EMAIL_KEY);
-}
-
 
 function safeParse<T>(raw: string | null): T | null {
   if (!raw) return null;
@@ -59,21 +25,6 @@ function safeParse<T>(raw: string | null): T | null {
   }
 }
 
-export function getNotifications(): Notification[] {
-  return safeParse<Notification[]>(localStorage.getItem(NOTIFS_KEY)) || [];
-}
-
-export function addNotification(n: Notification) {
-  const current = getNotifications();
-  localStorage.setItem(NOTIFS_KEY, JSON.stringify([n, ...current]));
-}
-
-// -------------------------------
-// Helpers for current user in localStorage
-// -------------------------------
-const USER_ID_KEY = "bw_user_id";
-const EMAIL_KEY = "bw_email";
-
 export function getCurrentUserId(): string | null {
   return localStorage.getItem(USER_ID_KEY);
 }
@@ -86,56 +37,68 @@ export function setCurrentUser(userId: string, email?: string) {
 export function clearCurrentUser() {
   localStorage.removeItem(USER_ID_KEY);
   localStorage.removeItem(EMAIL_KEY);
+  localStorage.removeItem(ANON_KEY);
 }
 
-// -------------------------------
-// DB-backed Saved + Likes
-// -------------------------------
-type IdListResponse = { ids: string[] };
+// -------------------------
+// Notifications (local only)
+// -------------------------
+export type Notification = {
+  id: string;
+  type: "like";
+  message: string;
+  createdAt: string;
+};
 
+const NOTIFS_KEY = "bw_notifications";
+
+export function getNotifications(): Notification[] {
+  return safeParse<Notification[]>(localStorage.getItem(NOTIFS_KEY)) || [];
+}
+
+export function addNotification(n: Notification) {
+  const current = getNotifications();
+  localStorage.setItem(NOTIFS_KEY, JSON.stringify([n, ...current]));
+}
+
+// -------------------------
+// DB-backed Saved + Likes
+// -------------------------
 export async function getSavedIds(userId: string): Promise<string[]> {
-  try {
-    const url = `${requireApiBase()}/saved?${qs({ user_id: userId })}`;
-    const res = await fetch(url, { method: "GET" });
-    if (!res.ok) return [];
-    const data = (await res.json()) as IdListResponse;
-    return Array.isArray(data?.ids) ? data.ids : [];
-  } catch {
-    return [];
-  }
+  const res = await fetch(`${requireApi()}/saved?user_id=${encodeURIComponent(userId)}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.ids || [];
 }
 
 export async function saveProfileId(userId: string, profileId: string) {
-  await fetch(`${requireApiBase()}/saved`, {
+  await fetch(`${requireApi()}/saved`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, profile_id: profileId }),
-  }).catch(() => {});
+  });
 }
 
 export async function removeSavedId(userId: string, profileId: string) {
-  const url = `${requireApiBase()}/saved?${qs({ user_id: userId, profile_id: profileId })}`;
-  await fetch(url, { method: "DELETE" }).catch(() => {});
+  await fetch(
+    `${requireApi()}/saved?user_id=${encodeURIComponent(userId)}&profile_id=${encodeURIComponent(profileId)}`,
+    { method: "DELETE" }
+  );
 }
 
 export async function getLikes(userId: string): Promise<string[]> {
-  try {
-    const url = `${requireApiBase()}/likes?${qs({ user_id: userId })}`;
-    const res = await fetch(url, { method: "GET" });
-    if (!res.ok) return [];
-    const data = (await res.json()) as IdListResponse;
-    return Array.isArray(data?.ids) ? data.ids : [];
-  } catch {
-    return [];
-  }
+  const res = await fetch(`${requireApi()}/likes?user_id=${encodeURIComponent(userId)}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.ids || [];
 }
 
 export async function likeProfile(userId: string, profileId: string) {
-  await fetch(`${requireApiBase()}/likes`, {
+  await fetch(`${requireApi()}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, profile_id: profileId }),
-  }).catch(() => {});
+  });
 }
 
 // Still useful: remove saved profiles if they became unavailable
