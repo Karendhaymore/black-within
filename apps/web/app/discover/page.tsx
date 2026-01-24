@@ -12,15 +12,12 @@ import {
 } from "../lib/storage";
 
 // -----------------------------
-// local-only notifications (kept here for now)
+// Local notification helper (client-only)
 // -----------------------------
 function addNotificationLocal(message: string) {
   try {
     const key = "bw_notifications";
-    const existing = JSON.parse(
-      window.localStorage.getItem(key) || "[]"
-    ) as any[];
-
+    const existing = JSON.parse(localStorage.getItem(key) || "[]") as any[];
     existing.unshift({
       id:
         typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -30,14 +27,14 @@ function addNotificationLocal(message: string) {
       message,
       createdAt: new Date().toISOString(),
     });
-
-    window.localStorage.setItem(key, JSON.stringify(existing.slice(0, 200)));
+    localStorage.setItem(key, JSON.stringify(existing.slice(0, 200)));
   } catch {
     // ignore
   }
 }
 
 export default function DiscoverPage() {
+  const [userId, setUserId] = useState<string>("");
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -47,7 +44,7 @@ export default function DiscoverPage() {
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
 
-  // Broken image fallback
+  // For broken images → fallback to initials
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
   const availableProfiles = useMemo(
@@ -60,7 +57,7 @@ export default function DiscoverPage() {
     [availableProfiles]
   );
 
-  // Dropdown options
+  // Build dropdown options
   const intentionOptions = useMemo(() => {
     const set = new Set<string>();
     availableProfiles.forEach((p) => set.add(p.intention));
@@ -78,9 +75,7 @@ export default function DiscoverPage() {
     return availableProfiles.filter((p) => {
       const intentionMatch =
         intentionFilter === "All" || p.intention === intentionFilter;
-
       const tagMatch = tagFilter === "All" || p.tags.includes(tagFilter);
-
       return intentionMatch && tagMatch;
     });
   }, [availableProfiles, intentionFilter, tagFilter]);
@@ -100,51 +95,54 @@ export default function DiscoverPage() {
       .toUpperCase();
   }
 
-  async function refreshSavedAndLikes() {
-    const uid = getOrCreateUserId();
+  async function refreshSavedAndLikes(uid: string) {
+    try {
+      setApiError(null);
 
-    const [saved, likes] = await Promise.all([
-      getSavedIds(uid),
-      getLikes(uid),
-    ]);
+      const [saved, likes] = await Promise.all([
+        getSavedIds(uid),
+        getLikes(uid),
+      ]);
 
-    // Keep only profiles that still exist in the preview set
-    const savedStillValid = saved.filter((id) => availableProfileIds.has(id));
-    const removed = saved.filter((id) => !availableProfileIds.has(id));
+      // Ensure we only keep IDs that still exist in demo profiles
+      const savedStillValid = saved.filter((id) => availableProfileIds.has(id));
+      const removed = saved.filter((id) => !availableProfileIds.has(id));
 
-    setSavedIds(savedStillValid);
-    setLikedIds(likes);
+      setSavedIds(savedStillValid);
+      setLikedIds(likes);
 
-    // Best-effort cleanup for removed profiles
-    if (removed.length > 0) {
-      await Promise.allSettled(
-        removed.map((profileId) => removeSavedId(uid, profileId))
-      );
+      // Best-effort cleanup of invalid saved IDs
+      if (removed.length > 0) {
+        await Promise.allSettled(
+          removed.map((profileId) => removeSavedId(uid, profileId))
+        );
+      }
+    } catch (e: any) {
+      setApiError(e?.message || "Could not refresh Saved/Likes from the API.");
     }
   }
 
   useEffect(() => {
+    const uid = getOrCreateUserId();
+    setUserId(uid);
+
     (async () => {
-      try {
-        setApiError(null);
-        await refreshSavedAndLikes();
-      } catch (e: any) {
-        setApiError(e?.message || "Could not connect to the API.");
-      }
+      await refreshSavedAndLikes(uid);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableProfileIds]);
 
   async function onSave(p: Profile) {
     try {
-      setApiError(null);
-      const uid = getOrCreateUserId();
+      if (!userId) return;
 
-      await saveProfileId(uid, p.id);
+      await saveProfileId(userId, p.id);
 
-      // Optimistic UI update (fast), then refresh to stay source-of-truth
+      // Optimistic UI update (instant count change)
       setSavedIds((prev) => (prev.includes(p.id) ? prev : [p.id, ...prev]));
-      await refreshSavedAndLikes();
+
+      // Then refresh from server to confirm
+      await refreshSavedAndLikes(userId);
 
       showToast("Saved. You can view it later in Saved Profiles.");
     } catch (e: any) {
@@ -155,14 +153,14 @@ export default function DiscoverPage() {
 
   async function onUnsave(p: Profile) {
     try {
-      setApiError(null);
-      const uid = getOrCreateUserId();
+      if (!userId) return;
 
-      await removeSavedId(uid, p.id);
+      await removeSavedId(userId, p.id);
 
+      // Optimistic UI update
       setSavedIds((prev) => prev.filter((id) => id !== p.id));
-      await refreshSavedAndLikes();
 
+      await refreshSavedAndLikes(userId);
       showToast("Removed from Saved Profiles.");
     } catch (e: any) {
       showToast("Could not remove right now. Please try again.");
@@ -172,13 +170,14 @@ export default function DiscoverPage() {
 
   async function onLike(p: Profile) {
     try {
-      setApiError(null);
-      const uid = getOrCreateUserId();
+      if (!userId) return;
 
-      await likeProfile(uid, p.id);
+      await likeProfile(userId, p.id);
 
+      // Optimistic UI update
       setLikedIds((prev) => (prev.includes(p.id) ? prev : [p.id, ...prev]));
-      await refreshSavedAndLikes();
+
+      await refreshSavedAndLikes(userId);
 
       addNotificationLocal("Someone liked your profile.");
       showToast("Like sent. They’ll be notified.");
@@ -311,7 +310,13 @@ export default function DiscoverPage() {
           <div style={{ display: "grid", gap: "0.35rem" }}>
             <label style={{ fontSize: "0.9rem", color: "#555" }}>
               Cultural & Spiritual Grounding
-              <div style={{ fontSize: "0.85rem", color: "#777", marginTop: "0.15rem" }}>
+              <div
+                style={{
+                  fontSize: "0.85rem",
+                  color: "#777",
+                  marginTop: "0.15rem",
+                }}
+              >
                 Select your spiritual identity...
               </div>
             </label>
@@ -433,38 +438,12 @@ export default function DiscoverPage() {
                 </div>
 
                 <div style={{ padding: "1rem" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: "0.75rem",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: "1.15rem", fontWeight: 600 }}>
-                        {p.displayName}
-                      </div>
+                  <div style={{ fontSize: "1.15rem", fontWeight: 600 }}>
+                    {p.displayName}
+                  </div>
 
-                      {p.isDemo && (
-                        <div style={{ marginTop: "0.35rem" }}>
-                          <span
-                            style={{
-                              fontSize: "0.8rem",
-                              padding: "0.2rem 0.5rem",
-                              border: "1px solid #ddd",
-                              borderRadius: 999,
-                              color: "#666",
-                            }}
-                          >
-                            Preview Profile
-                          </span>
-                        </div>
-                      )}
-
-                      <div style={{ color: "#666", marginTop: "0.4rem" }}>
-                        {p.age} • {p.city}, {p.stateUS}
-                      </div>
-                    </div>
+                  <div style={{ color: "#666", marginTop: "0.4rem" }}>
+                    {p.age} • {p.city}, {p.stateUS}
                   </div>
 
                   <div style={{ marginTop: "0.75rem", color: "#555" }}>
