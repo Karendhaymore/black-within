@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setCurrentUser } from "../lib/storage";
+import { setCurrentUser } from "../../lib/storage";
 
 type RequestCodeResponse = {
   ok: boolean;
