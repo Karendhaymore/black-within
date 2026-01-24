@@ -1,10 +1,21 @@
 import type { Profile } from "./sampleProfiles";
 
-const API = process.env.NEXT_PUBLIC_API_URL;
+//
+// IMPORTANT:
+// Set this in Render (web service env vars):
+// NEXT_PUBLIC_API_BASE_URL = https://black-within-api.onrender.com
+//
+const API_BASE =
+  (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
 
-function requireApi() {
-  if (!API) throw new Error("NEXT_PUBLIC_API_URL is not set");
-  return API;
+function requireApiBase() {
+  if (!API_BASE) throw new Error("NEXT_PUBLIC_API_BASE_URL is not set");
+  return API_BASE;
+}
+
+function qs(params: Record<string, string>) {
+  const usp = new URLSearchParams(params);
+  return usp.toString();
 }
 
 export type Notification = {
@@ -35,42 +46,74 @@ export function addNotification(n: Notification) {
   localStorage.setItem(NOTIFS_KEY, JSON.stringify([n, ...current]));
 }
 
+// -------------------------------
+// Helpers for current user in localStorage
+// -------------------------------
+const USER_ID_KEY = "bw_user_id";
+const EMAIL_KEY = "bw_email";
+
+export function getCurrentUserId(): string | null {
+  return localStorage.getItem(USER_ID_KEY);
+}
+
+export function setCurrentUser(userId: string, email?: string) {
+  localStorage.setItem(USER_ID_KEY, userId);
+  if (email) localStorage.setItem(EMAIL_KEY, email);
+}
+
+export function clearCurrentUser() {
+  localStorage.removeItem(USER_ID_KEY);
+  localStorage.removeItem(EMAIL_KEY);
+}
+
+// -------------------------------
 // DB-backed Saved + Likes
+// -------------------------------
+type IdListResponse = { ids: string[] };
+
 export async function getSavedIds(userId: string): Promise<string[]> {
-  const res = await fetch(`${requireApi()}/saved?user_id=${encodeURIComponent(userId)}`);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.ids || [];
+  try {
+    const url = `${requireApiBase()}/saved?${qs({ user_id: userId })}`;
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) return [];
+    const data = (await res.json()) as IdListResponse;
+    return Array.isArray(data?.ids) ? data.ids : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function saveProfileId(userId: string, profileId: string) {
-  await fetch(`${requireApi()}/saved`, {
+  await fetch(`${requireApiBase()}/saved`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, profile_id: profileId }),
-  });
+  }).catch(() => {});
 }
 
 export async function removeSavedId(userId: string, profileId: string) {
-  await fetch(
-    `${requireApi()}/saved?user_id=${encodeURIComponent(userId)}&profile_id=${encodeURIComponent(profileId)}`,
-    { method: "DELETE" }
-  );
+  const url = `${requireApiBase()}/saved?${qs({ user_id: userId, profile_id: profileId })}`;
+  await fetch(url, { method: "DELETE" }).catch(() => {});
 }
 
 export async function getLikes(userId: string): Promise<string[]> {
-  const res = await fetch(`${requireApi()}/likes?user_id=${encodeURIComponent(userId)}`);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.ids || [];
+  try {
+    const url = `${requireApiBase()}/likes?${qs({ user_id: userId })}`;
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) return [];
+    const data = (await res.json()) as IdListResponse;
+    return Array.isArray(data?.ids) ? data.ids : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function likeProfile(userId: string, profileId: string) {
-  await fetch(`${requireApi()}/likes`, {
+  await fetch(`${requireApiBase()}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, profile_id: profileId }),
-  });
+  }).catch(() => {});
 }
 
 // Still useful: remove saved profiles if they became unavailable
