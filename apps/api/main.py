@@ -157,39 +157,13 @@ def _ensure_user(user_id: str) -> str:
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
 
-   from sqlalchemy import select
-from datetime import datetime
-
-with Session(engine) as session:
-    # 1. Ensure user exists
-    user = session.get(User, user_id)
-    if not user:
-        user = User(id=user_id)
-        session.add(user)
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user:
+            return user_id
+        session.add(User(id=user_id))
         session.commit()
-
-    # 2. Check if profile already saved (avoid duplicates)
-    existing = session.execute(
-        select(SavedProfile).where(
-            SavedProfile.user_id == user_id,
-            SavedProfile.profile_id == profile_id
-        )
-    ).scalar_one_or_none()
-
-    if existing:
-        return {"ok": True}
-
-    # 3. Save the profile
-    saved = SavedProfile(
-        user_id=user_id,
-        profile_id=profile_id,
-        created_at=datetime.utcnow()
-    )
-
-    session.add(saved)
-    session.commit()
-
-    return {"ok": True}
+        return user_id
 
 
 @app.get("/health")
@@ -289,18 +263,26 @@ def save_profile(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        try:
-            session.add(
-                SavedProfile(
-                    id=_new_id(),
-                    user_id=user_id,
-                    profile_id=profile_id,
-                    created_at=datetime.utcnow(),
-                )
+        existing = session.execute(
+            select(SavedProfile).where(
+                SavedProfile.user_id == user_id,
+                SavedProfile.profile_id == profile_id,
             )
-            session.commit()
-        except Exception:
-            session.rollback()
+        ).scalar_one_or_none()
+
+        if existing:
+            return {"ok": True}
+
+        session.add(
+            SavedProfile(
+                id=_new_id(),
+                user_id=user_id,
+                profile_id=profile_id,
+                created_at=datetime.utcnow(),
+            )
+        )
+        session.commit()
+
     return {"ok": True}
 
 
@@ -329,7 +311,9 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
 def get_likes(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
-        rows = session.execute(select(Like.profile_id).where(Like.user_id == user_id)).all()
+        rows = session.execute(
+            select(Like.profile_id).where(Like.user_id == user_id)
+        ).all()
         return IdListResponse(ids=[r[0] for r in rows])
 
 
@@ -341,16 +325,24 @@ def like(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        try:
-            session.add(
-                Like(
-                    id=_new_id(),
-                    user_id=user_id,
-                    profile_id=profile_id,
-                    created_at=datetime.utcnow(),
-                )
+        existing = session.execute(
+            select(Like).where(
+                Like.user_id == user_id,
+                Like.profile_id == profile_id,
             )
-            session.commit()
-        except Exception:
-            session.rollback()
+        ).scalar_one_or_none()
+
+        if existing:
+            return {"ok": True}
+
+        session.add(
+            Like(
+                id=_new_id(),
+                user_id=user_id,
+                profile_id=profile_id,
+                created_at=datetime.utcnow(),
+            )
+        )
+        session.commit()
+
     return {"ok": True}
