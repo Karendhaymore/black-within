@@ -159,11 +159,11 @@ def _ensure_user(user_id: str) -> str:
 
     with Session(engine) as session:
         user = session.get(User, user_id)
-        if user:
-            return user_id
-        session.add(User(id=user_id))
-        session.commit()
-        return user_id
+        if not user:
+            session.add(User(id=user_id))
+            session.commit()
+
+    return user_id
 
 
 @app.get("/health")
