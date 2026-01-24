@@ -28,6 +28,28 @@ export type Notification = {
 // Notifications can stay local for now (not cross-device yet)
 const NOTIFS_KEY = "bw_notifications";
 
+const USER_ID_KEY = "bw_user_id";
+const EMAIL_KEY = "bw_email";
+
+export function setCurrentUser(userId: string, email?: string) {
+  localStorage.setItem(USER_ID_KEY, userId);
+  if (email) localStorage.setItem(EMAIL_KEY, email);
+}
+
+export function getCurrentUserId(): string | null {
+  return localStorage.getItem(USER_ID_KEY);
+}
+
+export function getCurrentEmail(): string | null {
+  return localStorage.getItem(EMAIL_KEY);
+}
+
+export function clearCurrentUser() {
+  localStorage.removeItem(USER_ID_KEY);
+  localStorage.removeItem(EMAIL_KEY);
+}
+
+
 function safeParse<T>(raw: string | null): T | null {
   if (!raw) return null;
   try {
