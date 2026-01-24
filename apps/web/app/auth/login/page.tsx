@@ -2,21 +2,20 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setCurrentUser } from "../../lib/storage";
+import { setCurrentUser } from "../lib/storage";
 
 type RequestCodeResponse = {
   ok: boolean;
-  devCode?: string; // preview mode only
+  devCode?: string;
 };
 
 type VerifyCodeResponse = {
   ok: boolean;
-  userId?: string; // what your API returns
-  user_id?: string; // tolerate snake_case just in case
+  userId?: string;
+  user_id?: string;
 };
 
 function getApiBaseUrl() {
-  // ✅ Use the SAME env var as storage.ts
   return (
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ||
     "https://black-within-api.onrender.com"
@@ -28,13 +27,11 @@ export default function LoginPage() {
   const API_BASE = useMemo(() => getApiBaseUrl(), []);
 
   const [step, setStep] = useState<"email" | "code">("email");
-
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [devCode, setDevCode] = useState<string | null>(null);
 
   async function requestCode(e: React.FormEvent) {
@@ -110,7 +107,7 @@ export default function LoginPage() {
         throw new Error("Invalid code. Please request a new one and try again.");
       }
 
-      // ✅ Store user for the rest of the app
+      // Store user for the rest of the app
       setCurrentUser(userId, cleanEmail);
 
       router.push("/discover");
