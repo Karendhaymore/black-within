@@ -157,13 +157,39 @@ def _ensure_user(user_id: str) -> str:
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
 
-    with Session(engine) as session:
-        user = session.get(User, user_id)
-        if user:
-            return user_id
-        session.add(User(id=user_id))
+   from sqlalchemy import select
+from datetime import datetime
+
+with Session(engine) as session:
+    # 1. Ensure user exists
+    user = session.get(User, user_id)
+    if not user:
+        user = User(id=user_id)
+        session.add(user)
         session.commit()
-        return user_id
+
+    # 2. Check if profile already saved (avoid duplicates)
+    existing = session.execute(
+        select(SavedProfile).where(
+            SavedProfile.user_id == user_id,
+            SavedProfile.profile_id == profile_id
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        return {"ok": True}
+
+    # 3. Save the profile
+    saved = SavedProfile(
+        user_id=user_id,
+        profile_id=profile_id,
+        created_at=datetime.utcnow()
+    )
+
+    session.add(saved)
+    session.commit()
+
+    return {"ok": True}
 
 
 @app.get("/health")
