@@ -15,8 +15,10 @@ from sqlalchemy import (
     UniqueConstraint,
     select,
     delete,
+    Integer,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+from sqlalchemy.exc import IntegrityError
 
 
 # -----------------------------
@@ -59,7 +61,8 @@ class User(Base):
 
 class SavedProfile(Base):
     __tablename__ = "saved_profiles"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    # IMPORTANT: DB has integer id. Let Postgres auto-generate it.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -69,7 +72,8 @@ class SavedProfile(Base):
 
 class Like(Base):
     __tablename__ = "likes"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    # IMPORTANT: DB has integer id. Let Postgres auto-generate it.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -92,6 +96,8 @@ class LoginCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+# NOTE:
+# Keeping this is OK; it will not alter your existing Postgres tables.
 Base.metadata.create_all(engine)
 
 
@@ -263,7 +269,7 @@ def save_profile(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        # If already saved, just return ok
+        # if already saved, return ok
         existing = session.execute(
             select(SavedProfile).where(
                 SavedProfile.user_id == user_id,
@@ -275,18 +281,20 @@ def save_profile(payload: ProfileAction):
             return {"ok": True}
 
         saved = SavedProfile(
-            id=_new_id(),
+            # IMPORTANT: DO NOT supply id; DB auto-generates integer id
             user_id=user_id,
             profile_id=profile_id,
             created_at=datetime.utcnow(),
         )
         session.add(saved)
 
-        # IMPORTANT: commit (and if it fails, FastAPI will show the real error in logs)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            return {"ok": True}
 
     return {"ok": True}
-
 
 
 @app.delete("/saved")
@@ -304,6 +312,7 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
             )
         )
         session.commit()
+
     return {"ok": True}
 
 
@@ -339,13 +348,17 @@ def like(payload: ProfileAction):
             return {"ok": True}
 
         row = Like(
-            id=_new_id(),
+            # IMPORTANT: DO NOT supply id; DB auto-generates integer id
             user_id=user_id,
             profile_id=profile_id,
             created_at=datetime.utcnow(),
         )
         session.add(row)
-        session.commit()
+
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            return {"ok": True}
 
     return {"ok": True}
-
