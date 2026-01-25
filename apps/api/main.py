@@ -263,6 +263,7 @@ def save_profile(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
+        # If already saved, just return ok
         existing = session.execute(
             select(SavedProfile).where(
                 SavedProfile.user_id == user_id,
@@ -273,17 +274,19 @@ def save_profile(payload: ProfileAction):
         if existing:
             return {"ok": True}
 
-        session.add(
-            SavedProfile(
-                id=_new_id(),
-                user_id=user_id,
-                profile_id=profile_id,
-                created_at=datetime.utcnow(),
-            )
+        saved = SavedProfile(
+            id=_new_id(),
+            user_id=user_id,
+            profile_id=profile_id,
+            created_at=datetime.utcnow(),
         )
+        session.add(saved)
+
+        # IMPORTANT: commit (and if it fails, FastAPI will show the real error in logs)
         session.commit()
 
     return {"ok": True}
+
 
 
 @app.delete("/saved")
@@ -335,14 +338,14 @@ def like(payload: ProfileAction):
         if existing:
             return {"ok": True}
 
-        session.add(
-            Like(
-                id=_new_id(),
-                user_id=user_id,
-                profile_id=profile_id,
-                created_at=datetime.utcnow(),
-            )
+        row = Like(
+            id=_new_id(),
+            user_id=user_id,
+            profile_id=profile_id,
+            created_at=datetime.utcnow(),
         )
+        session.add(row)
         session.commit()
 
     return {"ok": True}
+
