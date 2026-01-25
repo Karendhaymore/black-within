@@ -3,13 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEMO_PROFILES, type Profile } from "../lib/sampleProfiles";
 import { getOrCreateUserId } from "../lib/user";
-import {
-  getSavedIds,
-  saveProfileId,
-  removeSavedId,
-  getLikes,
-  likeProfile,
-} from "../lib/storage";
+
+// -----------------------------
+// API base
+// -----------------------------
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+  "https://black-within-api.onrender.com";
 
 // -----------------------------
 // Local notification helper (client-only)
@@ -33,12 +33,63 @@ function addNotificationLocal(message: string) {
   }
 }
 
+// -----------------------------
+// API helpers
+// -----------------------------
+async function apiGetSavedIds(userId: string): Promise<string[]> {
+  const res = await fetch(
+    `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`,
+    { method: "GET" }
+  );
+  if (!res.ok) throw new Error("Failed to load saved profiles.");
+  const json = await res.json();
+  return Array.isArray(json?.ids) ? json.ids : [];
+}
+
+async function apiGetLikes(userId: string): Promise<string[]> {
+  const res = await fetch(
+    `${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`,
+    { method: "GET" }
+  );
+  if (!res.ok) throw new Error("Failed to load likes.");
+  const json = await res.json();
+  return Array.isArray(json?.ids) ? json.ids : [];
+}
+
+async function apiSaveProfile(userId: string, profileId: string) {
+  const res = await fetch(`${API_BASE}/saved`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, profile_id: profileId }),
+  });
+  if (!res.ok) throw new Error("Save failed.");
+}
+
+async function apiUnsaveProfile(userId: string, profileId: string) {
+  const url = `${API_BASE}/saved?user_id=${encodeURIComponent(
+    userId
+  )}&profile_id=${encodeURIComponent(profileId)}`;
+
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) throw new Error("Unsave failed.");
+}
+
+async function apiLikeProfile(userId: string, profileId: string) {
+  const res = await fetch(`${API_BASE}/likes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, profile_id: profileId }),
+  });
+  if (!res.ok) throw new Error("Like failed.");
+}
+
 export default function DiscoverPage() {
   const [userId, setUserId] = useState<string>("");
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [loadingSets, setLoadingSets] = useState<boolean>(true);
 
   // Filters
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
@@ -98,27 +149,23 @@ export default function DiscoverPage() {
   async function refreshSavedAndLikes(uid: string) {
     try {
       setApiError(null);
+      setLoadingSets(true);
 
       const [saved, likes] = await Promise.all([
-        getSavedIds(uid),
-        getLikes(uid),
+        apiGetSavedIds(uid),
+        apiGetLikes(uid),
       ]);
 
-      // Ensure we only keep IDs that still exist in demo profiles
+      // Keep only IDs that still exist in demo profiles
       const savedStillValid = saved.filter((id) => availableProfileIds.has(id));
-      const removed = saved.filter((id) => !availableProfileIds.has(id));
+      const likesStillValid = likes.filter((id) => availableProfileIds.has(id));
 
       setSavedIds(savedStillValid);
-      setLikedIds(likes);
-
-      // Best-effort cleanup of invalid saved IDs
-      if (removed.length > 0) {
-        await Promise.allSettled(
-          removed.map((profileId) => removeSavedId(uid, profileId))
-        );
-      }
+      setLikedIds(likesStillValid);
     } catch (e: any) {
       setApiError(e?.message || "Could not refresh Saved/Likes from the API.");
+    } finally {
+      setLoadingSets(false);
     }
   }
 
@@ -132,56 +179,55 @@ export default function DiscoverPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableProfileIds]);
 
-  async function onSave(p: Profile) {
+  async function onToggleSave(p: Profile) {
+    if (!userId) return;
+
+    const currentlySaved = savedIds.includes(p.id);
+    const prev = savedIds;
+
+    // Optimistic UI update
+    setSavedIds((curr) =>
+      curr.includes(p.id) ? curr.filter((x) => x !== p.id) : [p.id, ...curr]
+    );
+
     try {
-      if (!userId) return;
+      if (currentlySaved) {
+        await apiUnsaveProfile(userId, p.id);
+        showToast("Removed from Saved Profiles.");
+      } else {
+        await apiSaveProfile(userId, p.id);
+        showToast("Saved. You can view it later in Saved Profiles.");
+      }
 
-      await saveProfileId(userId, p.id);
-
-      // Optimistic UI update (instant count change)
-      setSavedIds((prev) => (prev.includes(p.id) ? prev : [p.id, ...prev]));
-
-      // Then refresh from server to confirm
+      // Re-sync from server to confirm
       await refreshSavedAndLikes(userId);
-
-      showToast("Saved. You can view it later in Saved Profiles.");
     } catch (e: any) {
-      showToast("Could not save right now. Please try again.");
-      setApiError(e?.message || "Save failed.");
-    }
-  }
-
-  async function onUnsave(p: Profile) {
-    try {
-      if (!userId) return;
-
-      await removeSavedId(userId, p.id);
-
-      // Optimistic UI update
-      setSavedIds((prev) => prev.filter((id) => id !== p.id));
-
-      await refreshSavedAndLikes(userId);
-      showToast("Removed from Saved Profiles.");
-    } catch (e: any) {
-      showToast("Could not remove right now. Please try again.");
-      setApiError(e?.message || "Unsave failed.");
+      // Revert
+      setSavedIds(prev);
+      showToast("Could not update saved status right now. Please try again.");
+      setApiError(e?.message || "Save/Unsave failed.");
     }
   }
 
   async function onLike(p: Profile) {
+    if (!userId) return;
+    if (likedIds.includes(p.id)) return;
+
+    const prev = likedIds;
+
+    // Optimistic UI update
+    setLikedIds((curr) => (curr.includes(p.id) ? curr : [p.id, ...curr]));
+
     try {
-      if (!userId) return;
-
-      await likeProfile(userId, p.id);
-
-      // Optimistic UI update
-      setLikedIds((prev) => (prev.includes(p.id) ? prev : [p.id, ...prev]));
+      await apiLikeProfile(userId, p.id);
 
       await refreshSavedAndLikes(userId);
 
       addNotificationLocal("Someone liked your profile.");
       showToast("Like sent. They’ll be notified.");
     } catch (e: any) {
+      // Revert
+      setLikedIds(prev);
       showToast("Could not like right now. Please try again.");
       setApiError(e?.message || "Like failed.");
     }
@@ -495,41 +541,29 @@ export default function DiscoverPage() {
                       View
                     </a>
 
-                    {isSaved ? (
-                      <button
-                        onClick={() => onUnsave(p)}
-                        style={{
-                          padding: "0.6rem 0.9rem",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Unsave
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => onSave(p)}
-                        style={{
-                          padding: "0.6rem 0.9rem",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Save
-                      </button>
-                    )}
-
                     <button
-                      onClick={() => onLike(p)}
-                      disabled={isLiked}
+                      onClick={() => onToggleSave(p)}
+                      disabled={loadingSets}
                       style={{
                         padding: "0.6rem 0.9rem",
                         borderRadius: 10,
                         border: "1px solid #ccc",
-                        cursor: isLiked ? "not-allowed" : "pointer",
-                        opacity: isLiked ? 0.6 : 1,
+                        cursor: loadingSets ? "not-allowed" : "pointer",
+                        opacity: loadingSets ? 0.75 : 1,
+                      }}
+                    >
+                      {isSaved ? "Unsave" : "Save"}
+                    </button>
+
+                    <button
+                      onClick={() => onLike(p)}
+                      disabled={isLiked || loadingSets}
+                      style={{
+                        padding: "0.6rem 0.9rem",
+                        borderRadius: 10,
+                        border: "1px solid #ccc",
+                        cursor: isLiked || loadingSets ? "not-allowed" : "pointer",
+                        opacity: isLiked || loadingSets ? 0.6 : 1,
                       }}
                     >
                       {isLiked ? "Liked" : "Like"}
