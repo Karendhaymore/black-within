@@ -439,9 +439,13 @@ export default function DiscoverPage() {
               <div
                 key={p.id}
                 style={{
-                  border: "1px solid #e5e5e5",
+                  border: isSaved ? "1px solid #cfe7cf" : "1px solid #e5e5e5",
                   borderRadius: 14,
                   overflow: "hidden",
+                  background: "white",
+                  boxShadow: isSaved
+                    ? "0 0 0 2px rgba(207,231,207,0.35) inset"
+                    : "none",
                 }}
               >
                 <div
@@ -449,8 +453,30 @@ export default function DiscoverPage() {
                     width: "100%",
                     aspectRatio: "4 / 3",
                     background: "#f3f3f3",
+                    position: "relative",
                   }}
                 >
+                  {/* Saved badge (only when saved) */}
+                  {isSaved && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 10,
+                        right: 10,
+                        zIndex: 2,
+                        padding: "0.25rem 0.55rem",
+                        borderRadius: 999,
+                        border: "1px solid #cfe7cf",
+                        background: "rgba(246, 255, 246, 0.95)",
+                        color: "#256b36",
+                        fontSize: "0.8rem",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Saved
+                    </div>
+                  )}
+
                   {showFallback ? (
                     <div
                       style={{
@@ -547,9 +573,11 @@ export default function DiscoverPage() {
                       style={{
                         padding: "0.6rem 0.9rem",
                         borderRadius: 10,
-                        border: "1px solid #ccc",
+                        border: isSaved ? "1px solid #cfe7cf" : "1px solid #ccc",
+                        background: isSaved ? "#f6fff6" : "white",
                         cursor: loadingSets ? "not-allowed" : "pointer",
                         opacity: loadingSets ? 0.75 : 1,
+                        fontWeight: isSaved ? 600 : 500,
                       }}
                     >
                       {isSaved ? "Unsave" : "Save"}
