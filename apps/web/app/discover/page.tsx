@@ -12,28 +12,6 @@ const API_BASE =
   "https://black-within-api.onrender.com";
 
 // -----------------------------
-// Local notification helper (client-only)
-// -----------------------------
-function addNotificationLocal(message: string) {
-  try {
-    const key = "bw_notifications";
-    const existing = JSON.parse(localStorage.getItem(key) || "[]") as any[];
-    existing.unshift({
-      id:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : String(Date.now()),
-      type: "like",
-      message,
-      createdAt: new Date().toISOString(),
-    });
-    localStorage.setItem(key, JSON.stringify(existing.slice(0, 200)));
-  } catch {
-    // ignore
-  }
-}
-
-// -----------------------------
 // API helpers
 // -----------------------------
 async function apiGetSavedIds(userId: string): Promise<string[]> {
@@ -223,7 +201,7 @@ export default function DiscoverPage() {
 
       await refreshSavedAndLikes(userId);
 
-      addNotificationLocal("Someone liked your profile.");
+      // Notifications are now DB-backed (API creates them).
       showToast("Like sent. They’ll be notified.");
     } catch (e: any) {
       // Revert
