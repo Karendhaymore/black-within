@@ -19,7 +19,8 @@ type FormState = {
 };
 
 async function apiUpsertProfile(payload: any) {
-  const res = await fetch(`${API_BASE}/profiles`, {
+  // ✅ FIX: endpoint must match API
+  const res = await fetch(`${API_BASE}/profiles/upsert`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -84,16 +85,18 @@ export default function MyProfilePage() {
     setApiError(null);
 
     try {
+      // ✅ FIX: payload keys must match API schema
       await apiUpsertProfile({
         owner_user_id: userId,
-        display_name: form.display_name.trim(),
+        displayName: form.display_name.trim(),
         age: ageNum,
         city: form.city.trim(),
-        state_us: form.state_us.trim(),
+        stateUS: form.state_us.trim(),
         photo: form.photo.trim() || null,
-        identity_preview: form.identity_preview.trim(),
+        identityPreview: form.identity_preview.trim(),
         intention: form.intention.trim(),
         tags: tagsList,
+        isAvailable: true,
       });
 
       showToast("Profile saved. You are now a real profile in the database.");
