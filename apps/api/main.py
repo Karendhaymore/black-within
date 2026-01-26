@@ -23,18 +23,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
 
-# SendGrid (official SDK)
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
-
-
 # -----------------------------
-# SendGrid config
+# Optional SendGrid (only used if configured)
 # -----------------------------
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
-SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "")
-SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within")
-
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
+SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "").strip()
+SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
 
 # -----------------------------
 # Config
@@ -61,7 +55,6 @@ AUTH_USERID_PEPPER = os.getenv("AUTH_USERID_PEPPER", "")
 NOTIFICATIONS_LIMIT = int(os.getenv("NOTIFICATIONS_LIMIT", "200"))
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
-
 
 # -----------------------------
 # Database models
@@ -134,14 +127,9 @@ class LoginCode(Base):
 
 Base.metadata.create_all(engine)
 
-
 # -----------------------------
 # Schemas
 # -----------------------------
-class MeResponse(BaseModel):
-    user_id: str
-
-
 class ProfileAction(BaseModel):
     user_id: str
     profile_id: str
@@ -192,15 +180,15 @@ class ProfilesResponse(BaseModel):
 
 class UpsertMyProfilePayload(BaseModel):
     owner_user_id: str
-    displayName: str
+    display_name: str
     age: int
     city: str
-    stateUS: str
+    state_us: str
     photo: Optional[str] = None
-    identityPreview: str
+    identity_preview: str
     intention: str
     tags: List[str] = []
-    isAvailable: bool = True
+    is_available: bool = True
 
 
 # -----------------------------
@@ -251,33 +239,44 @@ def _ensure_user(user_id: str) -> str:
 
 def _send_email_sendgrid(to_email: str, subject: str, html: str) -> None:
     """
-    Live email sender.
-    - In preview mode, you can leave SendGrid unconfigured.
-    - In live mode, missing SendGrid config should raise, so you notice immediately.
+    Sends via SendGrid if configured.
+    Logs errors to stdout (Render logs).
     """
-    if not SENDGRID_API_KEY or not SENDGRID_FROM_EMAIL:
-        raise HTTPException(
-            status_code=500,
-            detail="Email is not configured (missing SENDGRID_API_KEY or SENDGRID_FROM_EMAIL).",
-        )
-
-    msg = Mail(
-        from_email=(SENDGRID_FROM_EMAIL, SENDGRID_FROM_NAME),
-        to_emails=to_email,
-        subject=subject,
-        html_content=html,
-    )
+    if not (SENDGRID_API_KEY and SENDGRID_FROM_EMAIL):
+        print("SendGrid not configured: missing SENDGRID_API_KEY or SENDGRID_FROM_EMAIL")
+        return
 
     try:
-        sg = SendGridAPIClient(SENDGRID_API_KEY)
-        sg.send(msg)
+        import requests  # ensure 'requests' is in requirements.txt
+
+        payload = {
+            "personalizations": [{"to": [{"email": to_email}]}],
+            "from": {"email": SENDGRID_FROM_EMAIL, "name": SENDGRID_FROM_NAME},
+            "subject": subject,
+            "content": [{"type": "text/html", "value": html}],
+        }
+
+        r = requests.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            headers={
+                "Authorization": f"Bearer {SENDGRID_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(payload),
+            timeout=15,
+        )
+
+        if r.status_code >= 400:
+            print("SendGrid error:", r.status_code, r.text)
+        else:
+            print("SendGrid: email sent to", to_email)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"SendGrid send failed: {str(e)}")
+        print("SendGrid exception:", str(e))
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "previewMode": AUTH_PREVIEW_MODE}
 
 
 # -----------------------------
@@ -292,7 +291,9 @@ def request_code(payload: RequestCodePayload):
     now = datetime.utcnow()
 
     with Session(engine) as session:
-        existing = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
+        existing = session.execute(
+            select(LoginCode).where(LoginCode.email == email)
+        ).scalar_one_or_none()
 
         if existing:
             existing.code = code
@@ -310,24 +311,22 @@ def request_code(payload: RequestCodePayload):
             )
         session.commit()
 
-    # LIVE MODE: send email
+    # Live mode: email
     if not AUTH_PREVIEW_MODE:
         _send_email_sendgrid(
             to_email=email,
             subject="Your Black Within verification code",
             html=f"""
               <div style="font-family:Arial,sans-serif;font-size:16px;color:#111">
-                <h2 style="margin:0 0 10px 0">Black Within</h2>
                 <p>Your verification code is:</p>
                 <p style="font-size:28px;font-weight:700;letter-spacing:2px">{code}</p>
                 <p>This code expires in {AUTH_CODE_TTL_MINUTES} minutes.</p>
-                <p style="color:#666;font-size:13px">If you didn’t request this, you can ignore this email.</p>
               </div>
             """,
         )
         return {"ok": True}
 
-    # PREVIEW MODE: returns devCode for testing
+    # Preview mode: return devCode (great for testing)
     return {"ok": True, "devCode": code}
 
 
@@ -340,7 +339,9 @@ def verify_code(payload: VerifyCodePayload):
         raise HTTPException(status_code=400, detail="A 6-digit code is required")
 
     with Session(engine) as session:
-        row = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
+        row = session.execute(
+            select(LoginCode).where(LoginCode.email == email)
+        ).scalar_one_or_none()
 
         if not row:
             raise HTTPException(status_code=401, detail="Invalid or expired code")
@@ -370,7 +371,12 @@ def list_profiles(
     limit: int = Query(default=50, ge=1, le=200),
 ):
     with Session(engine) as session:
-        q = select(Profile).where(Profile.is_available == True).order_by(Profile.updated_at.desc()).limit(limit)
+        q = (
+            select(Profile)
+            .where(Profile.is_available == True)
+            .order_by(Profile.updated_at.desc())
+            .limit(limit)
+        )
         if exclude_owner_user_id:
             q = q.where(Profile.owner_user_id != exclude_owner_user_id)
 
@@ -404,26 +410,27 @@ def list_profiles(
         return ProfilesResponse(items=items)
 
 
-@app.post("/profiles/upsert", response_model=ProfileItem)
-def upsert_my_profile(payload: UpsertMyProfilePayload):
+def _upsert_profile(payload: UpsertMyProfilePayload) -> ProfileItem:
     owner_user_id = _ensure_user(payload.owner_user_id)
-
     now = datetime.utcnow()
-    with Session(engine) as session:
-        existing = session.execute(select(Profile).where(Profile.owner_user_id == owner_user_id)).scalar_one_or_none()
 
-        tags_json = json.dumps(payload.tags[:25])
+    with Session(engine) as session:
+        existing = session.execute(
+            select(Profile).where(Profile.owner_user_id == owner_user_id)
+        ).scalar_one_or_none()
+
+        tags_json = json.dumps((payload.tags or [])[:25])
 
         if existing:
-            existing.display_name = payload.displayName.strip()
+            existing.display_name = payload.display_name.strip()
             existing.age = int(payload.age)
             existing.city = payload.city.strip()
-            existing.state_us = payload.stateUS.strip()
+            existing.state_us = payload.state_us.strip()
             existing.photo = (payload.photo or "").strip() or None
-            existing.identity_preview = payload.identityPreview.strip()
+            existing.identity_preview = payload.identity_preview.strip()
             existing.intention = payload.intention.strip()
             existing.tags_json = tags_json
-            existing.is_available = bool(payload.isAvailable)
+            existing.is_available = bool(payload.is_available)
             existing.updated_at = now
             session.commit()
             pid = existing.id
@@ -433,15 +440,15 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
                 Profile(
                     id=pid,
                     owner_user_id=owner_user_id,
-                    display_name=payload.displayName.strip(),
+                    display_name=payload.display_name.strip(),
                     age=int(payload.age),
                     city=payload.city.strip(),
-                    state_us=payload.stateUS.strip(),
+                    state_us=payload.state_us.strip(),
                     photo=(payload.photo or "").strip() or None,
-                    identity_preview=payload.identityPreview.strip(),
+                    identity_preview=payload.identity_preview.strip(),
                     intention=payload.intention.strip(),
                     tags_json=tags_json,
-                    is_available=bool(payload.isAvailable),
+                    is_available=bool(payload.is_available),
                     created_at=now,
                     updated_at=now,
                 )
@@ -465,6 +472,18 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
         )
 
 
+# Back-compat: your frontend currently POSTs to /profiles
+@app.post("/profiles", response_model=ProfileItem)
+def upsert_my_profile(payload: UpsertMyProfilePayload):
+    return _upsert_profile(payload)
+
+
+# Optional explicit route too (either works)
+@app.post("/profiles/upsert", response_model=ProfileItem)
+def upsert_my_profile_alias(payload: UpsertMyProfilePayload):
+    return _upsert_profile(payload)
+
+
 # -----------------------------
 # Saved profiles
 # -----------------------------
@@ -472,7 +491,9 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
 def get_saved(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
-        rows = session.execute(select(SavedProfile.profile_id).where(SavedProfile.user_id == user_id)).all()
+        rows = session.execute(
+            select(SavedProfile.profile_id).where(SavedProfile.user_id == user_id)
+        ).all()
         return IdListResponse(ids=[r[0] for r in rows])
 
 
@@ -485,17 +506,24 @@ def save_profile(payload: ProfileAction):
 
     with Session(engine) as session:
         existing = session.execute(
-            select(SavedProfile).where(SavedProfile.user_id == user_id, SavedProfile.profile_id == profile_id)
+            select(SavedProfile).where(
+                SavedProfile.user_id == user_id,
+                SavedProfile.profile_id == profile_id,
+            )
         ).scalar_one_or_none()
+
         if existing:
             return {"ok": True}
 
-        session.add(SavedProfile(user_id=user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+        session.add(
+            SavedProfile(user_id=user_id, profile_id=profile_id, created_at=datetime.utcnow())
+        )
         try:
             session.commit()
         except IntegrityError:
             session.rollback()
             return {"ok": True}
+
     return {"ok": True}
 
 
@@ -507,13 +535,19 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        session.execute(delete(SavedProfile).where(SavedProfile.user_id == user_id, SavedProfile.profile_id == profile_id))
+        session.execute(
+            delete(SavedProfile).where(
+                SavedProfile.user_id == user_id,
+                SavedProfile.profile_id == profile_id,
+            )
+        )
         session.commit()
+
     return {"ok": True}
 
 
 # -----------------------------
-# Notifications
+# Notifications (DB-backed)
 # -----------------------------
 @app.get("/notifications", response_model=NotificationsResponse)
 def get_notifications(user_id: str = Query(...)):
@@ -555,7 +589,9 @@ def clear_notifications(user_id: str = Query(...)):
 def get_likes(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
-        rows = session.execute(select(Like.profile_id).where(Like.user_id == user_id)).all()
+        rows = session.execute(
+            select(Like.profile_id).where(Like.user_id == user_id)
+        ).all()
         return IdListResponse(ids=[r[0] for r in rows])
 
 
@@ -579,6 +615,7 @@ def like(payload: ProfileAction):
 
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
 
+        # Notify recipient (profile owner)
         recipient_user_id = prof.owner_user_id
         if recipient_user_id and recipient_user_id != liker_user_id:
             session.add(
