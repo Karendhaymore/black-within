@@ -151,8 +151,7 @@ export default function DiscoverPage() {
     }
   }
 
-  // ✅ CHANGED: useEffect now loads profiles via GET /profiles first,
-  // then refreshes saved/likes.
+  // ✅ CHANGED: load profiles via GET /profiles first, then refresh saved/likes.
   useEffect(() => {
     const uid = getOrCreateUserId();
     setUserId(uid);
@@ -169,8 +168,7 @@ export default function DiscoverPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ NEW: when availableProfileIds changes (after profiles load), re-filter
-  // saved/likes to match available ids.
+  // ✅ When availableProfileIds changes (after profiles load), re-filter saved/likes.
   useEffect(() => {
     if (!userId) return;
     refreshSavedAndLikes(userId);
@@ -234,6 +232,21 @@ export default function DiscoverPage() {
       }}
     >
       <div style={{ width: "100%", maxWidth: 1100 }}>
+        {/* ✅ ADD THIS in your top-right buttons area */}
+        {/* Paste this <a> next to your other top-right buttons/links */}
+        <a
+          href="/profile"
+          style={{
+            padding: "0.65rem 1rem",
+            border: "1px solid #ccc",
+            borderRadius: 10,
+            textDecoration: "none",
+            color: "inherit",
+          }}
+        >
+          My Profile
+        </a>
+
         {/* (rest of your UI stays exactly the same) */}
         {/* Only: DEMO_PROFILES removed, profiles loaded from GET /profiles */}
         {/* Keep your existing JSX below */}
