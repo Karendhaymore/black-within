@@ -16,9 +16,11 @@ const API_BASE =
 type ApiNotification = {
   id: string;
   user_id: string;
-  type: string; // "like" | "system" | etc
+  type: string;
   message: string;
-  created_at: string; // ISO
+  created_at: string;
+  actor_user_id?: string | null;
+  profile_id?: string | null;
 };
 
 // -----------------------------
@@ -49,22 +51,26 @@ export default function NotificationsPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [clearing, setClearing] = useState<boolean>(false);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
 
   function showToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2200);
   }
 
-  async function refresh(uid: string) {
+  async function refresh(uid: string, opts?: { quiet?: boolean }) {
     try {
       setApiError(null);
-      setLoading(true);
+      if (!opts?.quiet) setLoading(true);
+      else setRefreshing(true);
+
       const rows = await apiGetNotifications(uid);
       setItems(rows);
     } catch (e: any) {
       setApiError(e?.message || "Could not load notifications from the API.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
@@ -89,7 +95,7 @@ export default function NotificationsPage() {
     try {
       await apiClearNotifications(userId);
       showToast("Cleared notifications.");
-      await refresh(userId);
+      await refresh(userId, { quiet: true });
     } catch (e: any) {
       // Revert
       setItems(prev);
@@ -136,11 +142,28 @@ export default function NotificationsPage() {
                 color: "#555",
               }}
             >
-              You’re viewing preview notifications while Black Within opens intentionally.
+              You’re viewing preview notifications while Black Within opens
+              intentionally.
             </div>
           </div>
 
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+            <button
+              onClick={() => refresh(userId, { quiet: true })}
+              disabled={loading || refreshing || !userId}
+              style={{
+                padding: "0.65rem 1rem",
+                border: "1px solid #ccc",
+                borderRadius: 10,
+                background: "white",
+                cursor: loading || refreshing || !userId ? "not-allowed" : "pointer",
+                opacity: loading || refreshing || !userId ? 0.6 : 1,
+                height: "fit-content",
+              }}
+            >
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+
             <button
               onClick={onClearAll}
               disabled={loading || clearing || items.length === 0}
@@ -266,16 +289,29 @@ export default function NotificationsPage() {
                   </span>
                 </div>
 
-                <div style={{ color: "#777", fontSize: "0.9rem", marginTop: "0.35rem" }}>
+                <div
+                  style={{
+                    color: "#777",
+                    fontSize: "0.9rem",
+                    marginTop: "0.35rem",
+                  }}
+                >
                   {new Date(n.created_at).toLocaleString()}
                 </div>
+
+                {(n.actor_user_id || n.profile_id) && (
+                  <div style={{ marginTop: "0.4rem", color: "#888", fontSize: "0.85rem" }}>
+                    {n.actor_user_id ? <>actor: {n.actor_user_id} </> : null}
+                    {n.profile_id ? <>• profile: {n.profile_id}</> : null}
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
 
         <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
-          MVP note: This page expects notifications to be stored in the database.
+          MVP note: Notifications are now stored in the database (cross-device).
         </div>
       </div>
     </main>
