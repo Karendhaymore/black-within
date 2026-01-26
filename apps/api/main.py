@@ -3,7 +3,7 @@ import re
 import secrets
 import hashlib
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,6 +43,9 @@ AUTH_CODE_TTL_MINUTES = int(os.getenv("AUTH_CODE_TTL_MINUTES", "15"))
 AUTH_PREVIEW_MODE = os.getenv("AUTH_PREVIEW_MODE", "true").lower() in ("1", "true", "yes")
 AUTH_USERID_PEPPER = os.getenv("AUTH_USERID_PEPPER", "")
 
+# Simple paging defaults for notifications
+NOTIFICATIONS_LIMIT = int(os.getenv("NOTIFICATIONS_LIMIT", "200"))
+
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
 
@@ -81,6 +84,16 @@ class Like(Base):
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
 
 
+class Notification(Base):
+    __tablename__ = "notifications"
+    # Integer id (auto) keeps it consistent with your other tables
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    type: Mapped[str] = mapped_column(String(20), default="like")
+    message: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 class LoginCode(Base):
     """
     Your DB requires:
@@ -97,7 +110,7 @@ class LoginCode(Base):
 
 
 # NOTE:
-# Keeping this is OK; it will not alter your existing Postgres tables.
+# create_all is safe here; it will CREATE missing tables but won't drop/alter existing ones.
 Base.metadata.create_all(engine)
 
 
@@ -124,6 +137,18 @@ class RequestCodePayload(BaseModel):
 class VerifyCodePayload(BaseModel):
     email: str
     code: str
+
+
+class NotificationItem(BaseModel):
+    id: str
+    user_id: str
+    type: str
+    message: str
+    created_at: str
+
+
+class NotificationsResponse(BaseModel):
+    items: List[NotificationItem]
 
 
 # -----------------------------
@@ -269,7 +294,6 @@ def save_profile(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        # if already saved, return ok
         existing = session.execute(
             select(SavedProfile).where(
                 SavedProfile.user_id == user_id,
@@ -281,7 +305,6 @@ def save_profile(payload: ProfileAction):
             return {"ok": True}
 
         saved = SavedProfile(
-            # IMPORTANT: DO NOT supply id; DB auto-generates integer id
             user_id=user_id,
             profile_id=profile_id,
             created_at=datetime.utcnow(),
@@ -317,6 +340,44 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
 
 
 # -----------------------------
+# Notifications (DB-backed)
+# -----------------------------
+@app.get("/notifications", response_model=NotificationsResponse)
+def get_notifications(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+
+    with Session(engine) as session:
+        rows = session.execute(
+            select(Notification)
+            .where(Notification.user_id == user_id)
+            .order_by(Notification.created_at.desc())
+            .limit(NOTIFICATIONS_LIMIT)
+        ).scalars().all()
+
+        items = [
+            NotificationItem(
+                id=str(n.id),
+                user_id=n.user_id,
+                type=n.type or "notice",
+                message=n.message,
+                created_at=n.created_at.isoformat(),
+            )
+            for n in rows
+        ]
+
+        return NotificationsResponse(items=items)
+
+
+@app.delete("/notifications")
+def clear_notifications(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+    with Session(engine) as session:
+        session.execute(delete(Notification).where(Notification.user_id == user_id))
+        session.commit()
+    return {"ok": True}
+
+
+# -----------------------------
 # Likes
 # -----------------------------
 @app.get("/likes", response_model=IdListResponse)
@@ -348,12 +409,24 @@ def like(payload: ProfileAction):
             return {"ok": True}
 
         row = Like(
-            # IMPORTANT: DO NOT supply id; DB auto-generates integer id
             user_id=user_id,
             profile_id=profile_id,
             created_at=datetime.utcnow(),
         )
         session.add(row)
+
+        # Create a DB-backed notification (customer-ready, cross-device)
+        # MVP NOTE: we do not yet know the recipient user_id for demo profiles,
+        # so we store this for the acting user. When real users exist,
+        # we will notify the recipient instead.
+        session.add(
+            Notification(
+                user_id=user_id,
+                type="like",
+                message="Like sent. They’ll be notified.",
+                created_at=datetime.utcnow(),
+            )
+        )
 
         try:
             session.commit()
