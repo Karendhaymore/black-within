@@ -23,7 +23,14 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
 
-# Optional SendGrid (only used if configured)
+# SendGrid (official SDK)
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
+
+
+# -----------------------------
+# SendGrid config
+# -----------------------------
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "")
 SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within")
@@ -71,7 +78,6 @@ class User(Base):
 
 class Profile(Base):
     __tablename__ = "profiles"
-    # Use UUID-like string for portability
     id: Mapped[str] = mapped_column(String(60), primary_key=True)
     owner_user_id: Mapped[str] = mapped_column(String(40), index=True)
     display_name: Mapped[str] = mapped_column(String(80))
@@ -81,7 +87,7 @@ class Profile(Base):
     photo: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     identity_preview: Mapped[str] = mapped_column(String(500))
     intention: Mapped[str] = mapped_column(String(120))
-    tags_json: Mapped[str] = mapped_column(Text, default="[]")  # JSON list stored as text
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
@@ -245,30 +251,28 @@ def _ensure_user(user_id: str) -> str:
 
 def _send_email_sendgrid(to_email: str, subject: str, html: str) -> None:
     """
-    Safe: if SENDGRID not configured, do nothing.
+    Live email sender.
+    - In preview mode, you can leave SendGrid unconfigured.
+    - In live mode, missing SendGrid config should raise, so you notice immediately.
     """
-    if not (SENDGRID_API_KEY and SENDGRID_FROM_EMAIL):
-        return
+    if not SENDGRID_API_KEY or not SENDGRID_FROM_EMAIL:
+        raise HTTPException(
+            status_code=500,
+            detail="Email is not configured (missing SENDGRID_API_KEY or SENDGRID_FROM_EMAIL).",
+        )
+
+    msg = Mail(
+        from_email=(SENDGRID_FROM_EMAIL, SENDGRID_FROM_NAME),
+        to_emails=to_email,
+        subject=subject,
+        html_content=html,
+    )
 
     try:
-        import requests
-        payload = {
-            "personalizations": [{"to": [{"email": to_email}]}],
-            "from": {"email": SENDGRID_FROM_EMAIL, "name": SENDGRID_FROM_NAME},
-            "subject": subject,
-            "content": [{"type": "text/html", "value": html}],
-        }
-        r = requests.post(
-            "https://api.sendgrid.com/v3/mail/send",
-            headers={"Authorization": f"Bearer {SENDGRID_API_KEY}", "Content-Type": "application/json"},
-            data=json.dumps(payload),
-            timeout=15,
-        )
-        # If SendGrid rejects, we still don't break login; but you can check logs.
-        if r.status_code >= 400:
-            print("SendGrid error:", r.status_code, r.text)
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        sg.send(msg)
     except Exception as e:
-        print("SendGrid exception:", str(e))
+        raise HTTPException(status_code=502, detail=f"SendGrid send failed: {str(e)}")
 
 
 @app.get("/health")
@@ -306,16 +310,18 @@ def request_code(payload: RequestCodePayload):
             )
         session.commit()
 
-    # LIVE MODE: send email (if configured)
+    # LIVE MODE: send email
     if not AUTH_PREVIEW_MODE:
         _send_email_sendgrid(
             to_email=email,
             subject="Your Black Within verification code",
             html=f"""
               <div style="font-family:Arial,sans-serif;font-size:16px;color:#111">
+                <h2 style="margin:0 0 10px 0">Black Within</h2>
                 <p>Your verification code is:</p>
                 <p style="font-size:28px;font-weight:700;letter-spacing:2px">{code}</p>
                 <p>This code expires in {AUTH_CODE_TTL_MINUTES} minutes.</p>
+                <p style="color:#666;font-size:13px">If you didn’t request this, you can ignore this email.</p>
               </div>
             """,
         )
@@ -404,7 +410,6 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
 
     now = datetime.utcnow()
     with Session(engine) as session:
-        # One active profile per owner (simple MVP rule for live launch)
         existing = session.execute(select(Profile).where(Profile.owner_user_id == owner_user_id)).scalar_one_or_none()
 
         tags_json = json.dumps(payload.tags[:25])
@@ -443,7 +448,6 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             )
             session.commit()
 
-        # Return fresh
         p = session.get(Profile, pid)
         tags = json.loads(p.tags_json or "[]")
         return ProfileItem(
@@ -509,7 +513,7 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
 
 
 # -----------------------------
-# Notifications (DB-backed)
+# Notifications
 # -----------------------------
 @app.get("/notifications", response_model=NotificationsResponse)
 def get_notifications(user_id: str = Query(...)):
@@ -563,12 +567,10 @@ def like(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        # Ensure profile exists
         prof = session.get(Profile, profile_id)
         if not prof:
             raise HTTPException(status_code=404, detail="Profile not found")
 
-        # Upsert like
         existing = session.execute(
             select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
         ).scalar_one_or_none()
@@ -577,7 +579,6 @@ def like(payload: ProfileAction):
 
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
 
-        # Notify RECIPIENT (profile owner), not the liker
         recipient_user_id = prof.owner_user_id
         if recipient_user_id and recipient_user_id != liker_user_id:
             session.add(
