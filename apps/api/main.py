@@ -36,8 +36,12 @@ if DATABASE_URL.startswith("postgres://"):
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://black-within.onrender.com")
+# CORS
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://black-within.onrender.com,http://localhost:3000")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
+
+# Optional regex to allow Render preview domains
+CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", "")  # e.g. https://.*\.onrender\.com
 
 AUTH_CODE_TTL_MINUTES = int(os.getenv("AUTH_CODE_TTL_MINUTES", "15"))
 AUTH_PREVIEW_MODE = os.getenv("AUTH_PREVIEW_MODE", "true").lower() in ("1", "true", "yes")
@@ -75,8 +79,8 @@ class SavedProfile(Base):
 class Like(Base):
     __tablename__ = "likes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)     # actor
-    profile_id: Mapped[str] = mapped_column(String(50), index=True)  # target profile id
+    user_id: Mapped[str] = mapped_column(String(40), index=True)      # actor
+    profile_id: Mapped[str] = mapped_column(String(50), index=True)   # liked profile id
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
@@ -85,37 +89,13 @@ class Like(Base):
 class Notification(Base):
     __tablename__ = "notifications"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    # recipient
-    user_id: Mapped[str] = mapped_column(String(40), index=True)
-
-    # optional metadata to support “who did what”
-    actor_user_id: Mapped[Optional[str]] = mapped_column(String(40), index=True, nullable=True)
-    profile_id: Mapped[Optional[str]] = mapped_column(String(50), index=True, nullable=True)
-
+    user_id: Mapped[str] = mapped_column(String(40), index=True)  # recipient user id
     type: Mapped[str] = mapped_column(String(20), default="like")
     message: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
-    # prevent duplicate notifications for the same like event
-    __table_args__ = (
-        UniqueConstraint(
-            "user_id",
-            "actor_user_id",
-            "profile_id",
-            "type",
-            name="uq_notification_dedupe",
-        ),
-    )
-
 
 class LoginCode(Base):
-    """
-    Your DB requires:
-      - id NOT NULL
-      - created_at NOT NULL
-    So we generate id and set created_at ourselves.
-    """
     __tablename__ = "login_codes"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     email: Mapped[str] = mapped_column(String(320), index=True, unique=True)
@@ -124,21 +104,17 @@ class LoginCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-# NOTE:
-# create_all is safe here; it will CREATE missing tables but won't drop/alter existing ones.
 Base.metadata.create_all(engine)
 
 
 # -----------------------------
 # Schemas
 # -----------------------------
-class MeResponse(BaseModel):
-    user_id: str
-
-
 class ProfileAction(BaseModel):
     user_id: str
     profile_id: str
+    # NEW: recipient user id (the person being liked)
+    recipient_user_id: Optional[str] = None
 
 
 class IdListResponse(BaseModel):
@@ -160,8 +136,6 @@ class NotificationItem(BaseModel):
     type: str
     message: str
     created_at: str
-    actor_user_id: Optional[str] = None
-    profile_id: Optional[str] = None
 
 
 class NotificationsResponse(BaseModel):
@@ -173,13 +147,16 @@ class NotificationsResponse(BaseModel):
 # -----------------------------
 app = FastAPI(title="Black Within API", version="0.1.0")
 
-app.add_middleware(
-    CORSMiddleware,
+cors_kwargs = dict(
     allow_origins=origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+if CORS_ORIGIN_REGEX.strip():
+    cors_kwargs["allow_origin_regex"] = CORS_ORIGIN_REGEX.strip()
+
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -192,20 +169,8 @@ def _normalize_email(email: str) -> str:
 
 
 def _make_user_id_from_email(email: str) -> str:
+    raw = f"{AUTH_USERID_PEPPER}:{emailn"
     raw = f"{AUTH_USERID_PEPPER}:{email}".encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()[:40]
-
-
-def _make_user_id_from_profile_id(profile_id: str) -> str:
-    """
-    PREVIEW / MVP:
-    Demo profiles don't have real accounts yet.
-    We derive a stable "recipient user id" from profile_id so notifications
-    are stored in the database in a recipient-like way.
-    When you move to real users, replace this with:
-      recipient_user_id = <actual owner user id from DB>
-    """
-    raw = f"{AUTH_USERID_PEPPER}:profile:{(profile_id or '').strip()}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:40]
 
 
@@ -334,12 +299,13 @@ def save_profile(payload: ProfileAction):
         if existing:
             return {"ok": True}
 
-        saved = SavedProfile(
-            user_id=user_id,
-            profile_id=profile_id,
-            created_at=datetime.utcnow(),
+        session.add(
+            SavedProfile(
+                user_id=user_id,
+                profile_id=profile_id,
+                created_at=datetime.utcnow(),
+            )
         )
-        session.add(saved)
 
         try:
             session.commit()
@@ -391,12 +357,9 @@ def get_notifications(user_id: str = Query(...)):
                 type=n.type or "notice",
                 message=n.message,
                 created_at=n.created_at.isoformat(),
-                actor_user_id=n.actor_user_id,
-                profile_id=n.profile_id,
             )
             for n in rows
         ]
-
         return NotificationsResponse(items=items)
 
 
@@ -426,12 +389,10 @@ def get_likes(user_id: str = Query(...)):
 def like(payload: ProfileAction):
     actor_user_id = _ensure_user(payload.user_id)
     profile_id = (payload.profile_id or "").strip()
+    recipient_user_id = (payload.recipient_user_id or "").strip() if payload.recipient_user_id else None
+
     if not profile_id:
         raise HTTPException(status_code=400, detail="profile_id is required")
-
-    # PREVIEW / MVP recipient mapping:
-    recipient_user_id = _make_user_id_from_profile_id(profile_id)
-    _ensure_user(recipient_user_id)
 
     with Session(engine) as session:
         existing = session.execute(
@@ -442,39 +403,28 @@ def like(payload: ProfileAction):
         ).scalar_one_or_none()
 
         if existing:
-            # Like already exists; do not create duplicate notifications
             return {"ok": True}
 
-        row = Like(
-            user_id=actor_user_id,
-            profile_id=profile_id,
-            created_at=datetime.utcnow(),
-        )
-        session.add(row)
-
-        # 1) Recipient gets the real notification
         session.add(
-            Notification(
-                user_id=recipient_user_id,
-                actor_user_id=actor_user_id,
-                profile_id=profile_id,
-                type="like",
-                message="Someone liked your profile.",
-                created_at=datetime.utcnow(),
-            )
-        )
-
-        # 2) Actor also gets a “sent” copy (helps you test/see activity now)
-        session.add(
-            Notification(
+            Like(
                 user_id=actor_user_id,
-                actor_user_id=actor_user_id,
                 profile_id=profile_id,
-                type="like",
-                message=f"You liked {profile_id}.",
                 created_at=datetime.utcnow(),
             )
         )
+
+        # Customer-ready: notification belongs to RECIPIENT (the profile owner)
+        # If recipient_user_id is not provided (preview/demo), we do NOT mis-assign it.
+        if recipient_user_id:
+            _ensure_user(recipient_user_id)
+            session.add(
+                Notification(
+                    user_id=recipient_user_id,
+                    type="like",
+                    message="Someone liked your profile.",
+                    created_at=datetime.utcnow(),
+                )
+            )
 
         try:
             session.commit()
