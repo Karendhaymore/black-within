@@ -64,7 +64,6 @@ class User(Base):
 
 class SavedProfile(Base):
     __tablename__ = "saved_profiles"
-    # IMPORTANT: DB has integer id. Let Postgres auto-generate it.
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(50), index=True)
@@ -75,10 +74,9 @@ class SavedProfile(Base):
 
 class Like(Base):
     __tablename__ = "likes"
-    # IMPORTANT: DB has integer id. Let Postgres auto-generate it.
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)
-    profile_id: Mapped[str] = mapped_column(String(50), index=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)     # actor
+    profile_id: Mapped[str] = mapped_column(String(50), index=True)  # target profile id
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
@@ -86,12 +84,29 @@ class Like(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
-    # Integer id (auto) keeps it consistent with your other tables
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # recipient
     user_id: Mapped[str] = mapped_column(String(40), index=True)
+
+    # optional metadata to support “who did what”
+    actor_user_id: Mapped[Optional[str]] = mapped_column(String(40), index=True, nullable=True)
+    profile_id: Mapped[Optional[str]] = mapped_column(String(50), index=True, nullable=True)
+
     type: Mapped[str] = mapped_column(String(20), default="like")
     message: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    # prevent duplicate notifications for the same like event
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "actor_user_id",
+            "profile_id",
+            "type",
+            name="uq_notification_dedupe",
+        ),
+    )
 
 
 class LoginCode(Base):
@@ -145,6 +160,8 @@ class NotificationItem(BaseModel):
     type: str
     message: str
     created_at: str
+    actor_user_id: Optional[str] = None
+    profile_id: Optional[str] = None
 
 
 class NotificationsResponse(BaseModel):
@@ -176,6 +193,19 @@ def _normalize_email(email: str) -> str:
 
 def _make_user_id_from_email(email: str) -> str:
     raw = f"{AUTH_USERID_PEPPER}:{email}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:40]
+
+
+def _make_user_id_from_profile_id(profile_id: str) -> str:
+    """
+    PREVIEW / MVP:
+    Demo profiles don't have real accounts yet.
+    We derive a stable "recipient user id" from profile_id so notifications
+    are stored in the database in a recipient-like way.
+    When you move to real users, replace this with:
+      recipient_user_id = <actual owner user id from DB>
+    """
+    raw = f"{AUTH_USERID_PEPPER}:profile:{(profile_id or '').strip()}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:40]
 
 
@@ -361,6 +391,8 @@ def get_notifications(user_id: str = Query(...)):
                 type=n.type or "notice",
                 message=n.message,
                 created_at=n.created_at.isoformat(),
+                actor_user_id=n.actor_user_id,
+                profile_id=n.profile_id,
             )
             for n in rows
         ]
@@ -392,38 +424,54 @@ def get_likes(user_id: str = Query(...)):
 
 @app.post("/likes")
 def like(payload: ProfileAction):
-    user_id = _ensure_user(payload.user_id)
+    actor_user_id = _ensure_user(payload.user_id)
     profile_id = (payload.profile_id or "").strip()
     if not profile_id:
         raise HTTPException(status_code=400, detail="profile_id is required")
 
+    # PREVIEW / MVP recipient mapping:
+    recipient_user_id = _make_user_id_from_profile_id(profile_id)
+    _ensure_user(recipient_user_id)
+
     with Session(engine) as session:
         existing = session.execute(
             select(Like).where(
-                Like.user_id == user_id,
+                Like.user_id == actor_user_id,
                 Like.profile_id == profile_id,
             )
         ).scalar_one_or_none()
 
         if existing:
+            # Like already exists; do not create duplicate notifications
             return {"ok": True}
 
         row = Like(
-            user_id=user_id,
+            user_id=actor_user_id,
             profile_id=profile_id,
             created_at=datetime.utcnow(),
         )
         session.add(row)
 
-        # Create a DB-backed notification (customer-ready, cross-device)
-        # MVP NOTE: we do not yet know the recipient user_id for demo profiles,
-        # so we store this for the acting user. When real users exist,
-        # we will notify the recipient instead.
+        # 1) Recipient gets the real notification
         session.add(
             Notification(
-                user_id=user_id,
+                user_id=recipient_user_id,
+                actor_user_id=actor_user_id,
+                profile_id=profile_id,
                 type="like",
-                message="Like sent. They’ll be notified.",
+                message="Someone liked your profile.",
+                created_at=datetime.utcnow(),
+            )
+        )
+
+        # 2) Actor also gets a “sent” copy (helps you test/see activity now)
+        session.add(
+            Notification(
+                user_id=actor_user_id,
+                actor_user_id=actor_user_id,
+                profile_id=profile_id,
+                type="like",
+                message=f"You liked {profile_id}.",
                 created_at=datetime.utcnow(),
             )
         )
