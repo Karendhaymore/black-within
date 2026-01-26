@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import (
     create_engine,
     String,
@@ -66,6 +66,21 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class Profile(Base):
+    __tablename__ = "profiles"
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)  # profile id
+    owner_user_id: Mapped[str] = mapped_column(String(40), index=True)  # user who owns it
+    display_name: Mapped[str] = mapped_column(String(120))
+    age: Mapped[int] = mapped_column(Integer)
+    city: Mapped[str] = mapped_column(String(80))
+    state_us: Mapped[str] = mapped_column(String(30))
+    photo: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    identity_preview: Mapped[str] = mapped_column(String(500))
+    intention: Mapped[str] = mapped_column(String(80))
+    tags_csv: Mapped[str] = mapped_column(String(800), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 class SavedProfile(Base):
     __tablename__ = "saved_profiles"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -113,8 +128,18 @@ Base.metadata.create_all(engine)
 class ProfileAction(BaseModel):
     user_id: str
     profile_id: str
-    # NEW: recipient user id (the person being liked)
-    recipient_user_id: Optional[str] = None
+
+
+class UpsertProfilePayload(BaseModel):
+    owner_user_id: str
+    display_name: str
+    age: int
+    city: str
+    state_us: str
+    photo: Optional[str] = None
+    identity_preview: str
+    intention: str
+    tags: List[str] = Field(default_factory=list)
 
 
 class IdListResponse(BaseModel):
@@ -169,7 +194,6 @@ def _normalize_email(email: str) -> str:
 
 
 def _make_user_id_from_email(email: str) -> str:
-    raw = f"{AUTH_USERID_PEPPER}:{emailn"
     raw = f"{AUTH_USERID_PEPPER}:{email}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:40]
 
@@ -266,6 +290,75 @@ def verify_code(payload: VerifyCodePayload):
     user_id = _make_user_id_from_email(email)
     _ensure_user(user_id)
     return {"ok": True, "userId": user_id}
+
+
+# -----------------------------
+# Profiles (create + browse)
+# -----------------------------
+@app.post("/profiles")
+def upsert_profile(payload: UpsertProfilePayload):
+    owner_user_id = _ensure_user(payload.owner_user_id)
+
+    # create a stable profile id for the user
+    profile_id = f"p_{owner_user_id}"
+
+    tags_csv = ",".join([t.strip() for t in payload.tags if t.strip()])
+
+    with Session(engine) as session:
+        existing = session.get(Profile, profile_id)
+        if existing:
+            existing.display_name = payload.display_name
+            existing.age = payload.age
+            existing.city = payload.city
+            existing.state_us = payload.state_us
+            existing.photo = payload.photo
+            existing.identity_preview = payload.identity_preview
+            existing.intention = payload.intention
+            existing.tags_csv = tags_csv
+        else:
+            session.add(
+                Profile(
+                    id=profile_id,
+                    owner_user_id=owner_user_id,
+                    display_name=payload.display_name,
+                    age=payload.age,
+                    city=payload.city,
+                    state_us=payload.state_us,
+                    photo=payload.photo,
+                    identity_preview=payload.identity_preview,
+                    intention=payload.intention,
+                    tags_csv=tags_csv,
+                    created_at=datetime.utcnow(),
+                )
+            )
+        session.commit()
+
+    return {"ok": True, "profile_id": profile_id}
+
+
+@app.get("/profiles")
+def list_profiles(limit: int = 50, offset: int = 0):
+    with Session(engine) as session:
+        rows = session.execute(
+            select(Profile).order_by(Profile.created_at.desc()).limit(limit).offset(offset)
+        ).scalars().all()
+
+        def to_dict(p: Profile):
+            return {
+                "id": p.id,
+                "owner_user_id": p.owner_user_id,
+                "displayName": p.display_name,
+                "age": p.age,
+                "city": p.city,
+                "stateUS": p.state_us,
+                "photo": p.photo,
+                "identityPreview": p.identity_preview,
+                "intention": p.intention,
+                "tags": [t for t in (p.tags_csv or "").split(",") if t],
+                "isAvailable": True,
+            }
+
+        return {"items": [to_dict(p) for p in rows]}
 
 
 # -----------------------------
@@ -389,42 +482,36 @@ def get_likes(user_id: str = Query(...)):
 def like(payload: ProfileAction):
     actor_user_id = _ensure_user(payload.user_id)
     profile_id = (payload.profile_id or "").strip()
-    recipient_user_id = (payload.recipient_user_id or "").strip() if payload.recipient_user_id else None
-
     if not profile_id:
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        existing = session.execute(
-            select(Like).where(
-                Like.user_id == actor_user_id,
-                Like.profile_id == profile_id,
-            )
-        ).scalar_one_or_none()
+        # Ensure profile exists and find recipient
+        prof = session.get(Profile, profile_id)
+        if not prof:
+            raise HTTPException(status_code=404, detail="Profile not found")
 
+        recipient_user_id = prof.owner_user_id
+        _ensure_user(recipient_user_id)
+
+        # Prevent duplicate likes from same actor to same profile
+        existing = session.execute(
+            select(Like).where(Like.user_id == actor_user_id, Like.profile_id == profile_id)
+        ).scalar_one_or_none()
         if existing:
             return {"ok": True}
 
+        session.add(Like(user_id=actor_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+
+        # Notification belongs to the RECIPIENT
         session.add(
-            Like(
-                user_id=actor_user_id,
-                profile_id=profile_id,
+            Notification(
+                user_id=recipient_user_id,
+                type="like",
+                message="Someone liked your profile.",
                 created_at=datetime.utcnow(),
             )
         )
-
-        # Customer-ready: notification belongs to RECIPIENT (the profile owner)
-        # If recipient_user_id is not provided (preview/demo), we do NOT mis-assign it.
-        if recipient_user_id:
-            _ensure_user(recipient_user_id)
-            session.add(
-                Notification(
-                    user_id=recipient_user_id,
-                    type="like",
-                    message="Someone liked your profile.",
-                    created_at=datetime.utcnow(),
-                )
-            )
 
         try:
             session.commit()
