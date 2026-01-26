@@ -16,6 +16,7 @@ from sqlalchemy import (
     select,
     delete,
     Integer,
+    Text,  # NEW
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
@@ -66,19 +67,21 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+# NEW: Profile table (int PK, one profile per user via unique owner_user_id)
 class Profile(Base):
     __tablename__ = "profiles"
-    id: Mapped[str] = mapped_column(String(50), primary_key=True)  # profile id
-    owner_user_id: Mapped[str] = mapped_column(String(40), index=True)  # user who owns it
-    display_name: Mapped[str] = mapped_column(String(120))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[str] = mapped_column(String(40), index=True, unique=True)
+    display_name: Mapped[str] = mapped_column(String(80))
     age: Mapped[int] = mapped_column(Integer)
     city: Mapped[str] = mapped_column(String(80))
     state_us: Mapped[str] = mapped_column(String(30))
     photo: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     identity_preview: Mapped[str] = mapped_column(String(500))
-    intention: Mapped[str] = mapped_column(String(80))
-    tags_csv: Mapped[str] = mapped_column(String(800), default="")
+    intention: Mapped[str] = mapped_column(String(120))
+    tags_csv: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
 class SavedProfile(Base):
@@ -95,7 +98,7 @@ class Like(Base):
     __tablename__ = "likes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)      # actor
-    profile_id: Mapped[str] = mapped_column(String(50), index=True)   # liked profile id
+    profile_id: Mapped[str] = mapped_column(String(50), index=True)   # liked profile id (string in this MVP)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
@@ -130,7 +133,8 @@ class ProfileAction(BaseModel):
     profile_id: str
 
 
-class UpsertProfilePayload(BaseModel):
+# NEW schemas for profiles
+class ProfileUpsert(BaseModel):
     owner_user_id: str
     display_name: str
     age: int
@@ -140,6 +144,25 @@ class UpsertProfilePayload(BaseModel):
     identity_preview: str
     intention: str
     tags: List[str] = Field(default_factory=list)
+
+
+class ProfileOut(BaseModel):
+    id: str
+    owner_user_id: str
+    display_name: str
+    age: int
+    city: str
+    state_us: str
+    photo: Optional[str] = None
+    identity_preview: str
+    intention: str
+    tags: List[str]
+    created_at: str
+    updated_at: str
+
+
+class ProfilesResponse(BaseModel):
+    items: List[ProfileOut]
 
 
 class IdListResponse(BaseModel):
@@ -293,75 +316,6 @@ def verify_code(payload: VerifyCodePayload):
 
 
 # -----------------------------
-# Profiles (create + browse)
-# -----------------------------
-@app.post("/profiles")
-def upsert_profile(payload: UpsertProfilePayload):
-    owner_user_id = _ensure_user(payload.owner_user_id)
-
-    # create a stable profile id for the user
-    profile_id = f"p_{owner_user_id}"
-
-    tags_csv = ",".join([t.strip() for t in payload.tags if t.strip()])
-
-    with Session(engine) as session:
-        existing = session.get(Profile, profile_id)
-        if existing:
-            existing.display_name = payload.display_name
-            existing.age = payload.age
-            existing.city = payload.city
-            existing.state_us = payload.state_us
-            existing.photo = payload.photo
-            existing.identity_preview = payload.identity_preview
-            existing.intention = payload.intention
-            existing.tags_csv = tags_csv
-        else:
-            session.add(
-                Profile(
-                    id=profile_id,
-                    owner_user_id=owner_user_id,
-                    display_name=payload.display_name,
-                    age=payload.age,
-                    city=payload.city,
-                    state_us=payload.state_us,
-                    photo=payload.photo,
-                    identity_preview=payload.identity_preview,
-                    intention=payload.intention,
-                    tags_csv=tags_csv,
-                    created_at=datetime.utcnow(),
-                )
-            )
-        session.commit()
-
-    return {"ok": True, "profile_id": profile_id}
-
-
-@app.get("/profiles")
-def list_profiles(limit: int = 50, offset: int = 0):
-    with Session(engine) as session:
-        rows = session.execute(
-            select(Profile).order_by(Profile.created_at.desc()).limit(limit).offset(offset)
-        ).scalars().all()
-
-        def to_dict(p: Profile):
-            return {
-                "id": p.id,
-                "owner_user_id": p.owner_user_id,
-                "displayName": p.display_name,
-                "age": p.age,
-                "city": p.city,
-                "stateUS": p.state_us,
-                "photo": p.photo,
-                "identityPreview": p.identity_preview,
-                "intention": p.intention,
-                "tags": [t for t in (p.tags_csv or "").split(",") if t],
-                "isAvailable": True,
-            }
-
-        return {"items": [to_dict(p) for p in rows]}
-
-
-# -----------------------------
 # Saved profiles
 # -----------------------------
 @app.get("/saved", response_model=IdListResponse)
@@ -466,6 +420,127 @@ def clear_notifications(user_id: str = Query(...)):
 
 
 # -----------------------------
+# Profiles (DB-backed)
+# Place BEFORE Likes
+# -----------------------------
+@app.get("/profiles", response_model=ProfilesResponse)
+def list_profiles(limit: int = Query(200, ge=1, le=500)):
+    with Session(engine) as session:
+        rows = session.execute(
+            select(Profile).order_by(Profile.updated_at.desc()).limit(limit)
+        ).scalars().all()
+
+        def to_out(p: Profile) -> ProfileOut:
+            tags = [t.strip() for t in (p.tags_csv or "").split(",") if t.strip()]
+            return ProfileOut(
+                id=str(p.id),
+                owner_user_id=p.owner_user_id,
+                display_name=p.display_name,
+                age=p.age,
+                city=p.city,
+                state_us=p.state_us,
+                photo=p.photo,
+                identity_preview=p.identity_preview,
+                intention=p.intention,
+                tags=tags,
+                created_at=p.created_at.isoformat(),
+                updated_at=p.updated_at.isoformat(),
+            )
+
+        return ProfilesResponse(items=[to_out(p) for p in rows])
+
+
+@app.get("/profiles/me", response_model=Optional[ProfileOut])
+def get_my_profile(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+    with Session(engine) as session:
+        p = session.execute(
+            select(Profile).where(Profile.owner_user_id == user_id)
+        ).scalar_one_or_none()
+        if not p:
+            return None
+        tags = [t.strip() for t in (p.tags_csv or "").split(",") if t.strip()]
+        return ProfileOut(
+            id=str(p.id),
+            owner_user_id=p.owner_user_id,
+            display_name=p.display_name,
+            age=p.age,
+            city=p.city,
+            state_us=p.state_us,
+            photo=p.photo,
+            identity_preview=p.identity_preview,
+            intention=p.intention,
+            tags=tags,
+            created_at=p.created_at.isoformat(),
+            updated_at=p.updated_at.isoformat(),
+        )
+
+
+@app.post("/profiles", response_model=ProfileOut)
+def upsert_profile(payload: ProfileUpsert):
+    owner = _ensure_user(payload.owner_user_id)
+
+    # very light validation
+    if payload.age < 18:
+        raise HTTPException(status_code=400, detail="Age must be 18+")
+    display = (payload.display_name or "").strip()
+    if not display:
+        raise HTTPException(status_code=400, detail="display_name is required")
+
+    tags_csv = ",".join([t.strip() for t in (payload.tags or []) if t.strip()][:30])
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        p = session.execute(
+            select(Profile).where(Profile.owner_user_id == owner)
+        ).scalar_one_or_none()
+        if p:
+            p.display_name = display
+            p.age = payload.age
+            p.city = (payload.city or "").strip()
+            p.state_us = (payload.state_us or "").strip()
+            p.photo = (payload.photo or "").strip() or None
+            p.identity_preview = (payload.identity_preview or "").strip()
+            p.intention = (payload.intention or "").strip()
+            p.tags_csv = tags_csv
+            p.updated_at = now
+        else:
+            p = Profile(
+                owner_user_id=owner,
+                display_name=display,
+                age=payload.age,
+                city=(payload.city or "").strip(),
+                state_us=(payload.state_us or "").strip(),
+                photo=(payload.photo or "").strip() or None,
+                identity_preview=(payload.identity_preview or "").strip(),
+                intention=(payload.intention or "").strip(),
+                tags_csv=tags_csv,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(p)
+
+        session.commit()
+        session.refresh(p)
+
+        tags = [t.strip() for t in (p.tags_csv or "").split(",") if t.strip()]
+        return ProfileOut(
+            id=str(p.id),
+            owner_user_id=p.owner_user_id,
+            display_name=p.display_name,
+            age=p.age,
+            city=p.city,
+            state_us=p.state_us,
+            photo=p.photo,
+            identity_preview=p.identity_preview,
+            intention=p.intention,
+            tags=tags,
+            created_at=p.created_at.isoformat(),
+            updated_at=p.updated_at.isoformat(),
+        )
+
+
+# -----------------------------
 # Likes
 # -----------------------------
 @app.get("/likes", response_model=IdListResponse)
@@ -480,30 +555,31 @@ def get_likes(user_id: str = Query(...)):
 
 @app.post("/likes")
 def like(payload: ProfileAction):
-    actor_user_id = _ensure_user(payload.user_id)
+    user_id = _ensure_user(payload.user_id)
     profile_id = (payload.profile_id or "").strip()
     if not profile_id:
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        # Ensure profile exists and find recipient
-        prof = session.get(Profile, profile_id)
-        if not prof:
-            raise HTTPException(status_code=404, detail="Profile not found")
-
-        recipient_user_id = prof.owner_user_id
-        _ensure_user(recipient_user_id)
-
         # Prevent duplicate likes from same actor to same profile
         existing = session.execute(
-            select(Like).where(Like.user_id == actor_user_id, Like.profile_id == profile_id)
+            select(Like).where(Like.user_id == user_id, Like.profile_id == profile_id)
         ).scalar_one_or_none()
         if existing:
             return {"ok": True}
 
-        session.add(Like(user_id=actor_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+        session.add(Like(user_id=user_id, profile_id=profile_id, created_at=datetime.utcnow()))
 
-        # Notification belongs to the RECIPIENT
+        # Find recipient from the profile_id (DB profile)
+        recipient_user_id = user_id  # fallback
+        try:
+            pid = int(profile_id)
+            prof = session.get(Profile, pid)
+            if prof and prof.owner_user_id:
+                recipient_user_id = prof.owner_user_id
+        except Exception:
+            pass
+
         session.add(
             Notification(
                 user_id=recipient_user_id,
