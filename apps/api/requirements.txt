@@ -4,3 +4,4 @@ SQLAlchemy==2.0.34
 psycopg[binary]==3.2.13
 python-dotenv==1.0.1
 email-validator==2.2.0
+sendgrid==6.11.0
