@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { DEMO_PROFILES, type Profile } from "../lib/sampleProfiles";
+import { type Profile } from "../lib/sampleProfiles";
 import { getOrCreateUserId } from "../lib/user";
 
 const API_BASE =
@@ -9,14 +9,18 @@ const API_BASE =
   "https://black-within-api.onrender.com";
 
 async function apiGetSavedIds(userId: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`);
+  const res = await fetch(
+    `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`
+  );
   if (!res.ok) throw new Error("Failed to load saved profiles.");
   const json = await res.json();
   return Array.isArray(json?.ids) ? json.ids : [];
 }
 
 async function apiGetLikes(userId: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`);
+  const res = await fetch(
+    `${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`
+  );
   if (!res.ok) throw new Error("Failed to load likes.");
   const json = await res.json();
   return Array.isArray(json?.ids) ? json.ids : [];
@@ -32,13 +36,19 @@ async function apiSaveProfile(userId: string, profileId: string) {
 }
 
 async function apiUnsaveProfile(userId: string, profileId: string) {
-  const url = `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}&profile_id=${encodeURIComponent(profileId)}`;
+  const url = `${API_BASE}/saved?user_id=${encodeURIComponent(
+    userId
+  )}&profile_id=${encodeURIComponent(profileId)}`;
   const res = await fetch(url, { method: "DELETE" });
   if (!res.ok) throw new Error("Unsave failed.");
 }
 
 // UPDATED: recipient_user_id added
-async function apiLikeProfile(userId: string, profileId: string, recipientUserId?: string) {
+async function apiLikeProfile(
+  userId: string,
+  profileId: string,
+  recipientUserId?: string
+) {
   const res = await fetch(`${API_BASE}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -51,8 +61,20 @@ async function apiLikeProfile(userId: string, profileId: string, recipientUserId
   if (!res.ok) throw new Error("Like failed.");
 }
 
+// ✅ NEW helper: GET /profiles
+async function apiListProfiles(): Promise<Profile[]> {
+  const res = await fetch(`${API_BASE}/profiles`, { method: "GET" });
+  if (!res.ok) throw new Error("Failed to load profiles.");
+  const json = await res.json();
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
 export default function DiscoverPage() {
   const [userId, setUserId] = useState<string>("");
+
+  // ✅ NEW state: store profiles from API
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -63,8 +85,16 @@ export default function DiscoverPage() {
   const [tagFilter, setTagFilter] = useState<string>("All");
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
-  const availableProfiles = useMemo(() => DEMO_PROFILES.filter((p) => p.isAvailable), []);
-  const availableProfileIds = useMemo(() => new Set(availableProfiles.map((p) => p.id)), [availableProfiles]);
+  // ✅ CHANGED: use profiles from API instead of DEMO_PROFILES
+  const availableProfiles = useMemo(
+    () => profiles.filter((p) => p.isAvailable),
+    [profiles]
+  );
+
+  const availableProfileIds = useMemo(
+    () => new Set(availableProfiles.map((p) => p.id)),
+    [availableProfiles]
+  );
 
   const intentionOptions = useMemo(() => {
     const set = new Set<string>();
@@ -80,7 +110,8 @@ export default function DiscoverPage() {
 
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
-      const intentionMatch = intentionFilter === "All" || p.intention === intentionFilter;
+      const intentionMatch =
+        intentionFilter === "All" || p.intention === intentionFilter;
       const tagMatch = tagFilter === "All" || p.tags.includes(tagFilter);
       return intentionMatch && tagMatch;
     });
@@ -106,7 +137,10 @@ export default function DiscoverPage() {
       setApiError(null);
       setLoadingSets(true);
 
-      const [saved, likes] = await Promise.all([apiGetSavedIds(uid), apiGetLikes(uid)]);
+      const [saved, likes] = await Promise.all([
+        apiGetSavedIds(uid),
+        apiGetLikes(uid),
+      ]);
 
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
       setLikedIds(likes.filter((id) => availableProfileIds.has(id)));
@@ -117,10 +151,29 @@ export default function DiscoverPage() {
     }
   }
 
+  // ✅ CHANGED: useEffect now loads profiles via GET /profiles first,
+  // then refreshes saved/likes.
   useEffect(() => {
     const uid = getOrCreateUserId();
     setUserId(uid);
-    refreshSavedAndLikes(uid);
+
+    (async () => {
+      try {
+        const items = await apiListProfiles();
+        setProfiles(items);
+      } catch (e: any) {
+        setApiError(e?.message || "Could not load profiles.");
+      }
+      await refreshSavedAndLikes(uid);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ NEW: when availableProfileIds changes (after profiles load), re-filter
+  // saved/likes to match available ids.
+  useEffect(() => {
+    if (!userId) return;
+    refreshSavedAndLikes(userId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableProfileIds]);
 
@@ -130,7 +183,9 @@ export default function DiscoverPage() {
     const currentlySaved = savedIds.includes(p.id);
     const prev = savedIds;
 
-    setSavedIds((curr) => (curr.includes(p.id) ? curr.filter((x) => x !== p.id) : [p.id, ...curr]));
+    setSavedIds((curr) =>
+      curr.includes(p.id) ? curr.filter((x) => x !== p.id) : [p.id, ...curr]
+    );
 
     try {
       if (currentlySaved) {
@@ -170,10 +225,17 @@ export default function DiscoverPage() {
   }
 
   return (
-    <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "2rem",
+        display: "grid",
+        placeItems: "start center",
+      }}
+    >
       <div style={{ width: "100%", maxWidth: 1100 }}>
         {/* (rest of your UI stays exactly the same) */}
-        {/* Only onLike() and apiLikeProfile() changed above */}
+        {/* Only: DEMO_PROFILES removed, profiles loaded from GET /profiles */}
         {/* Keep your existing JSX below */}
       </div>
     </main>
