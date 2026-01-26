@@ -1,53 +1,282 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getNotifications, type Notification } from "../lib/storage";
+import { getOrCreateUserId } from "../lib/user";
+
+// -----------------------------
+// API base
+// -----------------------------
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+  "https://black-within-api.onrender.com";
+
+// -----------------------------
+// Types
+// -----------------------------
+type ApiNotification = {
+  id: string;
+  user_id: string;
+  type: string; // "like" | "system" | etc
+  message: string;
+  created_at: string; // ISO
+};
+
+// -----------------------------
+// API helpers
+// -----------------------------
+async function apiGetNotifications(userId: string): Promise<ApiNotification[]> {
+  const res = await fetch(
+    `${API_BASE}/notifications?user_id=${encodeURIComponent(userId)}`,
+    { method: "GET" }
+  );
+  if (!res.ok) throw new Error("Failed to load notifications.");
+  const json = await res.json();
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
+async function apiClearNotifications(userId: string) {
+  const res = await fetch(
+    `${API_BASE}/notifications?user_id=${encodeURIComponent(userId)}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw new Error("Failed to clear notifications.");
+}
 
 export default function NotificationsPage() {
-  const [items, setItems] = useState<Notification[]>([]);
+  const [userId, setUserId] = useState<string>("");
+  const [items, setItems] = useState<ApiNotification[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [clearing, setClearing] = useState<boolean>(false);
+
+  function showToast(msg: string) {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 2200);
+  }
+
+  async function refresh(uid: string) {
+    try {
+      setApiError(null);
+      setLoading(true);
+      const rows = await apiGetNotifications(uid);
+      setItems(rows);
+    } catch (e: any) {
+      setApiError(e?.message || "Could not load notifications from the API.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    setItems(getNotifications());
+    const uid = getOrCreateUserId();
+    setUserId(uid);
+
+    (async () => {
+      await refresh(uid);
+    })();
   }, []);
 
+  async function onClearAll() {
+    if (!userId) return;
+
+    const prev = items;
+    setClearing(true);
+
+    // Optimistic UI
+    setItems([]);
+
+    try {
+      await apiClearNotifications(userId);
+      showToast("Cleared notifications.");
+      await refresh(userId);
+    } catch (e: any) {
+      // Revert
+      setItems(prev);
+      setApiError(e?.message || "Could not clear notifications.");
+      showToast("Could not clear right now. Please try again.");
+    } finally {
+      setClearing(false);
+    }
+  }
+
   return (
-    <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "2rem",
+        display: "grid",
+        placeItems: "start center",
+      }}
+    >
       <div style={{ width: "100%", maxWidth: 900 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "1rem",
+            flexWrap: "wrap",
+            alignItems: "flex-start",
+          }}
+        >
           <div>
-            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>Notifications</h1>
-            <p style={{ color: "#555" }}>Likes notify the recipient. Messaging stays locked for now.</p>
+            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
+              Notifications
+            </h1>
+            <p style={{ color: "#555" }}>
+              Likes notify the recipient. Messaging stays locked for now.
+            </p>
+
+            <div
+              style={{
+                marginTop: "0.85rem",
+                padding: "0.85rem",
+                borderRadius: 12,
+                border: "1px solid #eee",
+                color: "#555",
+              }}
+            >
+              You’re viewing preview notifications while Black Within opens intentionally.
+            </div>
           </div>
 
-          <a
-            href="/discover"
-            style={{
-              padding: "0.65rem 1rem",
-              border: "1px solid #ccc",
-              borderRadius: 10,
-              textDecoration: "none",
-              color: "inherit",
-              height: "fit-content",
-            }}
-          >
-            Back to Discover
-          </a>
+          <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+            <button
+              onClick={onClearAll}
+              disabled={loading || clearing || items.length === 0}
+              style={{
+                padding: "0.65rem 1rem",
+                border: "1px solid #ccc",
+                borderRadius: 10,
+                background: "white",
+                cursor:
+                  loading || clearing || items.length === 0
+                    ? "not-allowed"
+                    : "pointer",
+                opacity: loading || clearing || items.length === 0 ? 0.6 : 1,
+                height: "fit-content",
+              }}
+            >
+              {clearing ? "Clearing..." : "Clear all"}
+            </button>
+
+            <a
+              href="/discover"
+              style={{
+                padding: "0.65rem 1rem",
+                border: "1px solid #ccc",
+                borderRadius: 10,
+                textDecoration: "none",
+                color: "inherit",
+                height: "fit-content",
+              }}
+            >
+              Back to Discover
+            </a>
+          </div>
         </div>
 
-        {items.length === 0 ? (
-          <div style={{ marginTop: "2rem", padding: "1rem", border: "1px solid #eee", borderRadius: 12, color: "#666" }}>
+        {apiError && (
+          <div
+            style={{
+              marginTop: "0.9rem",
+              padding: "0.85rem",
+              borderRadius: 12,
+              border: "1px solid #f0c9c9",
+              background: "#fff7f7",
+              color: "#7a2d2d",
+            }}
+          >
+            <b>API notice:</b> {apiError}
+          </div>
+        )}
+
+        {toast && (
+          <div
+            style={{
+              marginTop: "1rem",
+              padding: "0.75rem",
+              borderRadius: 10,
+              border: "1px solid #cfe7cf",
+              background: "#f6fff6",
+            }}
+          >
+            {toast}
+          </div>
+        )}
+
+        {loading ? (
+          <div
+            style={{
+              marginTop: "1.5rem",
+              padding: "1.25rem",
+              border: "1px solid #eee",
+              borderRadius: 12,
+              color: "#666",
+            }}
+          >
+            Loading notifications…
+          </div>
+        ) : items.length === 0 ? (
+          <div
+            style={{
+              marginTop: "1.5rem",
+              padding: "1.25rem",
+              border: "1px solid #eee",
+              borderRadius: 12,
+              color: "#666",
+            }}
+          >
             No notifications yet.
           </div>
         ) : (
           <div style={{ marginTop: "1.5rem", display: "grid", gap: "0.75rem" }}>
             {items.map((n) => (
-              <div key={n.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: "1rem" }}>
-                <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>{n.message}</div>
-                <div style={{ color: "#777", fontSize: "0.9rem" }}>{new Date(n.createdAt).toLocaleString()}</div>
+              <div
+                key={n.id}
+                style={{
+                  border: "1px solid #eee",
+                  borderRadius: 12,
+                  padding: "1rem",
+                  background: "white",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: "1rem",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>{n.message}</div>
+
+                  <span
+                    style={{
+                      fontSize: "0.8rem",
+                      padding: "0.2rem 0.55rem",
+                      borderRadius: 999,
+                      border: "1px solid #ddd",
+                      color: "#555",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {n.type || "notice"}
+                  </span>
+                </div>
+
+                <div style={{ color: "#777", fontSize: "0.9rem", marginTop: "0.35rem" }}>
+                  {new Date(n.created_at).toLocaleString()}
+                </div>
               </div>
             ))}
           </div>
         )}
+
+        <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
+          MVP note: This page expects notifications to be stored in the database.
+        </div>
       </div>
     </main>
   );
