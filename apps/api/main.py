@@ -20,11 +20,12 @@ from sqlalchemy import (
     Integer,
     Text,
     Boolean,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
 
-# SendGrid (library already in your requirements.txt)
+# SendGrid
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
@@ -57,9 +58,11 @@ SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "").strip()
 SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
 
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+
 
 # -----------------------------
-# Database base + models
+# Database models
 # -----------------------------
 class Base(DeclarativeBase):
     pass
@@ -83,13 +86,10 @@ class Profile(Base):
     identity_preview: Mapped[str] = mapped_column(String(500))
     intention: Mapped[str] = mapped_column(String(120))
 
-    # IMPORTANT:
-    # Your DB has profiles.tags_csv (per the error hint), but our code wants to treat it as JSON.
-    # We map the python attribute "tags_json" onto the DB column name "tags_csv".
-    tags_json: Mapped[str] = mapped_column("tags_csv", Text, default="[]")
+    # IMPORTANT: DB currently has tags_csv; keep that name to avoid 500s
+    tags_csv: Mapped[str] = mapped_column(Text, default="[]")
 
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
@@ -133,12 +133,58 @@ class LoginCode(Base):
 
 
 # -----------------------------
-# Engine (AFTER Base/models)
+# MVP auto-migration
 # -----------------------------
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+def _auto_migrate_profiles_table():
+    """
+    create_all() does NOT modify existing tables.
+    This safely adds any missing columns to profiles so /profiles won't 500.
+    """
+    with engine.begin() as conn:
+        # Ensure table exists (if not, create_all will handle it)
+        # Add missing columns (safe)
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(40);"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_name VARCHAR(80);"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS age INTEGER;"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS city VARCHAR(80);"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS state_us VARCHAR(80);"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo VARCHAR(500);"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS identity_preview VARCHAR(500);"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS intention VARCHAR(120);"""))
 
-# Ensure all tables exist (MVP auto-create)
+        # Keep tags_csv (your DB already has this column)
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tags_csv TEXT DEFAULT '[]';"""))
+
+        # If a previous attempt created tags_json, migrate data over, then keep tags_csv as canonical
+        conn.execute(text("""
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='profiles' AND column_name='tags_json'
+              )
+              THEN
+                UPDATE profiles
+                SET tags_csv = COALESCE(tags_csv, tags_json, '[]')
+                WHERE tags_csv IS NULL OR tags_csv = '';
+              END IF;
+            END $$;
+        """))
+
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE;"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
+
+
+# Create tables if missing
 Base.metadata.create_all(bind=engine)
+
+# Then run MVP migrations (adds columns if missing)
+try:
+    _auto_migrate_profiles_table()
+except Exception as e:
+    # Don't crash startup; log and continue
+    print("AUTO_MIGRATE_PROFILES failed:", str(e))
 
 
 # -----------------------------
@@ -220,7 +266,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.0.2")
+app = FastAPI(title="Black Within API", version="1.0.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -283,25 +329,6 @@ def _send_email_sendgrid(to_email: str, subject: str, html: str) -> None:
         raise RuntimeError(f"SendGrid send failed: {resp.status_code} {resp.body}")
 
 
-def _parse_tags(value: str) -> List[str]:
-    """
-    DB column is tags_csv historically.
-    We now store JSON in it, but we must read both formats safely.
-    """
-    raw = (value or "").strip()
-    if not raw:
-        return []
-    # Try JSON list first
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, list):
-            return [str(x).strip() for x in parsed if str(x).strip()]
-    except Exception:
-        pass
-    # Fallback: comma-separated
-    return [t.strip() for t in raw.split(",") if t.strip()]
-
-
 @app.get("/")
 def root():
     return {"status": "ok", "service": "black-within-api"}
@@ -314,12 +341,12 @@ def health():
         "previewMode": AUTH_PREVIEW_MODE,
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
         "corsOrigins": origins,
-        "version": "1.0.2",
+        "version": "1.0.3",
     }
 
 
 # -----------------------------
-# ME
+# ME (frontend expects this)
 # -----------------------------
 @app.get("/me", response_model=MeResponse)
 def me(user_id: str = Query(...)):
@@ -424,7 +451,12 @@ def list_profiles(
         items: List[ProfileItem] = []
 
         for p in rows:
-            tags = _parse_tags(p.tags_json)
+            try:
+                tags = json.loads(p.tags_csv or "[]")
+                if not isinstance(tags, list):
+                    tags = []
+            except Exception:
+                tags = []
 
             items.append(
                 ProfileItem(
@@ -475,8 +507,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             select(Profile).where(Profile.owner_user_id == owner_user_id)
         ).scalar_one_or_none()
 
-        # Store JSON list in the tags_csv column (mapped as tags_json)
-        tags_json = json.dumps((payload.tags or [])[:25])
+        tags_csv = json.dumps((payload.tags or [])[:25])
 
         if existing:
             existing.display_name = display
@@ -486,7 +517,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             existing.photo = (payload.photo or "").strip() or None
             existing.identity_preview = preview
             existing.intention = payload.intention.strip()
-            existing.tags_json = tags_json
+            existing.tags_csv = tags_csv
             existing.is_available = is_avail
             existing.updated_at = now
             session.commit()
@@ -504,7 +535,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
                     photo=(payload.photo or "").strip() or None,
                     identity_preview=preview,
                     intention=payload.intention.strip(),
-                    tags_json=tags_json,
+                    tags_csv=tags_csv,
                     is_available=is_avail,
                     created_at=now,
                     updated_at=now,
@@ -513,7 +544,14 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             session.commit()
 
         p = session.get(Profile, pid)
-        tags = _parse_tags(p.tags_json)
+        tags = []
+        try:
+            tags = json.loads(p.tags_csv or "[]")
+            if not isinstance(tags, list):
+                tags = []
+        except Exception:
+            tags = []
+
         return ProfileItem(
             id=p.id,
             owner_user_id=p.owner_user_id,
@@ -529,7 +567,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
         )
 
 
-# IMPORTANT: your frontend currently POSTs to /profiles (so keep this alias)
+# IMPORTANT: your frontend currently POSTs to /profiles (keep this alias)
 @app.post("/profiles", response_model=ProfileItem)
 def upsert_profile_alias(payload: UpsertMyProfilePayload):
     return upsert_my_profile(payload)
