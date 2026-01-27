@@ -104,8 +104,8 @@ class SavedProfile(Base):
 class Like(Base):
     __tablename__ = "likes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)      # liker
-    profile_id: Mapped[str] = mapped_column(String(60), index=True)   # liked profile
+    user_id: Mapped[str] = mapped_column(String(40), index=True)       # liker
+    profile_id: Mapped[str] = mapped_column(String(60), index=True)    # liked profile
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
@@ -114,7 +114,7 @@ class Like(Base):
 class Notification(Base):
     __tablename__ = "notifications"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)      # recipient
+    user_id: Mapped[str] = mapped_column(String(40), index=True)       # recipient
     type: Mapped[str] = mapped_column(String(20), default="like")
     message: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
@@ -189,9 +189,7 @@ class ProfilesResponse(BaseModel):
 
 # Accept BOTH camelCase and snake_case (frontend may send either)
 class UpsertMyProfilePayload(BaseModel):
-    owner_user_id: str
-
-    # camelCase
+    owner_user_id: str  # camelCase
     displayName: Optional[str] = None
     stateUS: Optional[str] = None
     identityPreview: Optional[str] = None
@@ -316,21 +314,17 @@ def request_code(payload: RequestCodePayload):
     now = datetime.utcnow()
 
     with Session(engine) as session:
-        existing = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
-        if existing:
-            existing.code = code
-            existing.expires_at = expires_at
-            existing.created_at = now
-        else:
-            session.add(
-                LoginCode(
-                    id=_new_id(),
-                    email=email,
-                    code=code,
-                    expires_at=expires_at,
-                    created_at=now,
-                )
+        # Hard reset to avoid any weird race conditions
+        session.execute(delete(LoginCode).where(LoginCode.email == email))
+        session.add(
+            LoginCode(
+                id=_new_id(),
+                email=email,
+                code=code,
+                expires_at=expires_at,
+                created_at=now,
             )
+        )
         session.commit()
 
     # Preview mode returns code (dev convenience)
@@ -352,9 +346,9 @@ def request_code(payload: RequestCodePayload):
         )
         return {"ok": True, "sent": True, "previewMode": False}
     except Exception as e:
-        # IMPORTANT: return error so you can see it immediately in the browser/network tab
         print("SendGrid exception:", str(e))
-        return {"ok": True, "sent": False, "error": str(e), "previewMode": False}
+        # While stabilizing, return devCode so you can still log in if email delivery has issues
+        return {"ok": True, "sent": False, "error": str(e), "devCode": code, "previewMode": False}
 
 
 @app.post("/auth/verify-code")
@@ -367,17 +361,22 @@ def verify_code(payload: VerifyCodePayload):
 
     with Session(engine) as session:
         row = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
+
         if not row:
+            print(f"VERIFY FAIL: no code row for email={email}")
             raise HTTPException(status_code=401, detail="Invalid or expired code")
 
         if datetime.utcnow() > row.expires_at:
+            print(f"VERIFY FAIL: expired for email={email}, expired_at={row.expires_at.isoformat()}")
             session.execute(delete(LoginCode).where(LoginCode.email == email))
             session.commit()
             raise HTTPException(status_code=401, detail="Invalid or expired code")
 
         if row.code != code:
+            print(f"VERIFY FAIL: code mismatch for email={email} (got={code})")
             raise HTTPException(status_code=401, detail="Invalid or expired code")
 
+        # Success: consume code
         session.execute(delete(LoginCode).where(LoginCode.email == email))
         session.commit()
 
@@ -395,7 +394,12 @@ def list_profiles(
     limit: int = Query(default=50, ge=1, le=200),
 ):
     with Session(engine) as session:
-        q = select(Profile).where(Profile.is_available == True).order_by(Profile.updated_at.desc()).limit(limit)
+        q = (
+            select(Profile)
+            .where(Profile.is_available == True)
+            .order_by(Profile.updated_at.desc())
+            .limit(limit)
+        )
         if exclude_owner_user_id:
             q = q.where(Profile.owner_user_id != exclude_owner_user_id)
 
@@ -455,7 +459,9 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
 
     now = datetime.utcnow()
     with Session(engine) as session:
-        existing = session.execute(select(Profile).where(Profile.owner_user_id == owner_user_id)).scalar_one_or_none()
+        existing = session.execute(
+            select(Profile).where(Profile.owner_user_id == owner_user_id)
+        ).scalar_one_or_none()
         tags_json = json.dumps((payload.tags or [])[:25])
 
         if existing:
@@ -522,7 +528,9 @@ def upsert_profile_alias(payload: UpsertMyProfilePayload):
 def get_saved(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
-        rows = session.execute(select(SavedProfile.profile_id).where(SavedProfile.user_id == user_id)).all()
+        rows = session.execute(
+            select(SavedProfile.profile_id).where(SavedProfile.user_id == user_id)
+        ).all()
         return IdListResponse(ids=[r[0] for r in rows])
 
 
@@ -535,17 +543,27 @@ def save_profile(payload: ProfileAction):
 
     with Session(engine) as session:
         existing = session.execute(
-            select(SavedProfile).where(SavedProfile.user_id == user_id, SavedProfile.profile_id == profile_id)
+            select(SavedProfile).where(
+                SavedProfile.user_id == user_id,
+                SavedProfile.profile_id == profile_id,
+            )
         ).scalar_one_or_none()
         if existing:
             return {"ok": True}
 
-        session.add(SavedProfile(user_id=user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+        session.add(
+            SavedProfile(
+                user_id=user_id,
+                profile_id=profile_id,
+                created_at=datetime.utcnow(),
+            )
+        )
         try:
             session.commit()
         except IntegrityError:
             session.rollback()
             return {"ok": True}
+
     return {"ok": True}
 
 
@@ -557,8 +575,14 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        session.execute(delete(SavedProfile).where(SavedProfile.user_id == user_id, SavedProfile.profile_id == profile_id))
+        session.execute(
+            delete(SavedProfile).where(
+                SavedProfile.user_id == user_id,
+                SavedProfile.profile_id == profile_id,
+            )
+        )
         session.commit()
+
     return {"ok": True}
 
 
