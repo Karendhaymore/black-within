@@ -2,7 +2,6 @@ import os
 import re
 import secrets
 import hashlib
-import json
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -82,7 +81,10 @@ class Profile(Base):
     photo: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     identity_preview: Mapped[str] = mapped_column(String(500))
     intention: Mapped[str] = mapped_column(String(120))
-    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    # IMPORTANT: DB has tags_csv (not tags_json)
+    tags_csv: Mapped[str] = mapped_column(Text, default="")
+
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
@@ -128,12 +130,44 @@ class LoginCode(Base):
 
 
 # -----------------------------
-# Engine + create tables (MUST come after Base/models)
+# Engine + create tables (safe)
 # -----------------------------
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
-
-# Ensure all tables exist (MVP auto-create)
 Base.metadata.create_all(bind=engine)
+
+
+# -----------------------------
+# Helpers for tags
+# -----------------------------
+def _tags_list_from_csv(csv: str) -> List[str]:
+    csv = (csv or "").strip()
+    if not csv:
+        return []
+    parts = [p.strip() for p in csv.split(",")]
+    return [p for p in parts if p]
+
+
+def _tags_csv_from_list(tags: List[str]) -> str:
+    if not tags:
+        return ""
+    cleaned: List[str] = []
+    for t in tags[:25]:
+        t = (t or "").strip()
+        if not t:
+            continue
+        # avoid commas inside tags so CSV stays clean
+        t = t.replace(",", " ")
+        cleaned.append(t)
+    # de-dupe while keeping order
+    seen = set()
+    out = []
+    for t in cleaned:
+        key = t.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    return ",".join(out)
 
 
 # -----------------------------
@@ -193,13 +227,13 @@ class ProfilesResponse(BaseModel):
 
 # Accept BOTH camelCase and snake_case (frontend may send either)
 class UpsertMyProfilePayload(BaseModel):
-    owner_user_id: str  # camelCase
+    owner_user_id: str  # camelCase key name but stored snake_case in backend
+
     displayName: Optional[str] = None
     stateUS: Optional[str] = None
     identityPreview: Optional[str] = None
     isAvailable: Optional[bool] = True
 
-    # snake_case
     display_name: Optional[str] = None
     state_us: Optional[str] = None
     identity_preview: Optional[str] = None
@@ -215,7 +249,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.0.1")
+app = FastAPI(title="Black Within API", version="1.0.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -259,9 +293,6 @@ def _ensure_user(user_id: str) -> str:
 
 
 def _send_email_sendgrid(to_email: str, subject: str, html: str) -> None:
-    """
-    If SendGrid isn't configured, raise a clear error in live mode.
-    """
     if not SENDGRID_API_KEY:
         raise RuntimeError("SENDGRID_API_KEY is not set")
     if not SENDGRID_FROM_EMAIL:
@@ -277,7 +308,6 @@ def _send_email_sendgrid(to_email: str, subject: str, html: str) -> None:
     sg = SendGridAPIClient(SENDGRID_API_KEY)
     resp = sg.send(message)
 
-    # SendGrid returns 202 on success
     if resp.status_code not in (200, 202):
         raise RuntimeError(f"SendGrid send failed: {resp.status_code} {resp.body}")
 
@@ -298,7 +328,7 @@ def health():
 
 
 # -----------------------------
-# ME (frontend expects this)
+# ME
 # -----------------------------
 @app.get("/me", response_model=MeResponse)
 def me(user_id: str = Query(...)):
@@ -318,7 +348,6 @@ def request_code(payload: RequestCodePayload):
     now = datetime.utcnow()
 
     with Session(engine) as session:
-        # Hard reset to avoid any weird race conditions
         session.execute(delete(LoginCode).where(LoginCode.email == email))
         session.add(
             LoginCode(
@@ -331,11 +360,9 @@ def request_code(payload: RequestCodePayload):
         )
         session.commit()
 
-    # Preview mode returns code (dev convenience)
     if AUTH_PREVIEW_MODE:
         return {"ok": True, "devCode": code, "sent": False, "previewMode": True}
 
-    # Live mode: send email
     try:
         _send_email_sendgrid(
             to_email=email,
@@ -351,7 +378,6 @@ def request_code(payload: RequestCodePayload):
         return {"ok": True, "sent": True, "previewMode": False}
     except Exception as e:
         print("SendGrid exception:", str(e))
-        # While stabilizing, return devCode so you can still log in if email delivery has issues
         return {"ok": True, "sent": False, "error": str(e), "devCode": code, "previewMode": False}
 
 
@@ -367,20 +393,16 @@ def verify_code(payload: VerifyCodePayload):
         row = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
 
         if not row:
-            print(f"VERIFY FAIL: no code row for email={email}")
             raise HTTPException(status_code=401, detail="Invalid or expired code")
 
         if datetime.utcnow() > row.expires_at:
-            print(f"VERIFY FAIL: expired for email={email}, expired_at={row.expires_at.isoformat()}")
             session.execute(delete(LoginCode).where(LoginCode.email == email))
             session.commit()
             raise HTTPException(status_code=401, detail="Invalid or expired code")
 
         if row.code != code:
-            print(f"VERIFY FAIL: code mismatch for email={email} (got={code})")
             raise HTTPException(status_code=401, detail="Invalid or expired code")
 
-        # Success: consume code
         session.execute(delete(LoginCode).where(LoginCode.email == email))
         session.commit()
 
@@ -411,12 +433,7 @@ def list_profiles(
         items: List[ProfileItem] = []
 
         for p in rows:
-            try:
-                tags = json.loads(p.tags_json or "[]")
-                if not isinstance(tags, list):
-                    tags = []
-            except Exception:
-                tags = []
+            tags = _tags_list_from_csv(p.tags_csv)
 
             items.append(
                 ProfileItem(
@@ -466,7 +483,8 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
         existing = session.execute(
             select(Profile).where(Profile.owner_user_id == owner_user_id)
         ).scalar_one_or_none()
-        tags_json = json.dumps((payload.tags or [])[:25])
+
+        tags_csv = _tags_csv_from_list(payload.tags or [])
 
         if existing:
             existing.display_name = display
@@ -476,7 +494,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             existing.photo = (payload.photo or "").strip() or None
             existing.identity_preview = preview
             existing.intention = payload.intention.strip()
-            existing.tags_json = tags_json
+            existing.tags_csv = tags_csv
             existing.is_available = is_avail
             existing.updated_at = now
             session.commit()
@@ -494,7 +512,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
                     photo=(payload.photo or "").strip() or None,
                     identity_preview=preview,
                     intention=payload.intention.strip(),
-                    tags_json=tags_json,
+                    tags_csv=tags_csv,
                     is_available=is_avail,
                     created_at=now,
                     updated_at=now,
@@ -503,7 +521,6 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             session.commit()
 
         p = session.get(Profile, pid)
-        tags = json.loads(p.tags_json or "[]")
         return ProfileItem(
             id=p.id,
             owner_user_id=p.owner_user_id,
@@ -514,12 +531,12 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             photo=p.photo,
             identityPreview=p.identity_preview,
             intention=p.intention,
-            tags=tags if isinstance(tags, list) else [],
+            tags=_tags_list_from_csv(p.tags_csv),
             isAvailable=bool(p.is_available),
         )
 
 
-# IMPORTANT: your frontend currently POSTs to /profiles (so keep this alias)
+# IMPORTANT: your frontend currently POSTs to /profiles (keep alias)
 @app.post("/profiles", response_model=ProfileItem)
 def upsert_profile_alias(payload: UpsertMyProfilePayload):
     return upsert_my_profile(payload)
