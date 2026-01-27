@@ -59,6 +59,8 @@ SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
+# Ensure all tables exist (MVP auto-create)
+Base.metadata.create_all(bind=engine)
 
 # -----------------------------
 # Database models
