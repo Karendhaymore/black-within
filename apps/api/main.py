@@ -57,10 +57,6 @@ SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "").strip()
 SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
-
-# Ensure all tables exist (MVP auto-create)
-Base.metadata.create_all(bind=engine)
 
 # -----------------------------
 # Database models
@@ -131,7 +127,13 @@ class LoginCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-Base.metadata.create_all(engine)
+# -----------------------------
+# Engine + create tables (MUST come after Base/models)
+# -----------------------------
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+
+# Ensure all tables exist (MVP auto-create)
+Base.metadata.create_all(bind=engine)
 
 
 # -----------------------------
