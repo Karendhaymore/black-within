@@ -434,7 +434,7 @@ export default function DiscoverPage() {
 
                     <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                       <Link
-                        href={`/profiles/${p.id}`}
+                        <a href={`/profiles/${p.id}`}>View</a>
                         style={{
                           padding: "10px 12px",
                           borderRadius: 10,
