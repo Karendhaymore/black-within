@@ -36,18 +36,24 @@ const API_BASE =
   "https://black-within-api.onrender.com";
 
 async function apiGetSavedIds(userId: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`,
+    {
+      cache: "no-store",
+    }
+  );
   if (!res.ok) throw new Error(`Failed to load saved profiles (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
 }
 
 async function apiGetLikes(userId: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    `${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`,
+    {
+      cache: "no-store",
+    }
+  );
   if (!res.ok) throw new Error(`Failed to load likes (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
@@ -72,7 +78,11 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
 
 // NOTE: your backend /likes endpoint currently only needs user_id + profile_id.
 // We'll keep recipient_user_id in case you add it later, but it is not required right now.
-async function apiLikeProfile(userId: string, profileId: string, recipientUserId?: string) {
+async function apiLikeProfile(
+  userId: string,
+  profileId: string,
+  recipientUserId?: string
+) {
   const res = await fetch(`${API_BASE}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -89,7 +99,9 @@ async function apiLikeProfile(userId: string, profileId: string, recipientUserId
 async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[]> {
   const url =
     `${API_BASE}/profiles?limit=50` +
-    (excludeOwnerUserId ? `&exclude_owner_user_id=${encodeURIComponent(excludeOwnerUserId)}` : "");
+    (excludeOwnerUserId
+      ? `&exclude_owner_user_id=${encodeURIComponent(excludeOwnerUserId)}`
+      : "");
 
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
@@ -143,7 +155,8 @@ export default function DiscoverPage() {
 
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
-      const intentionMatch = intentionFilter === "All" || p.intention === intentionFilter;
+      const intentionMatch =
+        intentionFilter === "All" || p.intention === intentionFilter;
       const tags = Array.isArray(p.tags) ? p.tags : [];
       const tagMatch = tagFilter === "All" || tags.includes(tagFilter);
       return intentionMatch && tagMatch;
@@ -170,7 +183,10 @@ export default function DiscoverPage() {
       setApiError(null);
       setLoadingSets(true);
 
-      const [saved, likes] = await Promise.all([apiGetSavedIds(uid), apiGetLikes(uid)]);
+      const [saved, likes] = await Promise.all([
+        apiGetSavedIds(uid),
+        apiGetLikes(uid),
+      ]);
 
       // Keep only IDs that still exist in current profile list
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
@@ -272,7 +288,14 @@ export default function DiscoverPage() {
     >
       <div style={{ width: "100%", maxWidth: 1100 }}>
         {/* Top bar */}
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            alignItems: "center",
+          }}
+        >
           <h1 style={{ margin: 0 }}>Discover</h1>
 
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -294,9 +317,16 @@ export default function DiscoverPage() {
 
         {/* Debug + status */}
         <div style={{ marginTop: 10, fontSize: 13, color: "#666" }}>
-          <div><strong>API:</strong> {API_BASE}</div>
-          <div><strong>Profiles loaded:</strong> {profiles.length} {loadingProfiles ? "(loading…)" : ""}</div>
-          <div><strong>Saved/likes loading:</strong> {loadingSets ? "yes" : "no"}</div>
+          <div>
+            <strong>API:</strong> {API_BASE}
+          </div>
+          <div>
+            <strong>Profiles loaded:</strong> {profiles.length}{" "}
+            {loadingProfiles ? "(loading…)" : ""}
+          </div>
+          <div>
+            <strong>Saved/likes loading:</strong> {loadingSets ? "yes" : "no"}
+          </div>
         </div>
 
         {apiError && (
@@ -316,12 +346,25 @@ export default function DiscoverPage() {
         )}
 
         {/* Filters */}
-        <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div
+          style={{
+            marginTop: 16,
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Intention:
-            <select value={intentionFilter} onChange={(e) => setIntentionFilter(e.target.value)}>
+            <select
+              value={intentionFilter}
+              onChange={(e) => setIntentionFilter(e.target.value)}
+            >
               {intentionOptions.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
               ))}
             </select>
           </label>
@@ -330,7 +373,9 @@ export default function DiscoverPage() {
             Tag:
             <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
               {tagOptions.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
               ))}
             </select>
           </label>
@@ -371,13 +416,16 @@ export default function DiscoverPage() {
                     {/* Photo / initials */}
                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                       {p.photo && !brokenImages[p.id] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={p.photo}
                           alt={p.displayName}
                           width={56}
                           height={56}
                           style={{ borderRadius: 14, objectFit: "cover" }}
-                          onError={() => setBrokenImages((curr) => ({ ...curr, [p.id]: true }))}
+                          onError={() =>
+                            setBrokenImages((curr) => ({ ...curr, [p.id]: true }))
+                          }
                         />
                       ) : (
                         <div
@@ -396,8 +444,16 @@ export default function DiscoverPage() {
                       )}
 
                       <div style={{ flex: 1 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                          <div style={{ fontWeight: 800, fontSize: 18 }}>{p.displayName}</div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ fontWeight: 800, fontSize: 18 }}>
+                            {p.displayName}
+                          </div>
                           <div style={{ color: "#666" }}>{p.age}</div>
                         </div>
                         <div style={{ marginTop: 4, color: "#666", fontSize: 13 }}>
@@ -414,7 +470,14 @@ export default function DiscoverPage() {
                     </div>
 
                     {Array.isArray(p.tags) && p.tags.length > 0 && (
-                      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <div
+                        style={{
+                          marginTop: 10,
+                          display: "flex",
+                          gap: 6,
+                          flexWrap: "wrap",
+                        }}
+                      >
                         {p.tags.slice(0, 10).map((t, idx) => (
                           <span
                             key={`${p.id}-tag-${idx}`}
@@ -433,14 +496,16 @@ export default function DiscoverPage() {
                     )}
 
                     <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      {/* ✅ FIXED: correct Link usage (NO nested <a>) */}
                       <Link
-                        <a href={`/profiles/${p.id}`}>View</a>
+                        href={`/profiles/${p.id}`}
                         style={{
                           padding: "10px 12px",
                           borderRadius: 10,
                           border: "1px solid #ccc",
                           textDecoration: "none",
                           color: "inherit",
+                          display: "inline-block",
                         }}
                       >
                         View
