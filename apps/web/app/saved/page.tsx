@@ -1,15 +1,65 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { DEMO_PROFILES, type Profile } from "../lib/sampleProfiles";
-import { getSavedIds, removeSavedId, getCurrentUserId } from "../lib/storage";
+import Link from "next/link";
+import { getOrCreateUserId } from "../lib/user";
+
+type ApiProfile = {
+  id: string;
+  owner_user_id: string;
+  displayName: string;
+  age: number;
+  city: string;
+  stateUS: string;
+  photo?: string | null;
+  identityPreview: string;
+  intention: string;
+  tags: string[];
+  isAvailable: boolean;
+};
+
+type IdListResponse = { ids: string[] };
+type ProfilesResponse = { items: ApiProfile[] };
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+  process.env.NEXT_PUBLIC_API_URL?.trim() ||
+  "https://black-within-api.onrender.com";
+
+async function apiGetSavedIds(userId: string): Promise<string[]> {
+  const res = await fetch(
+    `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error("Failed to load saved profiles.");
+  const json = (await res.json()) as IdListResponse;
+  return Array.isArray(json?.ids) ? json.ids : [];
+}
+
+async function apiListProfiles(): Promise<ApiProfile[]> {
+  const res = await fetch(`${API_BASE}/profiles?limit=200`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("Failed to load profiles.");
+  const json = (await res.json()) as ProfilesResponse;
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
+async function apiUnsaveProfile(userId: string, profileId: string) {
+  const url = `${API_BASE}/saved?user_id=${encodeURIComponent(
+    userId
+  )}&profile_id=${encodeURIComponent(profileId)}`;
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) throw new Error("Unsave failed.");
+}
 
 export default function SavedPage() {
-  const router = useRouter();
+  const [userId, setUserId] = useState<string>("");
 
   const [savedIds, setSavedIds] = useState<string[]>([]);
+  const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // For broken images → fallback to initials
@@ -18,52 +68,67 @@ export default function SavedPage() {
   // Only show profiles that are available + saved
   const savedProfiles = useMemo(() => {
     const set = new Set(savedIds);
-    return DEMO_PROFILES.filter((p) => p.isAvailable && set.has(p.id));
-  }, [savedIds]);
-
-  useEffect(() => {
-    const userId = getCurrentUserId();
-    if (!userId) {
-      router.push("/auth/login");
-      return;
-    }
-
-    (async () => {
-      try {
-        setLoading(true);
-        const saved = await getSavedIds(userId);
-        setSavedIds(saved);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [router]);
+    return profiles.filter((p) => p.isAvailable && set.has(p.id));
+  }, [savedIds, profiles]);
 
   function showToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2000);
   }
 
-  async function onRemove(p: Profile) {
-    const userId = getCurrentUserId();
-    if (!userId) {
-      router.push("/auth/login");
-      return;
-    }
-
-    await removeSavedId(userId, p.id);
-    setSavedIds(await getSavedIds(userId));
-    showToast("Removed from Saved Profiles.");
-  }
-
   function getInitials(displayName: string) {
-    return displayName
+    return (displayName || "")
       .trim()
       .split(" ")
       .map((w) => w[0])
       .join("")
       .slice(0, 2)
       .toUpperCase();
+  }
+
+  async function refresh(uid: string) {
+    try {
+      setApiError(null);
+      setLoading(true);
+
+      const [ids, allProfiles] = await Promise.all([
+        apiGetSavedIds(uid),
+        apiListProfiles(),
+      ]);
+
+      setSavedIds(ids);
+      setProfiles(allProfiles);
+    } catch (e: any) {
+      setApiError(e?.message || `Could not reach API at ${API_BASE}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const uid = getOrCreateUserId();
+    setUserId(uid);
+    refresh(uid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function onRemove(profileId: string) {
+    if (!userId) return;
+
+    const prev = savedIds;
+
+    // optimistic
+    setSavedIds((curr) => curr.filter((id) => id !== profileId));
+
+    try {
+      await apiUnsaveProfile(userId, profileId);
+      showToast("Removed from Saved Profiles.");
+      await refresh(userId);
+    } catch (e: any) {
+      setSavedIds(prev);
+      setApiError(e?.message || "Could not remove saved profile.");
+      showToast("Could not remove right now. Please try again.");
+    }
   }
 
   return (
@@ -96,7 +161,7 @@ export default function SavedPage() {
           </div>
 
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-            <a
+            <Link
               href="/discover"
               style={{
                 padding: "0.65rem 1rem",
@@ -107,9 +172,9 @@ export default function SavedPage() {
               }}
             >
               Back to Discover
-            </a>
+            </Link>
 
-            <a
+            <Link
               href="/notifications"
               style={{
                 padding: "0.65rem 1rem",
@@ -120,9 +185,24 @@ export default function SavedPage() {
               }}
             >
               Notifications
-            </a>
+            </Link>
           </div>
         </div>
+
+        {apiError && (
+          <div
+            style={{
+              marginTop: "0.9rem",
+              padding: "0.85rem",
+              borderRadius: 12,
+              border: "1px solid #f0c9c9",
+              background: "#fff7f7",
+              color: "#7a2d2d",
+            }}
+          >
+            <b>API notice:</b> {apiError}
+          </div>
+        )}
 
         {toast && (
           <div
@@ -181,7 +261,7 @@ export default function SavedPage() {
             </div>
 
             <div style={{ marginTop: "1rem" }}>
-              <a
+              <Link
                 href="/discover"
                 style={{
                   padding: "0.65rem 1rem",
@@ -193,7 +273,7 @@ export default function SavedPage() {
                 }}
               >
                 Go to Discover
-              </a>
+              </Link>
             </div>
           </div>
         ) : (
@@ -212,10 +292,10 @@ export default function SavedPage() {
                 <div
                   key={p.id}
                   style={{
-                    border: "1px solid #cfe7cf", // subtle “saved” border
+                    border: "1px solid #cfe7cf",
                     borderRadius: 14,
                     overflow: "hidden",
-                    boxShadow: "0 0 0 2px rgba(207,231,207,0.35) inset", // subtle highlight
+                    boxShadow: "0 0 0 2px rgba(207,231,207,0.35) inset",
                     background: "white",
                   }}
                 >
@@ -227,7 +307,6 @@ export default function SavedPage() {
                       position: "relative",
                     }}
                   >
-                    {/* Small Saved badge */}
                     <div
                       style={{
                         position: "absolute",
@@ -264,7 +343,7 @@ export default function SavedPage() {
                     ) : (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={p.photo}
+                        src={p.photo || ""}
                         alt={p.displayName}
                         style={{
                           width: "100%",
@@ -299,7 +378,7 @@ export default function SavedPage() {
                         flexWrap: "wrap",
                       }}
                     >
-                      {p.tags.slice(0, 3).map((t) => (
+                      {(p.tags || []).slice(0, 3).map((t) => (
                         <span
                           key={t}
                           style={{
@@ -323,7 +402,7 @@ export default function SavedPage() {
                         flexWrap: "wrap",
                       }}
                     >
-                      <a
+                      <Link
                         href={`/profiles/${p.id}`}
                         style={{
                           padding: "0.6rem 0.9rem",
@@ -334,10 +413,10 @@ export default function SavedPage() {
                         }}
                       >
                         View
-                      </a>
+                      </Link>
 
                       <button
-                        onClick={() => onRemove(p)}
+                        onClick={() => onRemove(p.id)}
                         style={{
                           padding: "0.6rem 0.9rem",
                           borderRadius: 10,
