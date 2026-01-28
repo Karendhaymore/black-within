@@ -2,12 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { DEMO_PROFILES, type Profile } from "../../lib/sampleProfiles";
+import type { Profile } from "../../lib/sampleProfiles";
 import { getOrCreateUserId } from "../../lib/user";
 
-// -----------------------------
-// API base
-// -----------------------------
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
   "https://black-within-api.onrender.com";
@@ -37,6 +34,13 @@ function addNotificationLocal(message: string) {
 // -----------------------------
 // API helpers
 // -----------------------------
+async function apiListProfiles(): Promise<Profile[]> {
+  const res = await fetch(`${API_BASE}/profiles`, { method: "GET" });
+  if (!res.ok) throw new Error("Failed to load profiles.");
+  const json = await res.json();
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
 async function apiGetSavedIds(userId: string): Promise<string[]> {
   const res = await fetch(
     `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`,
@@ -87,29 +91,19 @@ async function apiLikeProfile(userId: string, profileId: string) {
 export default function ProfileDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-
   const profileId = (params?.id || "").toString();
 
   const [userId, setUserId] = useState<string>("");
+
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
   const [loadingSets, setLoadingSets] = useState<boolean>(true);
 
-  // Broken image fallback
   const [brokenImage, setBrokenImage] = useState<boolean>(false);
-
-  const profile = useMemo<Profile | null>(() => {
-    const p = DEMO_PROFILES.find((x) => x.id === profileId) || null;
-    // If you only want available profiles visible:
-    if (p && !p.isAvailable) return null;
-    return p;
-  }, [profileId]);
-
-  const availableProfileIds = useMemo(() => {
-    return new Set(DEMO_PROFILES.filter((p) => p.isAvailable).map((p) => p.id));
-  }, []);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -126,6 +120,16 @@ export default function ProfileDetailPage() {
       .toUpperCase();
   }
 
+  const availableProfileIds = useMemo(() => {
+    return new Set(profiles.filter((p) => p.isAvailable).map((p) => p.id));
+  }, [profiles]);
+
+  const profile = useMemo<Profile | null>(() => {
+    const p = profiles.find((x) => x.id === profileId) || null;
+    if (p && !p.isAvailable) return null;
+    return p;
+  }, [profiles, profileId]);
+
   async function refreshSavedAndLikes(uid: string) {
     try {
       setApiError(null);
@@ -136,7 +140,6 @@ export default function ProfileDetailPage() {
         apiGetLikes(uid),
       ]);
 
-      // Keep only IDs that still exist in demo profiles
       const savedStillValid = saved.filter((id) => availableProfileIds.has(id));
       const likesStillValid = likes.filter((id) => availableProfileIds.has(id));
 
@@ -149,13 +152,33 @@ export default function ProfileDetailPage() {
     }
   }
 
+  // Load user id + profiles
   useEffect(() => {
     const uid = getOrCreateUserId();
     setUserId(uid);
 
     (async () => {
+      try {
+        setApiError(null);
+        setLoading(true);
+
+        const items = await apiListProfiles();
+        setProfiles(items);
+      } catch (e: any) {
+        setApiError(e?.message || `Could not reach API at ${API_BASE}`);
+      } finally {
+        setLoading(false);
+      }
+
       await refreshSavedAndLikes(uid);
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // When profiles load and availableProfileIds changes, re-filter saved/likes
+  useEffect(() => {
+    if (!userId) return;
+    refreshSavedAndLikes(userId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableProfileIds]);
 
@@ -166,7 +189,6 @@ export default function ProfileDetailPage() {
     const currentlySaved = savedIds.includes(profile.id);
     const prev = savedIds;
 
-    // Optimistic update
     setSavedIds((curr) =>
       curr.includes(profile.id)
         ? curr.filter((x) => x !== profile.id)
@@ -197,8 +219,9 @@ export default function ProfileDetailPage() {
 
     const prev = likedIds;
 
-    // Optimistic update
-    setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
+    setLikedIds((curr) =>
+      curr.includes(profile.id) ? curr : [profile.id, ...curr]
+    );
 
     try {
       await apiLikeProfile(userId, profile.id);
@@ -206,12 +229,20 @@ export default function ProfileDetailPage() {
       await refreshSavedAndLikes(userId);
 
       addNotificationLocal("Someone liked your profile.");
-      showToast("Like sent. They’ll be notified.");
+      showToast("Like sent.");
     } catch (e: any) {
       setLikedIds(prev);
       showToast("Could not like right now. Please try again.");
       setApiError(e?.message || "Like failed.");
     }
+  }
+
+  if (loading) {
+    return (
+      <main style={{ minHeight: "100vh", padding: "2rem" }}>
+        <p>Loading profile…</p>
+      </main>
+    );
   }
 
   if (!profile) {
@@ -229,8 +260,14 @@ export default function ProfileDetailPage() {
             Profile not found
           </h1>
           <p style={{ color: "#666" }}>
-            This profile may be unavailable in preview mode.
+            This profile ID was not found in the API list.
           </p>
+
+          {apiError && (
+            <div style={{ marginTop: "1rem", color: "crimson" }}>
+              <b>API notice:</b> {apiError}
+            </div>
+          )}
 
           <div style={{ marginTop: "1rem" }}>
             <a
@@ -341,7 +378,6 @@ export default function ProfileDetailPage() {
           </div>
         )}
 
-        {/* Main card */}
         <div
           style={{
             marginTop: "1.25rem",
@@ -352,7 +388,6 @@ export default function ProfileDetailPage() {
             background: "white",
           }}
         >
-          {/* Photo */}
           <div
             style={{
               width: "100%",
@@ -361,7 +396,6 @@ export default function ProfileDetailPage() {
               position: "relative",
             }}
           >
-            {/* Saved badge (only when saved) */}
             {isSaved && (
               <div
                 style={{
@@ -408,7 +442,6 @@ export default function ProfileDetailPage() {
             )}
           </div>
 
-          {/* Body */}
           <div style={{ padding: "1.25rem" }}>
             <div style={{ color: "#555", fontSize: "1.05rem" }}>
               {profile.identityPreview}
@@ -442,7 +475,6 @@ export default function ProfileDetailPage() {
               ))}
             </div>
 
-            {/* Actions */}
             <div
               style={{
                 marginTop: "1.1rem",
@@ -500,11 +532,6 @@ export default function ProfileDetailPage() {
               Messaging opens later. Likes notify, but conversations remain locked.
             </div>
           </div>
-        </div>
-
-        <div style={{ marginTop: "1.5rem", color: "#777", fontSize: "0.95rem" }}>
-          Launch note: this is a preview profile used to demonstrate the experience
-          while Black Within opens intentionally.
         </div>
       </div>
     </main>
