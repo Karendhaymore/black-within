@@ -15,8 +15,6 @@ type FormState = {
   photo: string;
 
   relationship_intent: string; // dropdown -> maps to API "intention"
-  cultural_identity_statement: string; // maps into API "identityPreview"
-
   biggest_challenge: string;
   one_thing_to_know: string;
 };
@@ -117,8 +115,6 @@ export default function MyProfilePage() {
     photo: "",
 
     relationship_intent: "Intentional partnership",
-    cultural_identity_statement: "",
-
     biggest_challenge: "",
     one_thing_to_know: "",
   });
@@ -127,6 +123,7 @@ export default function MyProfilePage() {
   const [spiritualSelected, setSpiritualSelected] = useState<string[]>([]);
 
   const selectedTags = useMemo(() => {
+    // tags are used for filters in Discover
     return [...culturalSelected, ...spiritualSelected].slice(0, 25);
   }, [culturalSelected, spiritualSelected]);
 
@@ -160,16 +157,21 @@ export default function MyProfilePage() {
     if (!ageNum || ageNum < 18) return showToast("Please enter a valid age (18+).");
     if (!form.city.trim()) return showToast("Please add your city.");
     if (!form.state_us.trim()) return showToast("Please add your state.");
-    if (!form.cultural_identity_statement.trim())
-      return showToast("Please add your Cultural Identity Statement.");
     if (!form.relationship_intent.trim())
       return showToast("Please select a Relationship Intent.");
+
+    // require at least 1 selection to keep the vibe aligned
+    if (culturalSelected.length === 0)
+      return showToast("Please select at least one Cultural Identity option.");
+    if (spiritualSelected.length === 0)
+      return showToast("Please select at least one Spiritual Framework option.");
 
     setSaving(true);
     setApiError(null);
 
     const identityPreviewPacked = [
-      `Cultural Identity Statement: ${form.cultural_identity_statement.trim()}`,
+      `Cultural Identity: ${culturalSelected.join(" • ")}`,
+      `Spiritual Framework: ${spiritualSelected.join(" • ")}`,
       form.biggest_challenge.trim()
         ? `Biggest Dating Challenge: ${form.biggest_challenge.trim()}`
         : "",
@@ -224,12 +226,9 @@ export default function MyProfilePage() {
           }}
         >
           <div>
-            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
-              My Profile
-            </h1>
+            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>My Profile</h1>
             <p style={{ color: "#555" }}>
-              Build your real profile (stored in the database). This is what
-              other users will browse.
+              Build your real profile (stored in the database). This is what other users will browse.
             </p>
             <div style={{ marginTop: "0.75rem", color: "#777", fontSize: "0.92rem" }}>
               Your user id: <code>{userId || "..."}</code>
@@ -282,28 +281,14 @@ export default function MyProfilePage() {
           </div>
         )}
 
-        <div
-          style={{
-            marginTop: "1.25rem",
-            border: "1px solid #eee",
-            borderRadius: 14,
-            padding: "1.25rem",
-          }}
-        >
+        <div style={{ marginTop: "1.25rem", border: "1px solid #eee", borderRadius: 14, padding: "1.25rem" }}>
           <div style={{ display: "grid", gap: "0.9rem" }}>
             <label>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                Name (profile name can be different)
-              </div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Name (profile name can be different)</div>
               <input
                 value={form.display_name}
                 onChange={(e) => onChange("display_name", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                 placeholder="e.g., NubianGrace"
               />
             </label>
@@ -313,12 +298,7 @@ export default function MyProfilePage() {
               <input
                 value={form.age}
                 onChange={(e) => onChange("age", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                 placeholder="e.g., 31"
               />
             </label>
@@ -329,12 +309,7 @@ export default function MyProfilePage() {
                 <input
                   value={form.city}
                   onChange={(e) => onChange("city", e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "0.7rem",
-                    borderRadius: 10,
-                    border: "1px solid #ccc",
-                  }}
+                  style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                   placeholder="e.g., Atlanta"
                 />
               </label>
@@ -344,47 +319,28 @@ export default function MyProfilePage() {
                 <input
                   value={form.state_us}
                   onChange={(e) => onChange("state_us", e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "0.7rem",
-                    borderRadius: 10,
-                    border: "1px solid #ccc",
-                  }}
+                  style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                   placeholder="e.g., GA"
                 />
               </label>
             </div>
 
             <label>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                Photo URL (optional)
-              </div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Photo URL (optional)</div>
               <input
                 value={form.photo}
                 onChange={(e) => onChange("photo", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                 placeholder="https://..."
               />
             </label>
 
             <label>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                Relationship Intent
-              </div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Relationship Intent</div>
               <select
                 value={form.relationship_intent}
                 onChange={(e) => onChange("relationship_intent", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
               >
                 {RELATIONSHIP_INTENTS.map((opt) => (
                   <option key={opt} value={opt}>
@@ -395,9 +351,7 @@ export default function MyProfilePage() {
             </label>
 
             <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                Cultural Identity Statement (multi-select)
-              </div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Cultural Identity (multi-select)</div>
               <div style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}>
                 Choose what describes your cultural identity. You can select multiple.
               </div>
@@ -407,18 +361,14 @@ export default function MyProfilePage() {
                     key={label}
                     label={label}
                     selected={culturalSelected.includes(label)}
-                    onToggle={() =>
-                      toggleInList(label, culturalSelected, setCulturalSelected)
-                    }
+                    onToggle={() => toggleInList(label, culturalSelected, setCulturalSelected)}
                   />
                 ))}
               </div>
             </div>
 
             <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                Spiritual Framework (multi-select)
-              </div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Spiritual Framework (multi-select)</div>
               <div style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}>
                 Choose what guides your life and love. You can select multiple.
               </div>
@@ -428,33 +378,11 @@ export default function MyProfilePage() {
                     key={label}
                     label={label}
                     selected={spiritualSelected.includes(label)}
-                    onToggle={() =>
-                      toggleInList(label, spiritualSelected, setSpiritualSelected)
-                    }
+                    onToggle={() => toggleInList(label, spiritualSelected, setSpiritualSelected)}
                   />
                 ))}
               </div>
             </div>
-
-            <label>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                Cultural Identity Statement (written)
-              </div>
-              <textarea
-                value={form.cultural_identity_statement}
-                onChange={(e) =>
-                  onChange("cultural_identity_statement", e.target.value)
-                }
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                  minHeight: 90,
-                }}
-                placeholder="Write your identity statement in your own words."
-              />
-            </label>
 
             <label>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>
@@ -463,31 +391,17 @@ export default function MyProfilePage() {
               <textarea
                 value={form.biggest_challenge}
                 onChange={(e) => onChange("biggest_challenge", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                  minHeight: 90,
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc", minHeight: 90 }}
                 placeholder="Share what you’ve experienced (brief is fine)."
               />
             </label>
 
             <label>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                One thing you need to know about me is…
-              </div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>One thing you need to know about me is…</div>
               <textarea
                 value={form.one_thing_to_know}
                 onChange={(e) => onChange("one_thing_to_know", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                  minHeight: 90,
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc", minHeight: 90 }}
                 placeholder="Your truth. Your standard. Your vibe."
               />
             </label>
@@ -512,8 +426,8 @@ export default function MyProfilePage() {
         </div>
 
         <div style={{ marginTop: "1.25rem", color: "#777", fontSize: "0.95rem" }}>
-          Tip: open the site in an incognito window (or a different browser) to create a
-          second user + second profile. Then Like each other and watch notifications show up.
+          Tip: open the site in an incognito window (or a different browser) to create a second user + second profile.
+          Then Like each other and watch notifications show up.
         </div>
       </div>
     </main>
