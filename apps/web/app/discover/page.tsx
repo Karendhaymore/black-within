@@ -8,9 +8,6 @@ import { getOrCreateUserId } from "../lib/user";
  * IMPORTANT:
  * Your API returns profiles in this shape (camelCase fields):
  *   displayName, stateUS, identityPreview, isAvailable, tags (array)
- *
- * Do NOT import Profile from sampleProfiles anymore, because it may have
- * different field names and will cause Discover to silently fail.
  */
 
 type ApiProfile = {
@@ -38,9 +35,7 @@ const API_BASE =
 async function apiGetSavedIds(userId: string): Promise<string[]> {
   const res = await fetch(
     `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`,
-    {
-      cache: "no-store",
-    }
+    { cache: "no-store" }
   );
   if (!res.ok) throw new Error(`Failed to load saved profiles (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
@@ -50,9 +45,7 @@ async function apiGetSavedIds(userId: string): Promise<string[]> {
 async function apiGetLikes(userId: string): Promise<string[]> {
   const res = await fetch(
     `${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`,
-    {
-      cache: "no-store",
-    }
+    { cache: "no-store" }
   );
   if (!res.ok) throw new Error(`Failed to load likes (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
@@ -76,8 +69,6 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
   if (!res.ok) throw new Error(`Unsave failed (${res.status}).`);
 }
 
-// NOTE: your backend /likes endpoint currently only needs user_id + profile_id.
-// We'll keep recipient_user_id in case you add it later, but it is not required right now.
 async function apiLikeProfile(
   userId: string,
   profileId: string,
@@ -95,7 +86,6 @@ async function apiLikeProfile(
   if (!res.ok) throw new Error(`Like failed (${res.status}).`);
 }
 
-// GET /profiles (exclude self so you don't see your own profile in Discover)
 async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[]> {
   const url =
     `${API_BASE}/profiles?limit=50` +
@@ -116,9 +106,7 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
 export default function DiscoverPage() {
   const [userId, setUserId] = useState<string>("");
 
-  // profiles from API
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
-
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -188,7 +176,6 @@ export default function DiscoverPage() {
         apiGetLikes(uid),
       ]);
 
-      // Keep only IDs that still exist in current profile list
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
       setLikedIds(likes.filter((id) => availableProfileIds.has(id)));
     } catch (e: any) {
@@ -198,7 +185,6 @@ export default function DiscoverPage() {
     }
   }
 
-  // Load profiles first
   useEffect(() => {
     const uid = getOrCreateUserId();
     setUserId(uid);
@@ -218,13 +204,11 @@ export default function DiscoverPage() {
         setLoadingProfiles(false);
       }
 
-      // Then load saved/likes
       await refreshSavedAndLikes(uid);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When profile list changes, re-filter saved/likes
   useEffect(() => {
     if (!userId) return;
     refreshSavedAndLikes(userId);
@@ -265,9 +249,7 @@ export default function DiscoverPage() {
     setLikedIds((curr) => (curr.includes(p.id) ? curr : [p.id, ...curr]));
 
     try {
-      // recipientUserId should be p.owner_user_id once you want targeted notifications.
       await apiLikeProfile(userId, p.id, p.owner_user_id);
-
       await refreshSavedAndLikes(userId);
       showToast("Like sent.");
     } catch (e: any) {
@@ -276,6 +258,16 @@ export default function DiscoverPage() {
       showToast("Could not like right now.");
     }
   }
+
+  const navBtnStyle: React.CSSProperties = {
+    padding: "0.65rem 1rem",
+    border: "1px solid #ccc",
+    borderRadius: 10,
+    textDecoration: "none",
+    color: "inherit",
+    background: "white",
+    display: "inline-block",
+  };
 
   return (
     <main
@@ -294,24 +286,28 @@ export default function DiscoverPage() {
             justifyContent: "space-between",
             gap: 12,
             alignItems: "center",
+            flexWrap: "wrap",
           }}
         >
           <h1 style={{ margin: 0 }}>Discover</h1>
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <a
-              href="/profile"
-              style={{
-                padding: "0.65rem 1rem",
-                border: "1px solid #ccc",
-                borderRadius: 10,
-                textDecoration: "none",
-                color: "inherit",
-                background: "white",
-              }}
-            >
+          {/* ✅ Discover Navigation */}
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <Link href="/profile" style={navBtnStyle}>
               My Profile
-            </a>
+            </Link>
+
+            <Link href="/saved" style={navBtnStyle}>
+              Saved
+            </Link>
+
+            <Link href="/liked" style={navBtnStyle}>
+              Liked
+            </Link>
+
+            <Link href="/notifications" style={navBtnStyle}>
+              Notifications
+            </Link>
           </div>
         </div>
 
@@ -413,7 +409,6 @@ export default function DiscoverPage() {
                       background: "white",
                     }}
                   >
-                    {/* Photo / initials */}
                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                       {p.photo && !brokenImages[p.id] ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -496,7 +491,6 @@ export default function DiscoverPage() {
                     )}
 
                     <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      {/* ✅ FIXED: correct Link usage (NO nested <a>) */}
                       <Link
                         href={`/profiles/${p.id}`}
                         style={{
@@ -545,7 +539,6 @@ export default function DiscoverPage() {
           )}
         </div>
 
-        {/* Toast */}
         {toast && (
           <div
             style={{
