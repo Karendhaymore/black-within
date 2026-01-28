@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     Boolean,
     text,
+    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
@@ -122,7 +123,7 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
-    # ✅ NEW (nullable) fields to support "real notifications"
+    # NEW (for “real” wiring)
     actor_user_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
@@ -153,7 +154,6 @@ def _auto_migrate_profiles_table():
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo VARCHAR(500);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS identity_preview VARCHAR(500);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS intention VARCHAR(120);"""))
-
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tags_csv TEXT DEFAULT '[]';"""))
 
         conn.execute(text("""
@@ -178,8 +178,7 @@ def _auto_migrate_profiles_table():
 
 def _auto_migrate_notifications_table():
     """
-    Adds missing columns to notifications so we can store actor_user_id + profile_id.
-    Safe to run repeatedly.
+    Add actor_user_id/profile_id columns if missing (for richer notifications).
     """
     with engine.begin() as conn:
         conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_user_id VARCHAR(40);"""))
@@ -189,7 +188,7 @@ def _auto_migrate_notifications_table():
 # Create tables if missing
 Base.metadata.create_all(bind=engine)
 
-# Then run MVP migrations (adds columns if missing)
+# Then run MVP migrations
 try:
     _auto_migrate_profiles_table()
 except Exception as e:
@@ -255,6 +254,10 @@ class ProfileItem(BaseModel):
 
 
 class ProfilesResponse(BaseModel):
+    items: List[ProfileItem]
+
+
+class ProfilesListResponse(BaseModel):
     items: List[ProfileItem]
 
 
@@ -362,7 +365,7 @@ def health():
 
 
 # -----------------------------
-# ME (frontend expects this)
+# ME
 # -----------------------------
 @app.get("/me", response_model=MeResponse)
 def me(user_id: str = Query(...)):
@@ -675,8 +678,8 @@ def get_notifications(user_id: str = Query(...)):
                 type=n.type or "notice",
                 message=n.message,
                 created_at=n.created_at.isoformat(),
-                actor_user_id=getattr(n, "actor_user_id", None),
-                profile_id=getattr(n, "profile_id", None),
+                actor_user_id=n.actor_user_id,
+                profile_id=n.profile_id,
             )
             for n in rows
         ]
@@ -697,10 +700,91 @@ def clear_notifications(user_id: str = Query(...)):
 # -----------------------------
 @app.get("/likes", response_model=IdListResponse)
 def get_likes(user_id: str = Query(...)):
+    """
+    Backward compatible: returns profile_ids that THIS user has liked.
+    """
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
         rows = session.execute(select(Like.profile_id).where(Like.user_id == user_id)).all()
         return IdListResponse(ids=[r[0] for r in rows])
+
+
+@app.get("/likes/sent", response_model=IdListResponse)
+def get_likes_sent(user_id: str = Query(...)):
+    """
+    Alias of /likes (explicit naming).
+    """
+    return get_likes(user_id=user_id)
+
+
+@app.get("/likes/received", response_model=ProfilesListResponse)
+def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
+    """
+    Returns PROFILES of people who liked *your* profile.
+    Logic:
+      - Find likes for profiles owned by you
+      - For each like.user_id (liker), fetch their profile by owner_user_id
+    """
+    user_id = _ensure_user(user_id)
+
+    with Session(engine) as session:
+        # Get my profile id (the profile others are liking)
+        my_profile = session.execute(
+            select(Profile).where(Profile.owner_user_id == user_id)
+        ).scalar_one_or_none()
+
+        if not my_profile:
+            return ProfilesListResponse(items=[])
+
+        # Get distinct liker user_ids for likes on my profile
+        liker_rows = session.execute(
+            select(Like.user_id)
+            .where(Like.profile_id == my_profile.id)
+            .order_by(Like.created_at.desc())
+            .limit(limit)
+        ).all()
+        liker_user_ids = [r[0] for r in liker_rows]
+
+        if not liker_user_ids:
+            return ProfilesListResponse(items=[])
+
+        # Fetch profiles for those likers
+        prof_rows = session.execute(
+            select(Profile)
+            .where(Profile.owner_user_id.in_(liker_user_ids))
+            .where(Profile.is_available == True)
+        ).scalars().all()
+
+        # Keep stable order: by most recent like
+        prof_by_owner = {p.owner_user_id: p for p in prof_rows}
+        ordered_profiles = [prof_by_owner[uid] for uid in liker_user_ids if uid in prof_by_owner]
+
+        items: List[ProfileItem] = []
+        for p in ordered_profiles:
+            try:
+                tags = json.loads(p.tags_csv or "[]")
+                if not isinstance(tags, list):
+                    tags = []
+            except Exception:
+                tags = []
+
+            items.append(
+                ProfileItem(
+                    id=p.id,
+                    owner_user_id=p.owner_user_id,
+                    displayName=p.display_name,
+                    age=p.age,
+                    city=p.city,
+                    stateUS=p.state_us,
+                    photo=p.photo,
+                    identityPreview=p.identity_preview,
+                    intention=p.intention,
+                    tags=tags,
+                    isAvailable=bool(p.is_available),
+                )
+            )
+
+        return ProfilesListResponse(items=items)
 
 
 @app.post("/likes")
@@ -721,16 +805,9 @@ def like(payload: ProfileAction):
         if existing:
             return {"ok": True}
 
-        session.add(
-            Like(
-                user_id=liker_user_id,
-                profile_id=profile_id,
-                created_at=datetime.utcnow(),
-            )
-        )
+        session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
 
-        # ✅ REAL notifications: recipient is the profile owner
-        recipient_user_id = (prof.owner_user_id or "").strip()
+        recipient_user_id = prof.owner_user_id
         if recipient_user_id and recipient_user_id != liker_user_id:
             session.add(
                 Notification(
@@ -738,8 +815,8 @@ def like(payload: ProfileAction):
                     type="like",
                     message="Someone liked your profile.",
                     created_at=datetime.utcnow(),
-                    actor_user_id=liker_user_id,   # ✅ who did it
-                    profile_id=profile_id,         # ✅ which profile
+                    actor_user_id=liker_user_id,
+                    profile_id=profile_id,
                 )
             )
 
