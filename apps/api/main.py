@@ -4,7 +4,7 @@ import secrets
 import hashlib
 import json
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +21,6 @@ from sqlalchemy import (
     Text,
     Boolean,
     text,
-    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
@@ -79,16 +78,29 @@ class Profile(Base):
     __tablename__ = "profiles"
     id: Mapped[str] = mapped_column(String(60), primary_key=True)
     owner_user_id: Mapped[str] = mapped_column(String(40), index=True)
+
     display_name: Mapped[str] = mapped_column(String(80))
     age: Mapped[int] = mapped_column(Integer)
     city: Mapped[str] = mapped_column(String(80))
     state_us: Mapped[str] = mapped_column(String(80))
     photo: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
     identity_preview: Mapped[str] = mapped_column(String(500))
     intention: Mapped[str] = mapped_column(String(120))
 
     # IMPORTANT: DB currently has tags_csv; keep that name to avoid 500s
     tags_csv: Mapped[str] = mapped_column(Text, default="[]")
+
+    # NEW: alignment fields (stored as JSON strings in TEXT columns)
+    cultural_identity_csv: Mapped[str] = mapped_column(Text, default="[]")
+    spiritual_framework_csv: Mapped[str] = mapped_column(Text, default="[]")
+
+    # NEW: relationship intent (single-select)
+    relationship_intent: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    # NEW: conscious prompts
+    dating_challenge_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    personal_truth_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
@@ -129,7 +141,7 @@ class Notification(Base):
     # Target profile (the profile that was liked)
     profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
-    # Actor's profile id (so frontend can link to liker's profile)
+    # Actor profile id (so frontend can link to liker's profile page)
     actor_profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
 
@@ -161,6 +173,7 @@ def _auto_migrate_profiles_table():
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS intention VARCHAR(120);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tags_csv TEXT DEFAULT '[]';"""))
 
+        # Back-compat: if older column tags_json exists, copy into tags_csv when empty
         conn.execute(text("""
             DO $$
             BEGIN
@@ -176,6 +189,13 @@ def _auto_migrate_profiles_table():
             END $$;
         """))
 
+        # NEW alignment columns
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS cultural_identity_csv TEXT DEFAULT '[]';"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spiritual_framework_csv TEXT DEFAULT '[]';"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS relationship_intent VARCHAR(120);"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS dating_challenge_text TEXT;"""))
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS personal_truth_text TEXT;"""))
+
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE;"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
@@ -184,7 +204,6 @@ def _auto_migrate_profiles_table():
 def _auto_migrate_notifications_table():
     """
     Add actor_user_id/profile_id/actor_profile_id columns if missing (for richer notifications).
-    NOTE: profile_id exists as the target profile that was liked.
     """
     with engine.begin() as conn:
         conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_user_id VARCHAR(40);"""))
@@ -243,7 +262,6 @@ class NotificationItem(BaseModel):
     actor_user_id: Optional[str] = None
     actor_profile_id: Optional[str] = None
     actor_display_name: Optional[str] = None
-    actor_photo: Optional[str] = None
 
     # What it was about (e.g., the profile that got liked)
     profile_id: Optional[str] = None
@@ -256,15 +274,24 @@ class NotificationsResponse(BaseModel):
 class ProfileItem(BaseModel):
     id: str
     owner_user_id: str
+
     displayName: str
     age: int
     city: str
     stateUS: str
     photo: Optional[str] = None
+
     identityPreview: str
     intention: str
     tags: List[str]
     isAvailable: bool
+
+    # NEW alignment fields
+    culturalIdentity: List[str] = []
+    spiritualFramework: List[str] = []
+    relationshipIntent: Optional[str] = None
+    datingChallenge: Optional[str] = None
+    personalTruth: Optional[str] = None
 
 
 class ProfilesResponse(BaseModel):
@@ -277,13 +304,15 @@ class ProfilesListResponse(BaseModel):
 
 # Accept BOTH camelCase and snake_case (frontend may send either)
 class UpsertMyProfilePayload(BaseModel):
-    owner_user_id: str  # camelCase
+    owner_user_id: str  # camelCase id (we keep this key name for your frontend)
+
+    # existing camelCase
     displayName: Optional[str] = None
     stateUS: Optional[str] = None
     identityPreview: Optional[str] = None
     isAvailable: Optional[bool] = True
 
-    # snake_case
+    # existing snake_case fallbacks
     display_name: Optional[str] = None
     state_us: Optional[str] = None
     identity_preview: Optional[str] = None
@@ -294,6 +323,20 @@ class UpsertMyProfilePayload(BaseModel):
     photo: Optional[str] = None
     intention: str
     tags: List[str] = []
+
+    # NEW alignment fields (camelCase)
+    culturalIdentity: Optional[List[str]] = None
+    spiritualFramework: Optional[List[str]] = None
+    relationshipIntent: Optional[str] = None
+    datingChallenge: Optional[str] = None
+    personalTruth: Optional[str] = None
+
+    # NEW alignment fields (snake_case fallbacks)
+    cultural_identity: Optional[List[str]] = None
+    spiritual_framework: Optional[List[str]] = None
+    relationship_intent: Optional[str] = None
+    dating_challenge_text: Optional[str] = None
+    personal_truth_text: Optional[str] = None
 
 
 # -----------------------------
@@ -362,14 +405,32 @@ def _send_email_sendgrid(to_email: str, subject: str, html: str) -> None:
         raise RuntimeError(f"SendGrid send failed: {resp.status_code} {resp.body}")
 
 
-def _parse_tags(tags_csv: Optional[str]) -> List[str]:
+def _parse_json_list(s: Optional[str]) -> List[str]:
     try:
-        tags = json.loads(tags_csv or "[]")
-        if not isinstance(tags, list):
+        v = json.loads(s or "[]")
+        if not isinstance(v, list):
             return []
-        return tags
+        out: List[str] = []
+        for item in v:
+            if isinstance(item, str):
+                t = item.strip()
+                if t:
+                    out.append(t)
+        return out
     except Exception:
         return []
+
+
+def _coerce_str_list(v: Any) -> List[str]:
+    if not isinstance(v, list):
+        return []
+    out: List[str] = []
+    for item in v:
+        if isinstance(item, str):
+            t = item.strip()
+            if t:
+                out.append(t)
+    return out
 
 
 @app.get("/")
@@ -494,7 +555,9 @@ def list_profiles(
         items: List[ProfileItem] = []
 
         for p in rows:
-            tags = _parse_tags(p.tags_csv)
+            tags = _parse_json_list(p.tags_csv)
+            cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
+            spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
 
             items.append(
                 ProfileItem(
@@ -509,6 +572,11 @@ def list_profiles(
                     intention=p.intention,
                     tags=tags,
                     isAvailable=bool(p.is_available),
+                    culturalIdentity=cultural,
+                    spiritualFramework=spiritual,
+                    relationshipIntent=getattr(p, "relationship_intent", None),
+                    datingChallenge=getattr(p, "dating_challenge_text", None),
+                    personalTruth=getattr(p, "personal_truth_text", None),
                 )
             )
 
@@ -534,10 +602,38 @@ def _coerce_upsert_fields(payload: UpsertMyProfilePayload):
     return display, state, preview, bool(is_avail)
 
 
+def _coerce_alignment_fields(payload: UpsertMyProfilePayload):
+    cultural = payload.culturalIdentity if payload.culturalIdentity is not None else payload.cultural_identity
+    spiritual = payload.spiritualFramework if payload.spiritualFramework is not None else payload.spiritual_framework
+
+    cultural_list = _coerce_str_list(cultural)[:50]
+    spiritual_list = _coerce_str_list(spiritual)[:50]
+
+    rel_intent = (payload.relationshipIntent or payload.relationship_intent or "").strip() or None
+
+    dating_challenge = (
+        payload.datingChallenge
+        if payload.datingChallenge is not None
+        else payload.dating_challenge_text
+    )
+    personal_truth = (
+        payload.personalTruth
+        if payload.personalTruth is not None
+        else payload.personal_truth_text
+    )
+
+    dating_challenge = (dating_challenge or "").strip() or None
+    personal_truth = (personal_truth or "").strip() or None
+
+    return cultural_list, spiritual_list, rel_intent, dating_challenge, personal_truth
+
+
 @app.post("/profiles/upsert", response_model=ProfileItem)
 def upsert_my_profile(payload: UpsertMyProfilePayload):
     owner_user_id = _ensure_user(payload.owner_user_id)
     display, state, preview, is_avail = _coerce_upsert_fields(payload)
+
+    cultural_list, spiritual_list, rel_intent, dating_challenge, personal_truth = _coerce_alignment_fields(payload)
 
     now = datetime.utcnow()
     with Session(engine) as session:
@@ -545,7 +641,9 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             select(Profile).where(Profile.owner_user_id == owner_user_id)
         ).scalar_one_or_none()
 
-        tags_csv = json.dumps((payload.tags or [])[:25])
+        tags_csv = json.dumps(_coerce_str_list(payload.tags)[:25])
+        cultural_csv = json.dumps(cultural_list)
+        spiritual_csv = json.dumps(spiritual_list)
 
         if existing:
             existing.display_name = display
@@ -556,6 +654,14 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             existing.identity_preview = preview
             existing.intention = payload.intention.strip()
             existing.tags_csv = tags_csv
+
+            # NEW alignment fields
+            existing.cultural_identity_csv = cultural_csv
+            existing.spiritual_framework_csv = spiritual_csv
+            existing.relationship_intent = rel_intent
+            existing.dating_challenge_text = dating_challenge
+            existing.personal_truth_text = personal_truth
+
             existing.is_available = is_avail
             existing.updated_at = now
             session.commit()
@@ -574,6 +680,11 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
                     identity_preview=preview,
                     intention=payload.intention.strip(),
                     tags_csv=tags_csv,
+                    cultural_identity_csv=cultural_csv,
+                    spiritual_framework_csv=spiritual_csv,
+                    relationship_intent=rel_intent,
+                    dating_challenge_text=dating_challenge,
+                    personal_truth_text=personal_truth,
                     is_available=is_avail,
                     created_at=now,
                     updated_at=now,
@@ -582,7 +693,9 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             session.commit()
 
         p = session.get(Profile, pid)
-        tags = _parse_tags(p.tags_csv)
+        tags = _parse_json_list(p.tags_csv)
+        cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
+        spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
 
         return ProfileItem(
             id=p.id,
@@ -596,6 +709,11 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             intention=p.intention,
             tags=tags,
             isAvailable=bool(p.is_available),
+            culturalIdentity=cultural,
+            spiritualFramework=spiritual,
+            relationshipIntent=getattr(p, "relationship_intent", None),
+            datingChallenge=getattr(p, "dating_challenge_text", None),
+            personalTruth=getattr(p, "personal_truth_text", None),
         )
 
 
@@ -679,7 +797,6 @@ def get_notifications(user_id: str = Query(...)):
     Returns notifications with enriched actor info:
       - actor_display_name
       - actor_profile_id (so frontend can link to /profiles/{actor_profile_id})
-      - actor_photo (so frontend can show photo)
     """
     user_id = _ensure_user(user_id)
 
@@ -691,7 +808,6 @@ def get_notifications(user_id: str = Query(...)):
             .limit(NOTIFICATIONS_LIMIT)
         ).scalars().all()
 
-        # Collect actor_user_ids to enrich display name + profile id + photo
         actor_ids = [n.actor_user_id for n in rows if n.actor_user_id]
         actor_map: Dict[str, Dict[str, Optional[str]]] = {}
 
@@ -704,7 +820,6 @@ def get_notifications(user_id: str = Query(...)):
                 actor_map[p.owner_user_id] = {
                     "actor_display_name": p.display_name,
                     "actor_profile_id": p.id,
-                    "actor_photo": p.photo,
                 }
 
         items: List[NotificationItem] = []
@@ -712,13 +827,11 @@ def get_notifications(user_id: str = Query(...)):
             actor_info = actor_map.get(n.actor_user_id or "", {})
             actor_display_name = actor_info.get("actor_display_name")
             actor_profile_id = actor_info.get("actor_profile_id")
-            actor_photo = actor_info.get("actor_photo")
 
-            # If we already stored actor_profile_id in notification row, prefer it
+            # Prefer stored actor_profile_id if present
             if n.actor_profile_id:
                 actor_profile_id = n.actor_profile_id
 
-            # If actor_profile_id is set, we can still keep the display_name/photo from actor_map.
             items.append(
                 NotificationItem(
                     id=str(n.id),
@@ -729,7 +842,6 @@ def get_notifications(user_id: str = Query(...)):
                     actor_user_id=n.actor_user_id,
                     actor_profile_id=actor_profile_id,
                     actor_display_name=actor_display_name,
-                    actor_photo=actor_photo,
                     profile_id=n.profile_id,
                 )
             )
@@ -772,9 +884,6 @@ def get_likes_sent(user_id: str = Query(...)):
 def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
     """
     Returns PROFILES of people who liked *your* profile.
-    Logic:
-      - Find likes for profiles owned by you
-      - For each like.user_id (liker), fetch their profile by owner_user_id
     """
     user_id = _ensure_user(user_id)
 
@@ -808,7 +917,10 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
 
         items: List[ProfileItem] = []
         for p in ordered_profiles:
-            tags = _parse_tags(p.tags_csv)
+            tags = _parse_json_list(p.tags_csv)
+            cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
+            spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
+
             items.append(
                 ProfileItem(
                     id=p.id,
@@ -822,6 +934,11 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
                     intention=p.intention,
                     tags=tags,
                     isAvailable=bool(p.is_available),
+                    culturalIdentity=cultural,
+                    spiritualFramework=spiritual,
+                    relationshipIntent=getattr(p, "relationship_intent", None),
+                    datingChallenge=getattr(p, "dating_challenge_text", None),
+                    personalTruth=getattr(p, "personal_truth_text", None),
                 )
             )
 
@@ -863,7 +980,7 @@ def like(payload: ProfileAction):
                     message="Someone liked your profile.",
                     created_at=datetime.utcnow(),
                     actor_user_id=liker_user_id,
-                    profile_id=profile_id,  # target profile that was liked
+                    profile_id=profile_id,
                     actor_profile_id=(actor_profile.id if actor_profile else None),
                 )
             )
