@@ -4,7 +4,7 @@ import secrets
 import hashlib
 import json
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -123,9 +123,14 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
-    # NEW (for “real” wiring)
+    # Actor (who caused the notification)
     actor_user_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+
+    # Target profile (the profile that was liked) - you already had this column name in DB
     profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+
+    # NEW: actor profile id (so frontend can link to liker's profile page)
+    actor_profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
 
 class LoginCode(Base):
@@ -178,11 +183,13 @@ def _auto_migrate_profiles_table():
 
 def _auto_migrate_notifications_table():
     """
-    Add actor_user_id/profile_id columns if missing (for richer notifications).
+    Add actor_user_id/profile_id/actor_profile_id columns if missing (for richer notifications).
+    NOTE: profile_id already exists in your model+DB as the target profile that was liked.
     """
     with engine.begin() as conn:
         conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_user_id VARCHAR(40);"""))
         conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS profile_id VARCHAR(60);"""))
+        conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_profile_id VARCHAR(60);"""))
 
 
 # Create tables if missing
@@ -231,7 +238,13 @@ class NotificationItem(BaseModel):
     type: str
     message: str
     created_at: str
+
+    # Who caused it
     actor_user_id: Optional[str] = None
+    actor_profile_id: Optional[str] = None
+    actor_display_name: Optional[str] = None
+
+    # What it was about (e.g., the profile that got liked)
     profile_id: Optional[str] = None
 
 
@@ -285,7 +298,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.0.4")
+app = FastAPI(title="Black Within API", version="1.0.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -348,6 +361,16 @@ def _send_email_sendgrid(to_email: str, subject: str, html: str) -> None:
         raise RuntimeError(f"SendGrid send failed: {resp.status_code} {resp.body}")
 
 
+def _parse_tags(tags_csv: Optional[str]) -> List[str]:
+    try:
+        tags = json.loads(tags_csv or "[]")
+        if not isinstance(tags, list):
+            return []
+        return tags
+    except Exception:
+        return []
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "service": "black-within-api"}
@@ -360,7 +383,7 @@ def health():
         "previewMode": AUTH_PREVIEW_MODE,
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
         "corsOrigins": origins,
-        "version": "1.0.4",
+        "version": "1.0.5",
     }
 
 
@@ -470,12 +493,7 @@ def list_profiles(
         items: List[ProfileItem] = []
 
         for p in rows:
-            try:
-                tags = json.loads(p.tags_csv or "[]")
-                if not isinstance(tags, list):
-                    tags = []
-            except Exception:
-                tags = []
+            tags = _parse_tags(p.tags_csv)
 
             items.append(
                 ProfileItem(
@@ -563,13 +581,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             session.commit()
 
         p = session.get(Profile, pid)
-        tags = []
-        try:
-            tags = json.loads(p.tags_csv or "[]")
-            if not isinstance(tags, list):
-                tags = []
-        except Exception:
-            tags = []
+        tags = _parse_tags(p.tags_csv)
 
         return ProfileItem(
             id=p.id,
@@ -662,7 +674,13 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
 # -----------------------------
 @app.get("/notifications", response_model=NotificationsResponse)
 def get_notifications(user_id: str = Query(...)):
+    """
+    Returns notifications with enriched actor info:
+      - actor_display_name
+      - actor_profile_id (so frontend can link to /profiles/{actor_profile_id})
+    """
     user_id = _ensure_user(user_id)
+
     with Session(engine) as session:
         rows = session.execute(
             select(Notification)
@@ -671,18 +689,46 @@ def get_notifications(user_id: str = Query(...)):
             .limit(NOTIFICATIONS_LIMIT)
         ).scalars().all()
 
-        items = [
-            NotificationItem(
-                id=str(n.id),
-                user_id=n.user_id,
-                type=n.type or "notice",
-                message=n.message,
-                created_at=n.created_at.isoformat(),
-                actor_user_id=n.actor_user_id,
-                profile_id=n.profile_id,
+        # Collect actor_user_ids to enrich display name + profile id
+        actor_ids = [n.actor_user_id for n in rows if n.actor_user_id]
+        actor_map: Dict[str, Dict[str, Optional[str]]] = {}
+
+        if actor_ids:
+            # Get each actor's profile (by owner_user_id)
+            prof_rows = session.execute(
+                select(Profile).where(Profile.owner_user_id.in_(actor_ids))
+            ).scalars().all()
+
+            for p in prof_rows:
+                actor_map[p.owner_user_id] = {
+                    "actor_display_name": p.display_name,
+                    "actor_profile_id": p.id,
+                }
+
+        items: List[NotificationItem] = []
+        for n in rows:
+            actor_info = actor_map.get(n.actor_user_id or "", {})
+            actor_display_name = actor_info.get("actor_display_name")
+            actor_profile_id = actor_info.get("actor_profile_id")
+
+            # If we already stored actor_profile_id in the notification row, prefer it
+            if n.actor_profile_id:
+                actor_profile_id = n.actor_profile_id
+
+            items.append(
+                NotificationItem(
+                    id=str(n.id),
+                    user_id=n.user_id,
+                    type=n.type or "notice",
+                    message=n.message,
+                    created_at=n.created_at.isoformat(),
+                    actor_user_id=n.actor_user_id,
+                    actor_profile_id=actor_profile_id,
+                    actor_display_name=actor_display_name,
+                    profile_id=n.profile_id,
+                )
             )
-            for n in rows
-        ]
+
         return NotificationsResponse(items=items)
 
 
@@ -728,7 +774,6 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        # Get my profile id (the profile others are liking)
         my_profile = session.execute(
             select(Profile).where(Profile.owner_user_id == user_id)
         ).scalar_one_or_none()
@@ -736,7 +781,6 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
         if not my_profile:
             return ProfilesListResponse(items=[])
 
-        # Get distinct liker user_ids for likes on my profile
         liker_rows = session.execute(
             select(Like.user_id)
             .where(Like.profile_id == my_profile.id)
@@ -748,26 +792,18 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
         if not liker_user_ids:
             return ProfilesListResponse(items=[])
 
-        # Fetch profiles for those likers
         prof_rows = session.execute(
             select(Profile)
             .where(Profile.owner_user_id.in_(liker_user_ids))
             .where(Profile.is_available == True)
         ).scalars().all()
 
-        # Keep stable order: by most recent like
         prof_by_owner = {p.owner_user_id: p for p in prof_rows}
         ordered_profiles = [prof_by_owner[uid] for uid in liker_user_ids if uid in prof_by_owner]
 
         items: List[ProfileItem] = []
         for p in ordered_profiles:
-            try:
-                tags = json.loads(p.tags_csv or "[]")
-                if not isinstance(tags, list):
-                    tags = []
-            except Exception:
-                tags = []
-
+            tags = _parse_tags(p.tags_csv)
             items.append(
                 ProfileItem(
                     id=p.id,
@@ -808,7 +844,14 @@ def like(payload: ProfileAction):
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
 
         recipient_user_id = prof.owner_user_id
+
+        # Find the actor's profile (if they have one) so we can link to it in Notifications UI
+        actor_profile = session.execute(
+            select(Profile).where(Profile.owner_user_id == liker_user_id)
+        ).scalar_one_or_none()
+
         if recipient_user_id and recipient_user_id != liker_user_id:
+            # Store generic message (UI will show actor name if available)
             session.add(
                 Notification(
                     user_id=recipient_user_id,
@@ -816,7 +859,8 @@ def like(payload: ProfileAction):
                     message="Someone liked your profile.",
                     created_at=datetime.utcnow(),
                     actor_user_id=liker_user_id,
-                    profile_id=profile_id,
+                    profile_id=profile_id,  # target profile that was liked
+                    actor_profile_id=(actor_profile.id if actor_profile else None),
                 )
             )
 
