@@ -124,6 +124,43 @@ async function apiLikeProfile(
   if (!res.ok) throw new Error(`Like failed (${res.status}).`);
 }
 
+// -----------------------------
+// Identity Preview formatting
+// -----------------------------
+function normalizeHeading(label: string) {
+  const x = (label || "").trim().toLowerCase();
+  if (x.startsWith("cultural identity")) return "Cultural Identity";
+  if (x.startsWith("spiritual framework")) return "Spiritual Framework";
+  if (x.startsWith("biggest dating challenge")) return "Biggest Dating Challenge";
+  if (x.startsWith("one thing you need to know")) return "One Thing You Need to Know";
+  return (label || "").trim();
+}
+
+function parseIdentityPreview(raw: string): { title: string; body: string }[] {
+  const text = (raw || "").trim();
+  if (!text) return [];
+
+  // Expect blocks separated by blank lines
+  const blocks = text
+    .split(/\n\s*\n/g)
+    .map((b) => b.trim())
+    .filter(Boolean);
+
+  return blocks.map((b) => {
+    // If it looks like "Label: content" on the first line, split once
+    const idx = b.indexOf(":");
+    if (idx > 0 && idx < 60) {
+      const label = b.slice(0, idx).trim();
+      const content = b.slice(idx + 1).trim();
+      return {
+        title: normalizeHeading(label),
+        body: content || b,
+      };
+    }
+    return { title: "About", body: b };
+  });
+}
+
 export default function ProfileDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -166,6 +203,10 @@ export default function ProfileDetailPage() {
     if (p && !p.isAvailable) return null;
     return p;
   }, [profiles, profileId]);
+
+  const identitySections = useMemo(() => {
+    return parseIdentityPreview(profile?.identityPreview || "");
+  }, [profile?.identityPreview]);
 
   async function refreshSavedAndLikes(uid: string) {
     try {
@@ -499,11 +540,35 @@ export default function ProfileDetailPage() {
 
           {/* Body */}
           <div style={{ padding: "1.25rem" }}>
-            <div style={{ color: "#555", fontSize: "1.05rem" }}>
-              {profile.identityPreview}
-            </div>
+            {/* Identity sections */}
+            {identitySections.length > 0 ? (
+              <div style={{ display: "grid", gap: "0.85rem" }}>
+                {identitySections.map((sec, idx) => (
+                  <div
+                    key={`${profile.id}-sec-${idx}`}
+                    style={{
+                      border: "1px solid #eee",
+                      borderRadius: 14,
+                      padding: "0.9rem",
+                      background: "white",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, marginBottom: 6 }}>
+                      {sec.title}
+                    </div>
+                    <div style={{ color: "#555", fontSize: "1.02rem", whiteSpace: "pre-wrap" }}>
+                      {sec.body}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ color: "#555", fontSize: "1.05rem" }}>
+                {profile.identityPreview}
+              </div>
+            )}
 
-            <div style={{ marginTop: "0.85rem", color: "#666" }}>
+            <div style={{ marginTop: "0.95rem", color: "#666" }}>
               <b>Intention:</b> {profile.intention}
             </div>
 
@@ -516,7 +581,7 @@ export default function ProfileDetailPage() {
                   flexWrap: "wrap",
                 }}
               >
-                {tags.slice(0, 10).map((t, idx) => (
+                {tags.slice(0, 12).map((t, idx) => (
                   <span
                     key={`${profile.id}-tag-${idx}`}
                     style={{
@@ -587,9 +652,7 @@ export default function ProfileDetailPage() {
               </a>
             </div>
 
-            <div
-              style={{ marginTop: "0.9rem", color: "#777", fontSize: "0.92rem" }}
-            >
+            <div style={{ marginTop: "0.9rem", color: "#777", fontSize: "0.92rem" }}>
               Messaging opens later. Likes notify, but conversations remain locked.
             </div>
           </div>
