@@ -1,38 +1,36 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getOrCreateUserId } from "../lib/user";
 
-// -----------------------------
-// API base
-// -----------------------------
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+  process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
-// -----------------------------
-// Types
-// -----------------------------
 type ApiNotification = {
   id: string;
-  user_id: string;
+  user_id: string; // recipient
   type: string;
   message: string;
   created_at: string;
+
+  // ✅ new fields (API will provide after backend update below)
   actor_user_id?: string | null;
-  profile_id?: string | null;
+  actor_profile_id?: string | null;
+  actor_display_name?: string | null;
 };
 
-// -----------------------------
-// API helpers
-// -----------------------------
+type NotificationsResponse = { items: ApiNotification[] };
+
 async function apiGetNotifications(userId: string): Promise<ApiNotification[]> {
   const res = await fetch(
     `${API_BASE}/notifications?user_id=${encodeURIComponent(userId)}`,
-    { method: "GET" }
+    { method: "GET", cache: "no-store" }
   );
   if (!res.ok) throw new Error("Failed to load notifications.");
-  const json = await res.json();
+  const json = (await res.json()) as NotificationsResponse;
   return Array.isArray(json?.items) ? json.items : [];
 }
 
@@ -46,6 +44,7 @@ async function apiClearNotifications(userId: string) {
 
 export default function NotificationsPage() {
   const [userId, setUserId] = useState<string>("");
+
   const [items, setItems] = useState<ApiNotification[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -77,10 +76,8 @@ export default function NotificationsPage() {
   useEffect(() => {
     const uid = getOrCreateUserId();
     setUserId(uid);
-
-    (async () => {
-      await refresh(uid);
-    })();
+    refresh(uid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function onClearAll() {
@@ -88,16 +85,13 @@ export default function NotificationsPage() {
 
     const prev = items;
     setClearing(true);
-
-    // Optimistic UI
-    setItems([]);
+    setItems([]); // optimistic
 
     try {
       await apiClearNotifications(userId);
       showToast("Cleared notifications.");
       await refresh(userId, { quiet: true });
     } catch (e: any) {
-      // Revert
       setItems(prev);
       setApiError(e?.message || "Could not clear notifications.");
       showToast("Could not clear right now. Please try again.");
@@ -142,12 +136,12 @@ export default function NotificationsPage() {
                 color: "#555",
               }}
             >
-              You’re viewing preview notifications while Black Within opens
-              intentionally.
+              Tip: You’ll only see a “like” notification if someone likes a
+              profile you own (from a different browser/user).
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
             <button
               onClick={() => refresh(userId, { quiet: true })}
               disabled={loading || refreshing || !userId}
@@ -173,9 +167,7 @@ export default function NotificationsPage() {
                 borderRadius: 10,
                 background: "white",
                 cursor:
-                  loading || clearing || items.length === 0
-                    ? "not-allowed"
-                    : "pointer",
+                  loading || clearing || items.length === 0 ? "not-allowed" : "pointer",
                 opacity: loading || clearing || items.length === 0 ? 0.6 : 1,
                 height: "fit-content",
               }}
@@ -183,7 +175,7 @@ export default function NotificationsPage() {
               {clearing ? "Clearing..." : "Clear all"}
             </button>
 
-            <a
+            <Link
               href="/discover"
               style={{
                 padding: "0.65rem 1rem",
@@ -195,7 +187,21 @@ export default function NotificationsPage() {
               }}
             >
               Back to Discover
-            </a>
+            </Link>
+
+            <Link
+              href="/liked"
+              style={{
+                padding: "0.65rem 1rem",
+                border: "1px solid #ccc",
+                borderRadius: 10,
+                textDecoration: "none",
+                color: "inherit",
+                height: "fit-content",
+              }}
+            >
+              Liked
+            </Link>
           </div>
         </div>
 
@@ -254,64 +260,80 @@ export default function NotificationsPage() {
           </div>
         ) : (
           <div style={{ marginTop: "1.5rem", display: "grid", gap: "0.75rem" }}>
-            {items.map((n) => (
-              <div
-                key={n.id}
-                style={{
-                  border: "1px solid #eee",
-                  borderRadius: 12,
-                  padding: "1rem",
-                  background: "white",
-                }}
-              >
+            {items.map((n) => {
+              const who =
+                (n.actor_display_name || "").trim() ||
+                (n.actor_user_id ? "Someone" : "Someone");
+
+              return (
                 <div
+                  key={n.id}
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: "1rem",
-                    flexWrap: "wrap",
-                    alignItems: "center",
+                    border: "1px solid #eee",
+                    borderRadius: 12,
+                    padding: "1rem",
+                    background: "white",
                   }}
                 >
-                  <div style={{ fontWeight: 600 }}>{n.message}</div>
-
-                  <span
+                  <div
                     style={{
-                      fontSize: "0.8rem",
-                      padding: "0.2rem 0.55rem",
-                      borderRadius: 999,
-                      border: "1px solid #ddd",
-                      color: "#555",
-                      whiteSpace: "nowrap",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "1rem",
+                      flexWrap: "wrap",
+                      alignItems: "center",
                     }}
                   >
-                    {n.type || "notice"}
-                  </span>
-                </div>
+                    <div style={{ fontWeight: 600 }}>
+                      {/* ✅ show liker name + link to their profile if available */}
+                      {n.type === "like" && n.actor_profile_id ? (
+                        <>
+                          <Link
+                            href={`/profiles/${n.actor_profile_id}`}
+                            style={{ textDecoration: "underline", color: "inherit" }}
+                          >
+                            {who}
+                          </Link>{" "}
+                          liked your profile.
+                        </>
+                      ) : n.type === "like" ? (
+                        <>{who} liked your profile.</>
+                      ) : (
+                        <>{n.message}</>
+                      )}
+                    </div>
 
-                <div
-                  style={{
-                    color: "#777",
-                    fontSize: "0.9rem",
-                    marginTop: "0.35rem",
-                  }}
-                >
-                  {new Date(n.created_at).toLocaleString()}
-                </div>
-
-                {(n.actor_user_id || n.profile_id) && (
-                  <div style={{ marginTop: "0.4rem", color: "#888", fontSize: "0.85rem" }}>
-                    {n.actor_user_id ? <>actor: {n.actor_user_id} </> : null}
-                    {n.profile_id ? <>• profile: {n.profile_id}</> : null}
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        padding: "0.2rem 0.55rem",
+                        borderRadius: 999,
+                        border: "1px solid #ddd",
+                        color: "#555",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {n.type || "notice"}
+                    </span>
                   </div>
-                )}
-              </div>
-            ))}
+
+                  <div
+                    style={{
+                      color: "#777",
+                      fontSize: "0.9rem",
+                      marginTop: "0.35rem",
+                    }}
+                  >
+                    {new Date(n.created_at).toLocaleString()}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
         <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
-          MVP note: Notifications are now stored in the database (cross-device).
+          MVP note: Notifications are stored in the database (cross-device).
         </div>
       </div>
     </main>
