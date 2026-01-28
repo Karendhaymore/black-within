@@ -16,10 +16,13 @@ type ApiNotification = {
   message: string;
   created_at: string;
 
-  // ✅ new fields (API will provide after backend update below)
+  // From backend enrichment:
   actor_user_id?: string | null;
+
+  // ✅ who did it (liker)
   actor_profile_id?: string | null;
   actor_display_name?: string | null;
+  actor_photo?: string | null;
 };
 
 type NotificationsResponse = { items: ApiNotification[] };
@@ -42,6 +45,16 @@ async function apiClearNotifications(userId: string) {
   if (!res.ok) throw new Error("Failed to clear notifications.");
 }
 
+function getInitials(name: string) {
+  return (name || "")
+    .trim()
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
 export default function NotificationsPage() {
   const [userId, setUserId] = useState<string>("");
 
@@ -51,6 +64,9 @@ export default function NotificationsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [clearing, setClearing] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+
+  // broken photos → initials fallback
+  const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
   function showToast(msg: string) {
     setToast(msg);
@@ -141,7 +157,14 @@ export default function NotificationsPage() {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "0.75rem",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
             <button
               onClick={() => refresh(userId, { quiet: true })}
               disabled={loading || refreshing || !userId}
@@ -150,7 +173,8 @@ export default function NotificationsPage() {
                 border: "1px solid #ccc",
                 borderRadius: 10,
                 background: "white",
-                cursor: loading || refreshing || !userId ? "not-allowed" : "pointer",
+                cursor:
+                  loading || refreshing || !userId ? "not-allowed" : "pointer",
                 opacity: loading || refreshing || !userId ? 0.6 : 1,
                 height: "fit-content",
               }}
@@ -167,8 +191,11 @@ export default function NotificationsPage() {
                 borderRadius: 10,
                 background: "white",
                 cursor:
-                  loading || clearing || items.length === 0 ? "not-allowed" : "pointer",
-                opacity: loading || clearing || items.length === 0 ? 0.6 : 1,
+                  loading || clearing || items.length === 0
+                    ? "not-allowed"
+                    : "pointer",
+                opacity:
+                  loading || clearing || items.length === 0 ? 0.6 : 1,
                 height: "fit-content",
               }}
             >
@@ -214,6 +241,7 @@ export default function NotificationsPage() {
               border: "1px solid #f0c9c9",
               background: "#fff7f7",
               color: "#7a2d2d",
+              whiteSpace: "pre-wrap",
             }}
           >
             <b>API notice:</b> {apiError}
@@ -261,9 +289,13 @@ export default function NotificationsPage() {
         ) : (
           <div style={{ marginTop: "1.5rem", display: "grid", gap: "0.75rem" }}>
             {items.map((n) => {
-              const who =
+              const actorName =
                 (n.actor_display_name || "").trim() ||
                 (n.actor_user_id ? "Someone" : "Someone");
+
+              const hasActorProfile = !!n.actor_profile_id;
+              const actorPhoto = (n.actor_photo || "").trim();
+              const showFallback = !actorPhoto || brokenImages[n.id];
 
               return (
                 <div
@@ -284,25 +316,6 @@ export default function NotificationsPage() {
                       alignItems: "center",
                     }}
                   >
-                    <div style={{ fontWeight: 600 }}>
-                      {/* ✅ show liker name + link to their profile if available */}
-                      {n.type === "like" && n.actor_profile_id ? (
-                        <>
-                          <Link
-                            href={`/profiles/${n.actor_profile_id}`}
-                            style={{ textDecoration: "underline", color: "inherit" }}
-                          >
-                            {who}
-                          </Link>{" "}
-                          liked your profile.
-                        </>
-                      ) : n.type === "like" ? (
-                        <>{who} liked your profile.</>
-                      ) : (
-                        <>{n.message}</>
-                      )}
-                    </div>
-
                     <span
                       style={{
                         fontSize: "0.8rem",
@@ -319,12 +332,99 @@ export default function NotificationsPage() {
 
                   <div
                     style={{
-                      color: "#777",
-                      fontSize: "0.9rem",
-                      marginTop: "0.35rem",
+                      marginTop: "0.7rem",
+                      display: "flex",
+                      gap: "0.85rem",
+                      alignItems: "center",
                     }}
                   >
-                    {new Date(n.created_at).toLocaleString()}
+                    {/* photo / initials */}
+                    {showFallback ? (
+                      <div
+                        style={{
+                          width: 54,
+                          height: 54,
+                          borderRadius: 14,
+                          border: "1px solid #ddd",
+                          display: "grid",
+                          placeItems: "center",
+                          fontWeight: 800,
+                          color: "#555",
+                          background: "#fafafa",
+                          flex: "0 0 auto",
+                        }}
+                      >
+                        {getInitials(actorName)}
+                      </div>
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={actorPhoto}
+                        alt={actorName}
+                        width={54}
+                        height={54}
+                        style={{
+                          width: 54,
+                          height: 54,
+                          borderRadius: 14,
+                          objectFit: "cover",
+                          border: "1px solid #eee",
+                          flex: "0 0 auto",
+                        }}
+                        onError={() =>
+                          setBrokenImages((prev) => ({ ...prev, [n.id]: true }))
+                        }
+                      />
+                    )}
+
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700 }}>
+                        {n.type === "like" ? (
+                          hasActorProfile ? (
+                            <>
+                              <Link
+                                href={`/profiles/${n.actor_profile_id}`}
+                                style={{
+                                  textDecoration: "underline",
+                                  color: "inherit",
+                                }}
+                              >
+                                {actorName}
+                              </Link>{" "}
+                              liked your profile.
+                            </>
+                          ) : (
+                            <>{actorName} liked your profile.</>
+                          )
+                        ) : (
+                          <>{n.message}</>
+                        )}
+                      </div>
+
+                      <div style={{ color: "#777", fontSize: "0.9rem", marginTop: 4 }}>
+                        {new Date(n.created_at).toLocaleString()}
+                      </div>
+
+                      {hasActorProfile && (
+                        <div style={{ marginTop: 8 }}>
+                          <Link
+                            href={`/profiles/${n.actor_profile_id}`}
+                            style={{
+                              display: "inline-block",
+                              padding: "0.45rem 0.7rem",
+                              borderRadius: 10,
+                              border: "1px solid #ccc",
+                              textDecoration: "none",
+                              color: "inherit",
+                              background: "white",
+                              fontSize: 13,
+                            }}
+                          >
+                            View profile
+                          </Link>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
