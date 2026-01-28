@@ -122,6 +122,10 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
+    # ✅ NEW (nullable) fields to support "real notifications"
+    actor_user_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+
 
 class LoginCode(Base):
     __tablename__ = "login_codes"
@@ -141,8 +145,6 @@ def _auto_migrate_profiles_table():
     This safely adds any missing columns to profiles so /profiles won't 500.
     """
     with engine.begin() as conn:
-        # Ensure table exists (if not, create_all will handle it)
-        # Add missing columns (safe)
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(40);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_name VARCHAR(80);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS age INTEGER;"""))
@@ -152,10 +154,8 @@ def _auto_migrate_profiles_table():
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS identity_preview VARCHAR(500);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS intention VARCHAR(120);"""))
 
-        # Keep tags_csv (your DB already has this column)
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tags_csv TEXT DEFAULT '[]';"""))
 
-        # If a previous attempt created tags_json, migrate data over, then keep tags_csv as canonical
         conn.execute(text("""
             DO $$
             BEGIN
@@ -176,6 +176,16 @@ def _auto_migrate_profiles_table():
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
 
 
+def _auto_migrate_notifications_table():
+    """
+    Adds missing columns to notifications so we can store actor_user_id + profile_id.
+    Safe to run repeatedly.
+    """
+    with engine.begin() as conn:
+        conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_user_id VARCHAR(40);"""))
+        conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS profile_id VARCHAR(60);"""))
+
+
 # Create tables if missing
 Base.metadata.create_all(bind=engine)
 
@@ -183,8 +193,12 @@ Base.metadata.create_all(bind=engine)
 try:
     _auto_migrate_profiles_table()
 except Exception as e:
-    # Don't crash startup; log and continue
     print("AUTO_MIGRATE_PROFILES failed:", str(e))
+
+try:
+    _auto_migrate_notifications_table()
+except Exception as e:
+    print("AUTO_MIGRATE_NOTIFICATIONS failed:", str(e))
 
 
 # -----------------------------
@@ -218,6 +232,8 @@ class NotificationItem(BaseModel):
     type: str
     message: str
     created_at: str
+    actor_user_id: Optional[str] = None
+    profile_id: Optional[str] = None
 
 
 class NotificationsResponse(BaseModel):
@@ -266,7 +282,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.0.3")
+app = FastAPI(title="Black Within API", version="1.0.4")
 
 app.add_middleware(
     CORSMiddleware,
@@ -341,7 +357,7 @@ def health():
         "previewMode": AUTH_PREVIEW_MODE,
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
         "corsOrigins": origins,
-        "version": "1.0.3",
+        "version": "1.0.4",
     }
 
 
@@ -659,6 +675,8 @@ def get_notifications(user_id: str = Query(...)):
                 type=n.type or "notice",
                 message=n.message,
                 created_at=n.created_at.isoformat(),
+                actor_user_id=getattr(n, "actor_user_id", None),
+                profile_id=getattr(n, "profile_id", None),
             )
             for n in rows
         ]
@@ -703,9 +721,16 @@ def like(payload: ProfileAction):
         if existing:
             return {"ok": True}
 
-        session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+        session.add(
+            Like(
+                user_id=liker_user_id,
+                profile_id=profile_id,
+                created_at=datetime.utcnow(),
+            )
+        )
 
-        recipient_user_id = prof.owner_user_id
+        # ✅ REAL notifications: recipient is the profile owner
+        recipient_user_id = (prof.owner_user_id or "").strip()
         if recipient_user_id and recipient_user_id != liker_user_id:
             session.add(
                 Notification(
@@ -713,6 +738,8 @@ def like(payload: ProfileAction):
                     type="like",
                     message="Someone liked your profile.",
                     created_at=datetime.utcnow(),
+                    actor_user_id=liker_user_id,   # ✅ who did it
+                    profile_id=profile_id,         # ✅ which profile
                 )
             )
 
