@@ -126,10 +126,10 @@ class Notification(Base):
     # Actor (who caused the notification)
     actor_user_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
-    # Target profile (the profile that was liked) - you already had this column name in DB
+    # Target profile (the profile that was liked)
     profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
-    # NEW: actor profile id (so frontend can link to liker's profile page)
+    # Actor's profile id (so frontend can link to liker's profile)
     actor_profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
 
@@ -184,7 +184,7 @@ def _auto_migrate_profiles_table():
 def _auto_migrate_notifications_table():
     """
     Add actor_user_id/profile_id/actor_profile_id columns if missing (for richer notifications).
-    NOTE: profile_id already exists in your model+DB as the target profile that was liked.
+    NOTE: profile_id exists as the target profile that was liked.
     """
     with engine.begin() as conn:
         conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_user_id VARCHAR(40);"""))
@@ -243,6 +243,7 @@ class NotificationItem(BaseModel):
     actor_user_id: Optional[str] = None
     actor_profile_id: Optional[str] = None
     actor_display_name: Optional[str] = None
+    actor_photo: Optional[str] = None
 
     # What it was about (e.g., the profile that got liked)
     profile_id: Optional[str] = None
@@ -298,7 +299,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.0.5")
+app = FastAPI(title="Black Within API", version="1.0.6")
 
 app.add_middleware(
     CORSMiddleware,
@@ -383,7 +384,7 @@ def health():
         "previewMode": AUTH_PREVIEW_MODE,
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
         "corsOrigins": origins,
-        "version": "1.0.5",
+        "version": "1.0.6",
     }
 
 
@@ -678,6 +679,7 @@ def get_notifications(user_id: str = Query(...)):
     Returns notifications with enriched actor info:
       - actor_display_name
       - actor_profile_id (so frontend can link to /profiles/{actor_profile_id})
+      - actor_photo (so frontend can show photo)
     """
     user_id = _ensure_user(user_id)
 
@@ -689,12 +691,11 @@ def get_notifications(user_id: str = Query(...)):
             .limit(NOTIFICATIONS_LIMIT)
         ).scalars().all()
 
-        # Collect actor_user_ids to enrich display name + profile id
+        # Collect actor_user_ids to enrich display name + profile id + photo
         actor_ids = [n.actor_user_id for n in rows if n.actor_user_id]
         actor_map: Dict[str, Dict[str, Optional[str]]] = {}
 
         if actor_ids:
-            # Get each actor's profile (by owner_user_id)
             prof_rows = session.execute(
                 select(Profile).where(Profile.owner_user_id.in_(actor_ids))
             ).scalars().all()
@@ -703,6 +704,7 @@ def get_notifications(user_id: str = Query(...)):
                 actor_map[p.owner_user_id] = {
                     "actor_display_name": p.display_name,
                     "actor_profile_id": p.id,
+                    "actor_photo": p.photo,
                 }
 
         items: List[NotificationItem] = []
@@ -710,11 +712,13 @@ def get_notifications(user_id: str = Query(...)):
             actor_info = actor_map.get(n.actor_user_id or "", {})
             actor_display_name = actor_info.get("actor_display_name")
             actor_profile_id = actor_info.get("actor_profile_id")
+            actor_photo = actor_info.get("actor_photo")
 
-            # If we already stored actor_profile_id in the notification row, prefer it
+            # If we already stored actor_profile_id in notification row, prefer it
             if n.actor_profile_id:
                 actor_profile_id = n.actor_profile_id
 
+            # If actor_profile_id is set, we can still keep the display_name/photo from actor_map.
             items.append(
                 NotificationItem(
                     id=str(n.id),
@@ -725,6 +729,7 @@ def get_notifications(user_id: str = Query(...)):
                     actor_user_id=n.actor_user_id,
                     actor_profile_id=actor_profile_id,
                     actor_display_name=actor_display_name,
+                    actor_photo=actor_photo,
                     profile_id=n.profile_id,
                 )
             )
@@ -851,7 +856,6 @@ def like(payload: ProfileAction):
         ).scalar_one_or_none()
 
         if recipient_user_id and recipient_user_id != liker_user_id:
-            # Store generic message (UI will show actor name if available)
             session.add(
                 Notification(
                     user_id=recipient_user_id,
