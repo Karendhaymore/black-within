@@ -27,10 +27,35 @@ type ApiProfile = {
 type IdListResponse = { ids: string[] };
 type ProfilesResponse = { items: ApiProfile[] };
 
+type LimitsResponse = {
+  likesLimit: number;
+  likesUsedToday: number;
+  likesRemaining: number;
+  resetsAtUtc: string;
+};
+
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
+
+async function safeReadErrorDetail(res: Response): Promise<string> {
+  // Try to read FastAPI-style error: { detail: "..." }
+  try {
+    const data = await res.json();
+    if (data?.detail) return String(data.detail);
+  } catch {
+    // ignore
+  }
+  // Fallback: plain text
+  try {
+    const text = await res.text();
+    if (text) return text;
+  } catch {
+    // ignore
+  }
+  return `Request failed (${res.status}).`;
+}
 
 async function apiGetSavedIds(userId: string): Promise<string[]> {
   const res = await fetch(
@@ -52,13 +77,25 @@ async function apiGetLikes(userId: string): Promise<string[]> {
   return Array.isArray(json?.ids) ? json.ids : [];
 }
 
+async function apiGetLimits(userId: string): Promise<LimitsResponse> {
+  const res = await fetch(
+    `${API_BASE}/limits?user_id=${encodeURIComponent(userId)}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(`Failed to load limits (${res.status}).`);
+  return (await res.json()) as LimitsResponse;
+}
+
 async function apiSaveProfile(userId: string, profileId: string) {
   const res = await fetch(`${API_BASE}/saved`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, profile_id: profileId }),
   });
-  if (!res.ok) throw new Error(`Save failed (${res.status}).`);
+  if (!res.ok) {
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
+  }
 }
 
 async function apiUnsaveProfile(userId: string, profileId: string) {
@@ -66,32 +103,26 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
     userId
   )}&profile_id=${encodeURIComponent(profileId)}`;
   const res = await fetch(url, { method: "DELETE" });
-  if (!res.ok) throw new Error(`Unsave failed (${res.status}).`);
+  if (!res.ok) {
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
+  }
 }
 
-async function apiLikeProfile(userId: string, profileId: string, recipientUserId?: string) {
+async function apiLikeProfile(userId: string, profileId: string) {
   const res = await fetch(`${API_BASE}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       user_id: userId,
       profile_id: profileId,
-      recipient_user_id: recipientUserId || null,
     }),
   });
 
-  // ✅ Friendlier handling for the free-like limit
-  if (res.status === 429) {
-    // FastAPI usually returns { detail: "..." }
-    const msg =
-      (await res.json().catch(() => null))?.detail ||
-      "You’ve used your 5 free likes for today. Come back tomorrow.";
-    throw new Error(msg);
-  }
-
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Like failed (${res.status}). ${text}`.trim());
+    // ✅ Show the friendly 429 message from the API
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
   }
 }
 
@@ -112,42 +143,24 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
   return Array.isArray(json?.items) ? json.items : [];
 }
 
-/**
- * Logs out on THIS device by clearing saved login info,
- * then sends user back to /auth so they can sign in as a different person.
- */
-function logoutAndGoToAuth() {
-  try {
-    localStorage.removeItem("bw_user_id");
-    localStorage.removeItem("user_id");
-    localStorage.removeItem("userId");
-    localStorage.removeItem("email");
-    localStorage.removeItem("bw_email");
-    sessionStorage.clear();
-  } catch (e) {
-    // ignore
-  }
-  window.location.href = "/auth";
-}
-
 export default function DiscoverPage() {
   const [userId, setUserId] = useState<string>("");
 
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
+  const [limits, setLimits] = useState<LimitsResponse | null>(null);
+
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
   const [loadingProfiles, setLoadingProfiles] = useState<boolean>(true);
   const [loadingSets, setLoadingSets] = useState<boolean>(true);
+  const [loadingLimits, setLoadingLimits] = useState<boolean>(true);
 
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
-
-  // ✅ NEW: once we hit the daily limit, disable Like buttons
-  const [likeLimitReached, setLikeLimitReached] = useState<boolean>(false);
 
   const availableProfiles = useMemo(
     () => profiles.filter((p) => p.isAvailable),
@@ -183,7 +196,7 @@ export default function DiscoverPage() {
 
   function showToast(msg: string) {
     setToast(msg);
-    window.setTimeout(() => setToast(null), 2600);
+    window.setTimeout(() => setToast(null), 2400);
   }
 
   function getInitials(displayName: string) {
@@ -201,7 +214,10 @@ export default function DiscoverPage() {
       setApiError(null);
       setLoadingSets(true);
 
-      const [saved, likes] = await Promise.all([apiGetSavedIds(uid), apiGetLikes(uid)]);
+      const [saved, likes] = await Promise.all([
+        apiGetSavedIds(uid),
+        apiGetLikes(uid),
+      ]);
 
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
       setLikedIds(likes.filter((id) => availableProfileIds.has(id)));
@@ -210,6 +226,46 @@ export default function DiscoverPage() {
     } finally {
       setLoadingSets(false);
     }
+  }
+
+  async function refreshLimits(uid: string) {
+    try {
+      setLoadingLimits(true);
+      const lim = await apiGetLimits(uid);
+      setLimits(lim);
+    } catch (e: any) {
+      // limits are nice-to-have; don’t break the page if it fails
+      console.warn("Limits load failed:", e);
+      setLimits(null);
+    } finally {
+      setLoadingLimits(false);
+    }
+  }
+
+  function logout() {
+    // ✅ Simple logout: remove likely user-id keys, then go back to /auth
+    try {
+      const keysToTry = [
+        "bw_user_id",
+        "black_within_user_id",
+        "user_id",
+        "userid",
+        "userId",
+      ];
+      keysToTry.forEach((k) => {
+        try {
+          window.localStorage.removeItem(k);
+        } catch {}
+        try {
+          window.sessionStorage.removeItem(k);
+        } catch {}
+      });
+    } catch {}
+
+    showToast("Logged out.");
+    window.setTimeout(() => {
+      window.location.href = "/auth";
+    }, 400);
   }
 
   useEffect(() => {
@@ -231,7 +287,7 @@ export default function DiscoverPage() {
         setLoadingProfiles(false);
       }
 
-      await refreshSavedAndLikes(uid);
+      await Promise.all([refreshSavedAndLikes(uid), refreshLimits(uid)]);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -271,30 +327,24 @@ export default function DiscoverPage() {
   async function onLike(p: ApiProfile) {
     if (!userId) return;
     if (likedIds.includes(p.id)) return;
-    if (likeLimitReached) {
-      showToast("You’ve used your 5 free likes for today. Come back tomorrow.");
-      return;
-    }
 
     const prev = likedIds;
     setLikedIds((curr) => (curr.includes(p.id) ? curr : [p.id, ...curr]));
 
     try {
-      await apiLikeProfile(userId, p.id, p.owner_user_id);
-      await refreshSavedAndLikes(userId);
+      await apiLikeProfile(userId, p.id);
+
+      // ✅ Refresh likes AND limits after a like
+      await Promise.all([refreshSavedAndLikes(userId), refreshLimits(userId)]);
+
       showToast("Like sent.");
     } catch (e: any) {
       setLikedIds(prev);
 
+      // ✅ If you hit the 429 limit, you’ll see the friendly API message here
       const msg = e?.message || "Like failed.";
-      // ✅ If we hit the daily limit, freeze Like buttons to prevent repeated errors
-      if (String(msg).toLowerCase().includes("free likes") || String(msg).toLowerCase().includes("come back")) {
-        setLikeLimitReached(true);
-        showToast(msg);
-      } else {
-        setApiError(msg);
-        showToast("Could not like right now.");
-      }
+      setApiError(msg);
+      showToast(msg);
     }
   }
 
@@ -305,16 +355,6 @@ export default function DiscoverPage() {
     textDecoration: "none",
     color: "inherit",
     background: "white",
-    display: "inline-block",
-  };
-
-  const logoutBtnStyle: React.CSSProperties = {
-    padding: "0.65rem 1rem",
-    border: "1px solid #ccc",
-    borderRadius: 10,
-    background: "white",
-    color: "inherit",
-    cursor: "pointer",
     display: "inline-block",
   };
 
@@ -338,10 +378,34 @@ export default function DiscoverPage() {
             flexWrap: "wrap",
           }}
         >
-          <h1 style={{ margin: 0 }}>Discover</h1>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <h1 style={{ margin: 0 }}>Discover</h1>
+
+            {/* ✅ Likes counter (Option A) */}
+            <div style={{ fontSize: 13, color: "#555" }}>
+              {loadingLimits ? (
+                <span>Likes today: loading…</span>
+              ) : limits ? (
+                <span>
+                  Likes today: <strong>{limits.likesUsedToday}</strong> /{" "}
+                  <strong>{limits.likesLimit}</strong> ·{" "}
+                  <strong>{limits.likesRemaining}</strong> left
+                </span>
+              ) : (
+                <span>Likes today: unavailable</span>
+              )}
+            </div>
+          </div>
 
           {/* ✅ Discover Navigation */}
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
             <Link href="/profile" style={navBtnStyle}>
               My Profile
             </Link>
@@ -358,37 +422,18 @@ export default function DiscoverPage() {
               Notifications
             </Link>
 
+            {/* ✅ NEW: Logout button */}
             <button
-              onClick={() => {
-                const ok = window.confirm(
-                  "Log out on this device? You can then sign in as another test profile."
-                );
-                if (ok) logoutAndGoToAuth();
+              onClick={logout}
+              style={{
+                ...navBtnStyle,
+                cursor: "pointer",
               }}
-              style={logoutBtnStyle}
-              title="Log out on this device"
             >
               Log out
             </button>
           </div>
         </div>
-
-        {/* ✅ Friendly banner when like limit is reached */}
-        {likeLimitReached && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: 12,
-              borderRadius: 12,
-              border: "1px solid #f0d58a",
-              background: "#fffaf0",
-              color: "#6b4e00",
-            }}
-          >
-            <strong>Daily limit reached:</strong> You’ve used your 5 free likes for today.
-            Come back tomorrow (resets at midnight UTC).
-          </div>
-        )}
 
         {/* Debug + status */}
         <div style={{ marginTop: 10, fontSize: 13, color: "#666" }}>
@@ -396,7 +441,8 @@ export default function DiscoverPage() {
             <strong>API:</strong> {API_BASE}
           </div>
           <div>
-            <strong>Profiles loaded:</strong> {profiles.length} {loadingProfiles ? "(loading…)" : ""}
+            <strong>Profiles loaded:</strong> {profiles.length}{" "}
+            {loadingProfiles ? "(loading…)" : ""}
           </div>
           <div>
             <strong>Saved/likes loading:</strong> {loadingSets ? "yes" : "no"}
@@ -415,7 +461,7 @@ export default function DiscoverPage() {
               whiteSpace: "pre-wrap",
             }}
           >
-            <strong>Error:</strong> {apiError}
+            <strong>Message:</strong> {apiError}
           </div>
         )}
 
@@ -431,7 +477,10 @@ export default function DiscoverPage() {
         >
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Intention:
-            <select value={intentionFilter} onChange={(e) => setIntentionFilter(e.target.value)}>
+            <select
+              value={intentionFilter}
+              onChange={(e) => setIntentionFilter(e.target.value)}
+            >
               {intentionOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -442,7 +491,10 @@ export default function DiscoverPage() {
 
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Tag:
-            <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+            <select
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+            >
               {tagOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -473,7 +525,6 @@ export default function DiscoverPage() {
               {filteredProfiles.map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
-                const likeDisabled = isLiked || likeLimitReached;
 
                 return (
                   <div
@@ -494,7 +545,9 @@ export default function DiscoverPage() {
                           width={56}
                           height={56}
                           style={{ borderRadius: 14, objectFit: "cover" }}
-                          onError={() => setBrokenImages((curr) => ({ ...curr, [p.id]: true }))}
+                          onError={() =>
+                            setBrokenImages((curr) => ({ ...curr, [p.id]: true }))
+                          }
                         />
                       ) : (
                         <div
@@ -513,8 +566,16 @@ export default function DiscoverPage() {
                       )}
 
                       <div style={{ flex: 1 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                          <div style={{ fontWeight: 800, fontSize: 18 }}>{p.displayName}</div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ fontWeight: 800, fontSize: 18 }}>
+                            {p.displayName}
+                          </div>
                           <div style={{ color: "#666" }}>{p.age}</div>
                         </div>
                         <div style={{ marginTop: 4, color: "#666", fontSize: 13 }}>
@@ -531,7 +592,14 @@ export default function DiscoverPage() {
                     </div>
 
                     {Array.isArray(p.tags) && p.tags.length > 0 && (
-                      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <div
+                        style={{
+                          marginTop: 10,
+                          display: "flex",
+                          gap: 6,
+                          flexWrap: "wrap",
+                        }}
+                      >
                         {p.tags.slice(0, 10).map((t, idx) => (
                           <span
                             key={`${p.id}-tag-${idx}`}
@@ -579,23 +647,16 @@ export default function DiscoverPage() {
 
                       <button
                         onClick={() => onLike(p)}
-                        disabled={likeDisabled}
+                        disabled={isLiked}
                         style={{
                           padding: "10px 12px",
                           borderRadius: 10,
                           border: "1px solid #ccc",
-                          background: likeDisabled ? "#f5f5f5" : "white",
-                          cursor: likeDisabled ? "not-allowed" : "pointer",
+                          background: isLiked ? "#f5f5f5" : "white",
+                          cursor: isLiked ? "not-allowed" : "pointer",
                         }}
-                        title={
-                          likeLimitReached
-                            ? "Daily limit reached (5 free likes/day)"
-                            : isLiked
-                            ? "Already liked"
-                            : "Like"
-                        }
                       >
-                        {isLiked ? "Liked" : likeLimitReached ? "Limit reached" : "Like"}
+                        {isLiked ? "Liked" : "Like"}
                       </button>
                     </div>
                   </div>
