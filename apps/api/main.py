@@ -3,7 +3,7 @@ import re
 import secrets
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     Boolean,
     text,
+    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
@@ -54,7 +55,7 @@ AUTH_USERID_PEPPER = os.getenv("AUTH_USERID_PEPPER", "")
 
 NOTIFICATIONS_LIMIT = int(os.getenv("NOTIFICATIONS_LIMIT", "200"))
 
-# ✅ NEW: MVP enforcement (free daily likes)
+# ✅ Free likes/day (Option A counter will use this)
 FREE_LIKES_PER_DAY = int(os.getenv("FREE_LIKES_PER_DAY", "5"))
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
@@ -94,14 +95,14 @@ class Profile(Base):
     # IMPORTANT: DB currently has tags_csv; keep that name to avoid 500s
     tags_csv: Mapped[str] = mapped_column(Text, default="[]")
 
-    # NEW: alignment fields (stored as JSON strings in TEXT columns)
+    # alignment fields (stored as JSON strings in TEXT columns)
     cultural_identity_csv: Mapped[str] = mapped_column(Text, default="[]")
     spiritual_framework_csv: Mapped[str] = mapped_column(Text, default="[]")
 
-    # NEW: relationship intent (single-select)
+    # relationship intent (single-select)
     relationship_intent: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
-    # NEW: conscious prompts
+    # conscious prompts
     dating_challenge_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     personal_truth_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -125,23 +126,9 @@ class Like(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)       # liker
     profile_id: Mapped[str] = mapped_column(String(60), index=True)    # liked profile
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
-
-
-# ✅ NEW: Daily counter table (one row per user per UTC day)
-class DailyUsage(Base):
-    __tablename__ = "daily_usage"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    user_id: Mapped[str] = mapped_column(String(40), index=True)
-    day_key: Mapped[str] = mapped_column(String(10), index=True)  # "YYYY-MM-DD" (UTC)
-    likes_used: Mapped[int] = mapped_column(Integer, default=0)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (UniqueConstraint("user_id", "day_key", name="uq_daily_usage_user_day"),)
 
 
 class Notification(Base):
@@ -206,7 +193,7 @@ def _auto_migrate_profiles_table():
             END $$;
         """))
 
-        # NEW alignment columns
+        # alignment columns
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS cultural_identity_csv TEXT DEFAULT '[]';"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spiritual_framework_csv TEXT DEFAULT '[]';"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS relationship_intent VARCHAR(120);"""))
@@ -228,25 +215,6 @@ def _auto_migrate_notifications_table():
         conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_profile_id VARCHAR(60);"""))
 
 
-def _auto_migrate_daily_usage_table():
-    """
-    Create daily_usage table if missing (simple daily counters: likes_used).
-    """
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS daily_usage (
-                id SERIAL PRIMARY KEY,
-                user_id VARCHAR(40) NOT NULL,
-                day_key VARCHAR(10) NOT NULL,
-                likes_used INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMP DEFAULT NOW(),
-                CONSTRAINT uq_daily_usage_user_day UNIQUE (user_id, day_key)
-            );
-        """))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_usage_user_id ON daily_usage(user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_usage_day_key ON daily_usage(day_key);"""))
-
-
 # Create tables if missing
 Base.metadata.create_all(bind=engine)
 
@@ -260,11 +228,6 @@ try:
     _auto_migrate_notifications_table()
 except Exception as e:
     print("AUTO_MIGRATE_NOTIFICATIONS failed:", str(e))
-
-try:
-    _auto_migrate_daily_usage_table()
-except Exception as e:
-    print("AUTO_MIGRATE_DAILY_USAGE failed:", str(e))
 
 
 # -----------------------------
@@ -299,15 +262,11 @@ class NotificationItem(BaseModel):
     message: str
     created_at: str
 
-    # Who caused it
     actor_user_id: Optional[str] = None
     actor_profile_id: Optional[str] = None
     actor_display_name: Optional[str] = None
-
-    # Photo URL for the actor (liker)
     actor_photo: Optional[str] = None
 
-    # What it was about (e.g., the profile that got liked)
     profile_id: Optional[str] = None
 
 
@@ -330,7 +289,6 @@ class ProfileItem(BaseModel):
     tags: List[str]
     isAvailable: bool
 
-    # NEW alignment fields
     culturalIdentity: List[str] = []
     spiritualFramework: List[str] = []
     relationshipIntent: Optional[str] = None
@@ -346,17 +304,22 @@ class ProfilesListResponse(BaseModel):
     items: List[ProfileItem]
 
 
-# Accept BOTH camelCase and snake_case (frontend may send either)
-class UpsertMyProfilePayload(BaseModel):
-    owner_user_id: str  # camelCase id (we keep this key name for your frontend)
+# ✅ NEW: likes/day counter response
+class LimitsResponse(BaseModel):
+    likesLimit: int
+    likesUsedToday: int
+    likesRemaining: int
+    resetsAtUtc: str
 
-    # existing camelCase
+
+class UpsertMyProfilePayload(BaseModel):
+    owner_user_id: str
+
     displayName: Optional[str] = None
     stateUS: Optional[str] = None
     identityPreview: Optional[str] = None
     isAvailable: Optional[bool] = True
 
-    # existing snake_case fallbacks
     display_name: Optional[str] = None
     state_us: Optional[str] = None
     identity_preview: Optional[str] = None
@@ -368,14 +331,12 @@ class UpsertMyProfilePayload(BaseModel):
     intention: str
     tags: List[str] = []
 
-    # NEW alignment fields (camelCase)
     culturalIdentity: Optional[List[str]] = None
     spiritualFramework: Optional[List[str]] = None
     relationshipIntent: Optional[str] = None
     datingChallenge: Optional[str] = None
     personalTruth: Optional[str] = None
 
-    # NEW alignment fields (snake_case fallbacks)
     cultural_identity: Optional[List[str]] = None
     spiritual_framework: Optional[List[str]] = None
     relationship_intent: Optional[str] = None
@@ -386,7 +347,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.0.8")
+app = FastAPI(title="Black Within API", version="1.0.9")
 
 app.add_middleware(
     CORSMiddleware,
@@ -413,11 +374,6 @@ def _make_user_id_from_email(email: str) -> str:
 
 def _new_id() -> str:
     return secrets.token_hex(20)[:40]
-
-
-def _utc_day_key(dt: Optional[datetime] = None) -> str:
-    d = dt or datetime.utcnow()
-    return d.strftime("%Y-%m-%d")
 
 
 def _ensure_user(user_id: str) -> str:
@@ -482,6 +438,35 @@ def _coerce_str_list(v: Any) -> List[str]:
     return out
 
 
+def _utc_day_start(dt: Optional[datetime] = None) -> datetime:
+    """
+    Returns today's midnight in UTC.
+    We treat the free-like reset as UTC midnight.
+    """
+    now = dt or datetime.now(timezone.utc)
+    return datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+
+
+def _utc_next_midnight(dt: Optional[datetime] = None) -> datetime:
+    start = _utc_day_start(dt)
+    return start + timedelta(days=1)
+
+
+def _likes_used_today(session: Session, user_id: str) -> int:
+    day_start = _utc_day_start()
+    # likes.created_at is stored as UTC via datetime.utcnow(); compare as naive/aware safely
+    # We'll compare against naive UTC for compatibility.
+    day_start_naive = day_start.replace(tzinfo=None)
+
+    count = session.execute(
+        select(func.count(Like.id)).where(
+            Like.user_id == user_id,
+            Like.created_at >= day_start_naive,
+        )
+    ).scalar_one()
+    return int(count or 0)
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "service": "black-within-api"}
@@ -494,7 +479,7 @@ def health():
         "previewMode": AUTH_PREVIEW_MODE,
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
         "corsOrigins": origins,
-        "version": "1.0.8",
+        "version": "1.0.9",
         "freeLikesPerDay": FREE_LIKES_PER_DAY,
     }
 
@@ -506,6 +491,30 @@ def health():
 def me(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     return MeResponse(user_id=user_id)
+
+
+# -----------------------------
+# LIMITS (Option A)
+# -----------------------------
+@app.get("/limits", response_model=LimitsResponse)
+def limits(user_id: str = Query(...)):
+    """
+    Simple "what can I do today?" endpoint.
+    Right now it only reports free likes/day usage.
+    """
+    user_id = _ensure_user(user_id)
+    with Session(engine) as session:
+        used = _likes_used_today(session, user_id)
+        limit = FREE_LIKES_PER_DAY
+        remaining = max(0, limit - used)
+        resets_at = _utc_next_midnight().isoformat()
+
+    return LimitsResponse(
+        likesLimit=limit,
+        likesUsedToday=used,
+        likesRemaining=remaining,
+        resetsAtUtc=resets_at,
+    )
 
 
 # -----------------------------
@@ -705,7 +714,6 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             existing.intention = payload.intention.strip()
             existing.tags_csv = tags_csv
 
-            # NEW alignment fields
             existing.cultural_identity_csv = cultural_csv
             existing.spiritual_framework_csv = spiritual_csv
             existing.relationship_intent = rel_intent
@@ -767,7 +775,6 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
         )
 
 
-# IMPORTANT: your frontend currently POSTs to /profiles (keep this alias)
 @app.post("/profiles", response_model=ProfileItem)
 def upsert_profile_alias(payload: UpsertMyProfilePayload):
     return upsert_my_profile(payload)
@@ -846,8 +853,8 @@ def get_notifications(user_id: str = Query(...)):
     """
     Returns notifications with enriched actor info:
       - actor_display_name
-      - actor_profile_id (so frontend can link to /profiles/{actor_profile_id})
-      - actor_photo (so frontend can show photo instead of initials)
+      - actor_profile_id
+      - actor_photo
     """
     user_id = _ensure_user(user_id)
 
@@ -881,7 +888,6 @@ def get_notifications(user_id: str = Query(...)):
             actor_profile_id = actor_info.get("actor_profile_id")
             actor_photo = actor_info.get("actor_photo")
 
-            # Prefer stored actor_profile_id if present
             if n.actor_profile_id:
                 actor_profile_id = n.actor_profile_id
 
@@ -928,9 +934,6 @@ def get_likes(user_id: str = Query(...)):
 
 @app.get("/likes/sent", response_model=IdListResponse)
 def get_likes_sent(user_id: str = Query(...)):
-    """
-    Alias of /likes (explicit naming).
-    """
     return get_likes(user_id=user_id)
 
 
@@ -1006,67 +1009,30 @@ def like(payload: ProfileAction):
     if not profile_id:
         raise HTTPException(status_code=400, detail="profile_id is required")
 
-    day_key = _utc_day_key()
-
     with Session(engine) as session:
-        # Ensure target profile exists
         prof = session.get(Profile, profile_id)
         if not prof:
             raise HTTPException(status_code=404, detail="Profile not found")
 
-        # If this is already liked, don't count it again (and don't block)
+        # If already liked, don't count again
         existing = session.execute(
             select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
         ).scalar_one_or_none()
         if existing:
             return {"ok": True}
 
-        # -----------------------------
-        # Free daily likes limit (MVP enforcement)
-        # -----------------------------
-        usage = session.execute(
-            select(DailyUsage).where(
-                DailyUsage.user_id == liker_user_id,
-                DailyUsage.day_key == day_key,
-            )
-        ).scalar_one_or_none()
-
-        if not usage:
-            usage = DailyUsage(user_id=liker_user_id, day_key=day_key, likes_used=0, created_at=datetime.utcnow())
-            session.add(usage)
-            try:
-                session.commit()
-            except IntegrityError:
-                session.rollback()
-                usage = session.execute(
-                    select(DailyUsage).where(
-                        DailyUsage.user_id == liker_user_id,
-                        DailyUsage.day_key == day_key,
-                    )
-                ).scalar_one_or_none()
-
-        if usage and int(usage.likes_used or 0) >= FREE_LIKES_PER_DAY:
+        # ✅ Enforce free likes/day (UTC midnight reset)
+        used_today = _likes_used_today(session, liker_user_id)
+        if used_today >= FREE_LIKES_PER_DAY:
             raise HTTPException(
                 status_code=429,
-                detail=f"You’ve reached your {FREE_LIKES_PER_DAY} likes for today. Come back tomorrow or upgrade.",
+                detail=f"You’ve used your {FREE_LIKES_PER_DAY} free likes for today. Come back tomorrow.",
             )
 
-        # Add the like
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
-
-        # Increment counter (only for NEW likes)
-        usage = session.execute(
-            select(DailyUsage).where(
-                DailyUsage.user_id == liker_user_id,
-                DailyUsage.day_key == day_key,
-            )
-        ).scalar_one_or_none()
-        if usage:
-            usage.likes_used = int(usage.likes_used or 0) + 1
 
         recipient_user_id = prof.owner_user_id
 
-        # Find the actor's profile (if they have one) so we can link to it in Notifications UI
         actor_profile = session.execute(
             select(Profile).where(Profile.owner_user_id == liker_user_id)
         ).scalar_one_or_none()
