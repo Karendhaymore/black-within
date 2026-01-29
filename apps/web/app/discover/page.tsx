@@ -43,6 +43,8 @@ function getLoggedInUserId(): string | null {
   if (typeof window === "undefined") return null;
   try {
     const uid = window.localStorage.getItem("bw_user_id");
+    const loggedIn = window.localStorage.getItem("bw_logged_in") === "1";
+    if (!loggedIn) return null;
     return uid && uid.trim() ? uid.trim() : null;
   } catch {
     return null;
@@ -271,15 +273,13 @@ export default function DiscoverPage() {
 
   function logout() {
     try {
-      const keysToTry = ["bw_user_id", "bw_session_token", "bw_email"];
-      keysToTry.forEach((k) => {
-        try {
-          window.localStorage.removeItem(k);
-        } catch {}
-        try {
-          window.sessionStorage.removeItem(k);
-        } catch {}
-      });
+      // ✅ Log out without erasing the account/user id
+      window.localStorage.setItem("bw_logged_in", "0");
+
+      // Optional: if you add tokens later, clear them here
+      try {
+        window.localStorage.removeItem("bw_session_token");
+      } catch {}
     } catch {}
 
     showToast("Logged out.");
