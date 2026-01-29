@@ -54,6 +54,9 @@ AUTH_USERID_PEPPER = os.getenv("AUTH_USERID_PEPPER", "")
 
 NOTIFICATIONS_LIMIT = int(os.getenv("NOTIFICATIONS_LIMIT", "200"))
 
+# ✅ NEW: MVP enforcement (free daily likes)
+FREE_LIKES_PER_DAY = int(os.getenv("FREE_LIKES_PER_DAY", "5"))
+
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "").strip()
 SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
@@ -125,6 +128,20 @@ class Like(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
+
+
+# ✅ NEW: Daily counter table (one row per user per UTC day)
+class DailyUsage(Base):
+    __tablename__ = "daily_usage"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    day_key: Mapped[str] = mapped_column(String(10), index=True)  # "YYYY-MM-DD" (UTC)
+    likes_used: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "day_key", name="uq_daily_usage_user_day"),)
 
 
 class Notification(Base):
@@ -211,6 +228,25 @@ def _auto_migrate_notifications_table():
         conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_profile_id VARCHAR(60);"""))
 
 
+def _auto_migrate_daily_usage_table():
+    """
+    Create daily_usage table if missing (simple daily counters: likes_used).
+    """
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS daily_usage (
+                id SERIAL PRIMARY KEY,
+                user_id VARCHAR(40) NOT NULL,
+                day_key VARCHAR(10) NOT NULL,
+                likes_used INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                CONSTRAINT uq_daily_usage_user_day UNIQUE (user_id, day_key)
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_usage_user_id ON daily_usage(user_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_usage_day_key ON daily_usage(day_key);"""))
+
+
 # Create tables if missing
 Base.metadata.create_all(bind=engine)
 
@@ -224,6 +260,11 @@ try:
     _auto_migrate_notifications_table()
 except Exception as e:
     print("AUTO_MIGRATE_NOTIFICATIONS failed:", str(e))
+
+try:
+    _auto_migrate_daily_usage_table()
+except Exception as e:
+    print("AUTO_MIGRATE_DAILY_USAGE failed:", str(e))
 
 
 # -----------------------------
@@ -263,7 +304,7 @@ class NotificationItem(BaseModel):
     actor_profile_id: Optional[str] = None
     actor_display_name: Optional[str] = None
 
-    # ✅ NEW: photo URL for the actor (liker)
+    # Photo URL for the actor (liker)
     actor_photo: Optional[str] = None
 
     # What it was about (e.g., the profile that got liked)
@@ -345,7 +386,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.0.7")
+app = FastAPI(title="Black Within API", version="1.0.8")
 
 app.add_middleware(
     CORSMiddleware,
@@ -372,6 +413,11 @@ def _make_user_id_from_email(email: str) -> str:
 
 def _new_id() -> str:
     return secrets.token_hex(20)[:40]
+
+
+def _utc_day_key(dt: Optional[datetime] = None) -> str:
+    d = dt or datetime.utcnow()
+    return d.strftime("%Y-%m-%d")
 
 
 def _ensure_user(user_id: str) -> str:
@@ -448,7 +494,8 @@ def health():
         "previewMode": AUTH_PREVIEW_MODE,
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
         "corsOrigins": origins,
-        "version": "1.0.7",
+        "version": "1.0.8",
+        "freeLikesPerDay": FREE_LIKES_PER_DAY,
     }
 
 
@@ -824,7 +871,6 @@ def get_notifications(user_id: str = Query(...)):
                 actor_map[p.owner_user_id] = {
                     "actor_display_name": p.display_name,
                     "actor_profile_id": p.id,
-                    # ✅ ADD THIS
                     "actor_photo": p.photo,
                 }
 
@@ -833,7 +879,7 @@ def get_notifications(user_id: str = Query(...)):
             actor_info = actor_map.get(n.actor_user_id or "", {})
             actor_display_name = actor_info.get("actor_display_name")
             actor_profile_id = actor_info.get("actor_profile_id")
-            actor_photo = actor_info.get("actor_photo")  # ✅ ADD
+            actor_photo = actor_info.get("actor_photo")
 
             # Prefer stored actor_profile_id if present
             if n.actor_profile_id:
@@ -849,7 +895,7 @@ def get_notifications(user_id: str = Query(...)):
                     actor_user_id=n.actor_user_id,
                     actor_profile_id=actor_profile_id,
                     actor_display_name=actor_display_name,
-                    actor_photo=actor_photo,  # ✅ ADD
+                    actor_photo=actor_photo,
                     profile_id=n.profile_id,
                 )
             )
@@ -960,18 +1006,63 @@ def like(payload: ProfileAction):
     if not profile_id:
         raise HTTPException(status_code=400, detail="profile_id is required")
 
+    day_key = _utc_day_key()
+
     with Session(engine) as session:
+        # Ensure target profile exists
         prof = session.get(Profile, profile_id)
         if not prof:
             raise HTTPException(status_code=404, detail="Profile not found")
 
+        # If this is already liked, don't count it again (and don't block)
         existing = session.execute(
             select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
         ).scalar_one_or_none()
         if existing:
             return {"ok": True}
 
+        # -----------------------------
+        # Free daily likes limit (MVP enforcement)
+        # -----------------------------
+        usage = session.execute(
+            select(DailyUsage).where(
+                DailyUsage.user_id == liker_user_id,
+                DailyUsage.day_key == day_key,
+            )
+        ).scalar_one_or_none()
+
+        if not usage:
+            usage = DailyUsage(user_id=liker_user_id, day_key=day_key, likes_used=0, created_at=datetime.utcnow())
+            session.add(usage)
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                usage = session.execute(
+                    select(DailyUsage).where(
+                        DailyUsage.user_id == liker_user_id,
+                        DailyUsage.day_key == day_key,
+                    )
+                ).scalar_one_or_none()
+
+        if usage and int(usage.likes_used or 0) >= FREE_LIKES_PER_DAY:
+            raise HTTPException(
+                status_code=429,
+                detail=f"You’ve reached your {FREE_LIKES_PER_DAY} likes for today. Come back tomorrow or upgrade.",
+            )
+
+        # Add the like
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+
+        # Increment counter (only for NEW likes)
+        usage = session.execute(
+            select(DailyUsage).where(
+                DailyUsage.user_id == liker_user_id,
+                DailyUsage.day_key == day_key,
+            )
+        ).scalar_one_or_none()
+        if usage:
+            usage.likes_used = int(usage.likes_used or 0) + 1
 
         recipient_user_id = prof.owner_user_id
 
