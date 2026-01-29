@@ -581,6 +581,18 @@ export default function DiscoverPage() {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
 
+                // ✅ Disable Like when no likes left (or still loading status)
+                const isLimitReached =
+                  !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
+
+                const likeDisabled = isLiked || loadingLikesStatus || isLimitReached;
+
+                const likeLabel = isLiked
+                  ? "Liked"
+                  : isLimitReached
+                  ? "Limit reached"
+                  : "Like";
+
                 return (
                   <div
                     key={p.id}
@@ -693,16 +705,24 @@ export default function DiscoverPage() {
 
                       <button
                         onClick={() => onLike(p)}
-                        disabled={isLiked}
+                        disabled={likeDisabled}
+                        title={
+                          isLimitReached
+                            ? "Daily like limit reached. Please wait for reset."
+                            : loadingLikesStatus
+                            ? "Loading like limits..."
+                            : undefined
+                        }
                         style={{
                           padding: "10px 12px",
                           borderRadius: 10,
                           border: "1px solid #ccc",
-                          background: isLiked ? "#f5f5f5" : "white",
-                          cursor: isLiked ? "not-allowed" : "pointer",
+                          background: likeDisabled ? "#f5f5f5" : "white",
+                          cursor: likeDisabled ? "not-allowed" : "pointer",
+                          opacity: likeDisabled ? 0.85 : 1,
                         }}
                       >
-                        {isLiked ? "Liked" : "Like"}
+                        {likeLabel}
                       </button>
                     </div>
                   </div>
