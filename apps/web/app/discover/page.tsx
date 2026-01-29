@@ -103,6 +103,28 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
   return Array.isArray(json?.items) ? json.items : [];
 }
 
+/**
+ * Logs out on THIS device by clearing saved login info,
+ * then sends user back to /auth so they can sign in as a different person.
+ */
+function logoutAndGoToAuth() {
+  try {
+    // Remove common keys safely (even if some don't exist)
+    localStorage.removeItem("bw_user_id");
+    localStorage.removeItem("user_id");
+    localStorage.removeItem("userId");
+    localStorage.removeItem("email");
+    localStorage.removeItem("bw_email");
+
+    // If your getOrCreateUserId() stores a different key, this still helps:
+    sessionStorage.clear();
+  } catch (e) {
+    // ignore
+  }
+
+  window.location.href = "/auth";
+}
+
 export default function DiscoverPage() {
   const [userId, setUserId] = useState<string>("");
 
@@ -269,6 +291,16 @@ export default function DiscoverPage() {
     display: "inline-block",
   };
 
+  const logoutBtnStyle: React.CSSProperties = {
+    padding: "0.65rem 1rem",
+    border: "1px solid #ccc",
+    borderRadius: 10,
+    background: "white",
+    color: "inherit",
+    cursor: "pointer",
+    display: "inline-block",
+  };
+
   return (
     <main
       style={{
@@ -292,7 +324,14 @@ export default function DiscoverPage() {
           <h1 style={{ margin: 0 }}>Discover</h1>
 
           {/* ✅ Discover Navigation */}
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
             <Link href="/profile" style={navBtnStyle}>
               My Profile
             </Link>
@@ -308,6 +347,20 @@ export default function DiscoverPage() {
             <Link href="/notifications" style={navBtnStyle}>
               Notifications
             </Link>
+
+            {/* ✅ NEW: LOG OUT BUTTON */}
+            <button
+              onClick={() => {
+                const ok = window.confirm(
+                  "Log out on this device? You can then sign in as another test profile."
+                );
+                if (ok) logoutAndGoToAuth();
+              }}
+              style={logoutBtnStyle}
+              title="Log out on this device"
+            >
+              Log out
+            </button>
           </div>
         </div>
 
@@ -367,7 +420,10 @@ export default function DiscoverPage() {
 
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Tag:
-            <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+            <select
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+            >
               {tagOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -380,11 +436,15 @@ export default function DiscoverPage() {
         {/* Grid */}
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
-            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+            <div
+              style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}
+            >
               Loading profiles…
             </div>
           ) : filteredProfiles.length === 0 ? (
-            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+            <div
+              style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}
+            >
               No profiles match your filters yet.
             </div>
           ) : (
@@ -490,7 +550,14 @@ export default function DiscoverPage() {
                       </div>
                     )}
 
-                    <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <div
+                      style={{
+                        marginTop: 12,
+                        display: "flex",
+                        gap: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
                       <Link
                         href={`/profiles/${p.id}`}
                         style={{
