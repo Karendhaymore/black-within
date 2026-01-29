@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { getOrCreateUserId } from "../lib/user";
 
 /**
  * IMPORTANT:
@@ -27,7 +26,7 @@ type ApiProfile = {
 type IdListResponse = { ids: string[] };
 type ProfilesResponse = { items: ApiProfile[] };
 
-// ✅ NEW: This matches /likes/status
+// Matches /likes/status
 type LikesStatusResponse = {
   likesLeft: number;
   limit: number;
@@ -40,21 +39,25 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
+function getLoggedInUserId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const uid = window.localStorage.getItem("bw_user_id");
+    return uid && uid.trim() ? uid.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function safeReadErrorDetail(res: Response): Promise<string> {
-  // Try to read FastAPI-style error: { detail: "..." }
   try {
     const data = await res.json();
     if (data?.detail) return String(data.detail);
-  } catch {
-    // ignore
-  }
-  // Fallback: plain text
+  } catch {}
   try {
     const text = await res.text();
     if (text) return text;
-  } catch {
-    // ignore
-  }
+  } catch {}
   return `Request failed (${res.status}).`;
 }
 
@@ -78,7 +81,6 @@ async function apiGetLikes(userId: string): Promise<string[]> {
   return Array.isArray(json?.ids) ? json.ids : [];
 }
 
-// ✅ NEW: load likes status from /likes/status
 async function apiGetLikesStatus(userId: string): Promise<LikesStatusResponse> {
   const res = await fetch(
     `${API_BASE}/likes/status?user_id=${encodeURIComponent(userId)}`,
@@ -115,14 +117,10 @@ async function apiLikeProfile(userId: string, profileId: string) {
   const res = await fetch(`${API_BASE}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user_id: userId,
-      profile_id: profileId,
-    }),
+    body: JSON.stringify({ user_id: userId, profile_id: profileId }),
   });
 
   if (!res.ok) {
-    // ✅ Show the friendly 429 message from the API
     const msg = await safeReadErrorDetail(res);
     throw new Error(msg);
   }
@@ -158,8 +156,6 @@ export default function DiscoverPage() {
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
-
-  // ✅ NEW
   const [likesStatus, setLikesStatus] = useState<LikesStatusResponse | null>(null);
 
   const [toast, setToast] = useState<string | null>(null);
@@ -167,15 +163,12 @@ export default function DiscoverPage() {
 
   const [loadingProfiles, setLoadingProfiles] = useState<boolean>(true);
   const [loadingSets, setLoadingSets] = useState<boolean>(true);
-
-  // ✅ NEW
   const [loadingLikesStatus, setLoadingLikesStatus] = useState<boolean>(true);
 
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
-  // Used to schedule an auto-refresh at reset time
   const resetTimerRef = useRef<number | null>(null);
 
   const availableProfiles = useMemo(
@@ -244,25 +237,26 @@ export default function DiscoverPage() {
     }
   }
 
-  // ✅ NEW: refresh likes status and schedule an auto refresh right after reset time
   async function refreshLikesStatus(uid: string) {
     try {
       setLoadingLikesStatus(true);
       const status = await apiGetLikesStatus(uid);
       setLikesStatus(status);
 
-      // Clear any prior timer
       if (resetTimerRef.current) {
         window.clearTimeout(resetTimerRef.current);
         resetTimerRef.current = null;
       }
 
-      // Schedule refresh shortly AFTER reset time (add 1.2 seconds buffer)
       const resetAt = new Date(status.resetsAtUTC).getTime();
       const now = Date.now();
       const msUntilReset = resetAt - now;
 
-      if (Number.isFinite(msUntilReset) && msUntilReset > 0 && msUntilReset < 24 * 60 * 60 * 1000) {
+      if (
+        Number.isFinite(msUntilReset) &&
+        msUntilReset > 0 &&
+        msUntilReset < 24 * 60 * 60 * 1000
+      ) {
         resetTimerRef.current = window.setTimeout(() => {
           refreshLikesStatus(uid).catch(() => {});
         }, msUntilReset + 1200);
@@ -276,17 +270,8 @@ export default function DiscoverPage() {
   }
 
   function logout() {
-    // ✅ Simple logout: clear local auth + identity, then go back to /auth
     try {
-      const keysToTry = [
-        "bw_user_id",
-        "bw_session_token",
-        "bw_email",
-        "black_within_user_id",
-        "user_id",
-        "userid",
-        "userId",
-      ];
+      const keysToTry = ["bw_user_id", "bw_session_token", "bw_email"];
       keysToTry.forEach((k) => {
         try {
           window.localStorage.removeItem(k);
@@ -304,7 +289,11 @@ export default function DiscoverPage() {
   }
 
   useEffect(() => {
-    const uid = getOrCreateUserId();
+    const uid = getLoggedInUserId();
+    if (!uid) {
+      window.location.href = "/auth";
+      return;
+    }
     setUserId(uid);
 
     (async () => {
@@ -334,7 +323,6 @@ export default function DiscoverPage() {
   }, [availableProfileIds]);
 
   useEffect(() => {
-    // Cleanup timer when page unmounts
     return () => {
       if (resetTimerRef.current) {
         window.clearTimeout(resetTimerRef.current);
@@ -373,7 +361,6 @@ export default function DiscoverPage() {
     if (!userId) return;
     if (likedIds.includes(p.id)) return;
 
-    // Optional UX: if likesLeft is 0, show message immediately
     if (likesStatus && likesStatus.likesLeft <= 0) {
       showToast(
         likesStatus.windowType === "test_seconds"
@@ -388,19 +375,13 @@ export default function DiscoverPage() {
 
     try {
       await apiLikeProfile(userId, p.id);
-
-      // ✅ Refresh likes AND status after a like
       await Promise.all([refreshSavedAndLikes(userId), refreshLikesStatus(userId)]);
-
       showToast("Like sent.");
     } catch (e: any) {
       setLikedIds(prev);
-
       const msg = e?.message || "Like failed.";
       setApiError(msg);
       showToast(msg);
-
-      // ✅ Also refresh status in case it hit the limit
       refreshLikesStatus(userId).catch(() => {});
     }
   }
@@ -427,7 +408,6 @@ export default function DiscoverPage() {
       }}
     >
       <div style={{ width: "100%", maxWidth: 1100 }}>
-        {/* Top bar */}
         <div
           style={{
             display: "flex",
@@ -440,19 +420,18 @@ export default function DiscoverPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <h1 style={{ margin: 0 }}>Discover</h1>
 
-            {/* ✅ Likes counter (test_seconds or daily_utc) */}
             <div style={{ fontSize: 13, color: "#555" }}>
               {loadingLikesStatus ? (
                 <span>Likes today: loading…</span>
               ) : likesStatus ? (
                 <span>
-                  Likes left:{" "}
-                  <strong>{likesStatus.likesLeft}</strong> /{" "}
+                  Likes left: <strong>{likesStatus.likesLeft}</strong> /{" "}
                   <strong>{likesStatus.limit}</strong>
                   {resetHint ? (
                     <span style={{ color: "#777" }}>
                       {" "}
-                      · resets {likesStatus.windowType === "test_seconds" ? "at" : "after"}{" "}
+                      · resets{" "}
+                      {likesStatus.windowType === "test_seconds" ? "at" : "after"}{" "}
                       <strong>{resetHint}</strong>
                     </span>
                   ) : null}
@@ -463,7 +442,6 @@ export default function DiscoverPage() {
             </div>
           </div>
 
-          {/* ✅ Discover Navigation */}
           <div
             style={{
               display: "flex",
@@ -500,7 +478,6 @@ export default function DiscoverPage() {
           </div>
         </div>
 
-        {/* Debug + status */}
         <div style={{ marginTop: 10, fontSize: 13, color: "#666" }}>
           <div>
             <strong>API:</strong> {API_BASE}
@@ -530,7 +507,6 @@ export default function DiscoverPage() {
           </div>
         )}
 
-        {/* Filters */}
         <div
           style={{
             marginTop: 16,
@@ -556,10 +532,7 @@ export default function DiscoverPage() {
 
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Tag:
-            <select
-              value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
-            >
+            <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
               {tagOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -568,7 +541,6 @@ export default function DiscoverPage() {
             </select>
           </label>
 
-          {/* ✅ Manual refresh button (nice for testing) */}
           <button
             onClick={() => {
               if (!userId) return;
@@ -588,7 +560,6 @@ export default function DiscoverPage() {
           </button>
         </div>
 
-        {/* Grid */}
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
             <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
@@ -657,9 +628,7 @@ export default function DiscoverPage() {
                             gap: 10,
                           }}
                         >
-                          <div style={{ fontWeight: 800, fontSize: 18 }}>
-                            {p.displayName}
-                          </div>
+                          <div style={{ fontWeight: 800, fontSize: 18 }}>{p.displayName}</div>
                           <div style={{ color: "#666" }}>{p.age}</div>
                         </div>
                         <div style={{ marginTop: 4, color: "#666", fontSize: 13 }}>
@@ -676,14 +645,7 @@ export default function DiscoverPage() {
                     </div>
 
                     {Array.isArray(p.tags) && p.tags.length > 0 && (
-                      <div
-                        style={{
-                          marginTop: 10,
-                          display: "flex",
-                          gap: 6,
-                          flexWrap: "wrap",
-                        }}
-                      >
+                      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {p.tags.slice(0, 10).map((t, idx) => (
                           <span
                             key={`${p.id}-tag-${idx}`}
