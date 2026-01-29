@@ -5,8 +5,8 @@ import hashlib
 import hmac
 import json
 import base64
-from datetime import datetime, timedelta, date
-from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta, date, time
+from typing import List, Optional, Dict, Any, Tuple
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,14 +55,17 @@ AUTH_CODE_TTL_MINUTES = int(os.getenv("AUTH_CODE_TTL_MINUTES", "15"))
 AUTH_PREVIEW_MODE = os.getenv("AUTH_PREVIEW_MODE", "true").lower() in ("1", "true", "yes")
 AUTH_USERID_PEPPER = os.getenv("AUTH_USERID_PEPPER", "")
 
-# NEW: password auth config (required for /auth/signup + /auth/login)
+# Password auth config (required for /auth/signup + /auth/login)
 AUTH_SECRET = os.getenv("AUTH_SECRET", "").strip()  # set this in Render env vars
 PBKDF2_ITERS = int(os.getenv("PBKDF2_ITERS", "200000"))
 
 NOTIFICATIONS_LIMIT = int(os.getenv("NOTIFICATIONS_LIMIT", "200"))
 
-# NEW: free likes/day limit
+# Free likes/day limit
 FREE_LIKES_PER_DAY = int(os.getenv("FREE_LIKES_PER_DAY", "5"))
+
+# NEW: test-mode reset (seconds). If > 0, likes reset every N seconds (for testing).
+LIKES_RESET_TEST_SECONDS = int(os.getenv("LIKES_RESET_TEST_SECONDS", "0") or "0")
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "").strip()
@@ -151,7 +154,9 @@ class Like(Base):
 
 class DailyLikeCount(Base):
     """
-    Tracks how many likes a user has sent today (UTC date).
+    Tracks likes used in the current window.
+    - Normal mode: one row per user per UTC day (day column).
+    - Test mode: we still keep a row, but we also use window_started_at to know when to reset.
     """
     __tablename__ = "daily_like_counts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -159,6 +164,9 @@ class DailyLikeCount(Base):
     day: Mapped[date] = mapped_column(Date, index=True)
     count: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # NEW: used for test-mode rolling reset
+    window_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (UniqueConstraint("user_id", "day", name="uq_daily_like_user_day"),)
 
@@ -265,7 +273,8 @@ def _auto_migrate_auth_accounts_table():
 
 def _auto_migrate_daily_like_counts_table():
     """
-    Create daily_like_counts if missing (for free likes/day limit).
+    Create daily_like_counts if missing (for free likes/day limit),
+    and add window_started_at if missing (for test reset mode).
     """
     with engine.begin() as conn:
         conn.execute(text("""
@@ -275,11 +284,15 @@ def _auto_migrate_daily_like_counts_table():
               day DATE,
               count INTEGER DEFAULT 0,
               updated_at TIMESTAMP DEFAULT NOW(),
+              window_started_at TIMESTAMP NULL,
               CONSTRAINT uq_daily_like_user_day UNIQUE (user_id, day)
             );
         """))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_user_id ON daily_like_counts(user_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_day ON daily_like_counts(day);"""))
+
+        # If the table already existed before window_started_at, add it safely:
+        conn.execute(text("""ALTER TABLE daily_like_counts ADD COLUMN IF NOT EXISTS window_started_at TIMESTAMP NULL;"""))
 
 
 # Create tables if missing
@@ -349,15 +362,11 @@ class NotificationItem(BaseModel):
     message: str
     created_at: str
 
-    # Who caused it
     actor_user_id: Optional[str] = None
     actor_profile_id: Optional[str] = None
     actor_display_name: Optional[str] = None
-
-    # photo URL for the actor (liker)
     actor_photo: Optional[str] = None
 
-    # What it was about (e.g., the profile that got liked)
     profile_id: Optional[str] = None
 
 
@@ -380,7 +389,6 @@ class ProfileItem(BaseModel):
     tags: List[str]
     isAvailable: bool
 
-    # alignment fields
     culturalIdentity: List[str] = []
     spiritualFramework: List[str] = []
     relationshipIntent: Optional[str] = None
@@ -396,17 +404,22 @@ class ProfilesListResponse(BaseModel):
     items: List[ProfileItem]
 
 
+class LikesStatusResponse(BaseModel):
+    likesLeft: int
+    limit: int
+    windowType: str  # "daily_utc" or "test_seconds"
+    resetsAtUTC: str
+
+
 # Accept BOTH camelCase and snake_case (frontend may send either)
 class UpsertMyProfilePayload(BaseModel):
     owner_user_id: str  # keep this key name for your frontend
 
-    # existing camelCase
     displayName: Optional[str] = None
     stateUS: Optional[str] = None
     identityPreview: Optional[str] = None
     isAvailable: Optional[bool] = True
 
-    # existing snake_case fallbacks
     display_name: Optional[str] = None
     state_us: Optional[str] = None
     identity_preview: Optional[str] = None
@@ -418,14 +431,12 @@ class UpsertMyProfilePayload(BaseModel):
     intention: str
     tags: List[str] = []
 
-    # alignment fields (camelCase)
     culturalIdentity: Optional[List[str]] = None
     spiritualFramework: Optional[List[str]] = None
     relationshipIntent: Optional[str] = None
     datingChallenge: Optional[str] = None
     personalTruth: Optional[str] = None
 
-    # alignment fields (snake_case fallbacks)
     cultural_identity: Optional[List[str]] = None
     spiritual_framework: Optional[List[str]] = None
     relationship_intent: Optional[str] = None
@@ -436,7 +447,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.1.0")
+app = FastAPI(title="Black Within API", version="1.1.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -535,7 +546,6 @@ def _hash_password(password: str) -> str:
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
     if not AUTH_SECRET:
-        # Not strictly required for hashing, but required as a signal you configured auth securely.
         raise HTTPException(status_code=500, detail="Server auth is not configured (AUTH_SECRET missing).")
 
     salt = secrets.token_bytes(16)
@@ -565,24 +575,75 @@ def _today_utc() -> date:
     return datetime.utcnow().date()
 
 
+def _utc_midnight_of_day(d: date) -> datetime:
+    return datetime.combine(d, time.min)
+
+
+def _next_utc_midnight(now_utc: datetime) -> datetime:
+    tomorrow = (now_utc.date() + timedelta(days=1))
+    return _utc_midnight_of_day(tomorrow)
+
+
 def _get_or_create_daily_like_counter(session: Session, user_id: str, day: date) -> DailyLikeCount:
     row = session.execute(
         select(DailyLikeCount).where(DailyLikeCount.user_id == user_id, DailyLikeCount.day == day)
     ).scalar_one_or_none()
     if row:
         return row
-    row = DailyLikeCount(user_id=user_id, day=day, count=0, updated_at=datetime.utcnow())
+    row = DailyLikeCount(user_id=user_id, day=day, count=0, updated_at=datetime.utcnow(), window_started_at=None)
     session.add(row)
     try:
         session.commit()
     except IntegrityError:
         session.rollback()
-        # Another request created it; fetch it
         row = session.execute(
             select(DailyLikeCount).where(DailyLikeCount.user_id == user_id, DailyLikeCount.day == day)
         ).scalar_one()
         return row
     return row
+
+
+def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, int, datetime, str]:
+    """
+    Returns:
+      (counter_row, likes_left, resets_at_utc, window_type)
+
+    Window types:
+      - daily_utc: resets at next UTC midnight
+      - test_seconds: resets every LIKES_RESET_TEST_SECONDS seconds (rolling window)
+    """
+    now = datetime.utcnow()
+
+    # TEST MODE (for you while building)
+    if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
+        # We still store it in today's row (simple + safe), but we reset using window_started_at.
+        today = now.date()
+        counter = _get_or_create_daily_like_counter(session, user_id, today)
+
+        if not counter.window_started_at:
+            counter.window_started_at = now
+            counter.updated_at = now
+            session.commit()
+
+        reset_at = counter.window_started_at + timedelta(seconds=LIKES_RESET_TEST_SECONDS)
+
+        # If the window expired, reset the count
+        if now >= reset_at:
+            counter.count = 0
+            counter.window_started_at = now
+            counter.updated_at = now
+            session.commit()
+            reset_at = counter.window_started_at + timedelta(seconds=LIKES_RESET_TEST_SECONDS)
+
+        likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
+        return counter, likes_left, reset_at, "test_seconds"
+
+    # NORMAL MODE (real product behavior)
+    today = now.date()
+    counter = _get_or_create_daily_like_counter(session, user_id, today)
+    reset_at = _next_utc_midnight(now)
+    likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
+    return counter, likes_left, reset_at, "daily_utc"
 
 
 @app.get("/")
@@ -598,8 +659,9 @@ def health():
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
         "passwordAuthConfigured": bool(AUTH_SECRET),
         "freeLikesPerDay": FREE_LIKES_PER_DAY,
+        "likesResetTestSeconds": LIKES_RESET_TEST_SECONDS,
         "corsOrigins": origins,
-        "version": "1.1.0",
+        "version": "1.1.1",
     }
 
 
@@ -681,7 +743,6 @@ def request_code(payload: RequestCodePayload):
         session.commit()
 
     if AUTH_PREVIEW_MODE:
-        # devCode is used by your frontend preview mode
         return {"ok": True, "devCode": code, "sent": False, "previewMode": True}
 
     try:
@@ -732,6 +793,22 @@ def verify_code(payload: VerifyCodePayload):
     user_id = _make_user_id_from_email(email)
     _ensure_user(user_id)
     return {"ok": True, "userId": user_id}
+
+
+# -----------------------------
+# Likes status (lets frontend show "likes left" + when it resets)
+# -----------------------------
+@app.get("/likes/status", response_model=LikesStatusResponse)
+def likes_status(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+    with Session(engine) as session:
+        counter, likes_left, reset_at, window_type = _get_likes_window(session, user_id)
+        return LikesStatusResponse(
+            likesLeft=likes_left,
+            limit=FREE_LIKES_PER_DAY,
+            windowType=window_type,
+            resetsAtUTC=reset_at.isoformat(),
+        )
 
 
 # -----------------------------
@@ -1031,7 +1108,6 @@ def get_notifications(user_id: str = Query(...)):
             actor_profile_id = actor_info.get("actor_profile_id")
             actor_photo = actor_info.get("actor_photo")
 
-            # Prefer stored actor_profile_id if present
             if n.actor_profile_id:
                 actor_profile_id = n.actor_profile_id
 
@@ -1063,7 +1139,7 @@ def clear_notifications(user_id: str = Query(...)):
 
 
 # -----------------------------
-# Likes (with daily limit)
+# Likes (with daily reset + test reset)
 # -----------------------------
 @app.get("/likes", response_model=IdListResponse)
 def get_likes(user_id: str = Query(...)):
@@ -1078,9 +1154,6 @@ def get_likes(user_id: str = Query(...)):
 
 @app.get("/likes/sent", response_model=IdListResponse)
 def get_likes_sent(user_id: str = Query(...)):
-    """
-    Alias of /likes (explicit naming).
-    """
     return get_likes(user_id=user_id)
 
 
@@ -1157,18 +1230,24 @@ def like(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        # Enforce free likes/day
-        today = _today_utc()
-        counter = _get_or_create_daily_like_counter(session, liker_user_id, today)
+        # Read the current window (daily or test seconds)
+        counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
 
         # If already liked, don't count it again
         existing = session.execute(
             select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
         ).scalar_one_or_none()
         if existing:
-            return {"ok": True, "likesLeft": max(0, FREE_LIKES_PER_DAY - int(counter.count))}
+            return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
 
+        # Enforce limit
         if int(counter.count) >= FREE_LIKES_PER_DAY:
+            # Friendly + specific message
+            if window_type == "test_seconds":
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.",
+                )
             raise HTTPException(
                 status_code=429,
                 detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.",
@@ -1181,13 +1260,18 @@ def like(payload: ProfileAction):
         # Write the like
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
 
-        # Increment daily counter
+        # Increment the counter
         counter.count = int(counter.count) + 1
         counter.updated_at = datetime.utcnow()
 
+        # In test mode, ensure window_started_at exists
+        if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
+            if not counter.window_started_at:
+                counter.window_started_at = datetime.utcnow()
+
         recipient_user_id = prof.owner_user_id
 
-        # Find the actor's profile (if they have one) so we can link to it in Notifications UI
+        # Find actor profile (if they have one)
         actor_profile = session.execute(
             select(Profile).where(Profile.owner_user_id == liker_user_id)
         ).scalar_one_or_none()
@@ -1209,7 +1293,10 @@ def like(payload: ProfileAction):
             session.commit()
         except IntegrityError:
             session.rollback()
-            return {"ok": True, "likesLeft": max(0, FREE_LIKES_PER_DAY - int(counter.count))}
+            # If something raced, still return a safe value
+            likes_left_safe = max(0, FREE_LIKES_PER_DAY - int(counter.count))
+            return {"ok": True, "likesLeft": likes_left_safe, "resetsAtUTC": reset_at.isoformat()}
 
-        likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
-        return {"ok": True, "likesLeft": likes_left}
+        # Recompute likes left and reset time after commit (test mode might have reset logic)
+        counter2, likes_left_final, reset_at2, window_type2 = _get_likes_window(session, liker_user_id)
+        return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
