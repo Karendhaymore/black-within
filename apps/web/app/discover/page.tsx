@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getOrCreateUserId } from "../lib/user";
 
@@ -27,11 +27,12 @@ type ApiProfile = {
 type IdListResponse = { ids: string[] };
 type ProfilesResponse = { items: ApiProfile[] };
 
-type LimitsResponse = {
-  likesLimit: number;
-  likesUsedToday: number;
-  likesRemaining: number;
-  resetsAtUtc: string;
+// ✅ NEW: This matches /likes/status
+type LikesStatusResponse = {
+  likesLeft: number;
+  limit: number;
+  windowType: "daily_utc" | "test_seconds";
+  resetsAtUTC: string; // ISO datetime string
 };
 
 const API_BASE =
@@ -77,13 +78,14 @@ async function apiGetLikes(userId: string): Promise<string[]> {
   return Array.isArray(json?.ids) ? json.ids : [];
 }
 
-async function apiGetLimits(userId: string): Promise<LimitsResponse> {
+// ✅ NEW: load likes status from /likes/status
+async function apiGetLikesStatus(userId: string): Promise<LikesStatusResponse> {
   const res = await fetch(
-    `${API_BASE}/limits?user_id=${encodeURIComponent(userId)}`,
+    `${API_BASE}/likes/status?user_id=${encodeURIComponent(userId)}`,
     { cache: "no-store" }
   );
-  if (!res.ok) throw new Error(`Failed to load limits (${res.status}).`);
-  return (await res.json()) as LimitsResponse;
+  if (!res.ok) throw new Error(`Failed to load like status (${res.status}).`);
+  return (await res.json()) as LikesStatusResponse;
 }
 
 async function apiSaveProfile(userId: string, profileId: string) {
@@ -143,24 +145,38 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
   return Array.isArray(json?.items) ? json.items : [];
 }
 
+function formatResetHint(status: LikesStatusResponse | null) {
+  if (!status?.resetsAtUTC) return "";
+  const d = new Date(status.resetsAtUTC);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export default function DiscoverPage() {
   const [userId, setUserId] = useState<string>("");
 
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
-  const [limits, setLimits] = useState<LimitsResponse | null>(null);
+
+  // ✅ NEW
+  const [likesStatus, setLikesStatus] = useState<LikesStatusResponse | null>(null);
 
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
   const [loadingProfiles, setLoadingProfiles] = useState<boolean>(true);
   const [loadingSets, setLoadingSets] = useState<boolean>(true);
-  const [loadingLimits, setLoadingLimits] = useState<boolean>(true);
+
+  // ✅ NEW
+  const [loadingLikesStatus, setLoadingLikesStatus] = useState<boolean>(true);
 
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
+
+  // Used to schedule an auto-refresh at reset time
+  const resetTimerRef = useRef<number | null>(null);
 
   const availableProfiles = useMemo(
     () => profiles.filter((p) => p.isAvailable),
@@ -228,25 +244,44 @@ export default function DiscoverPage() {
     }
   }
 
-  async function refreshLimits(uid: string) {
+  // ✅ NEW: refresh likes status and schedule an auto refresh right after reset time
+  async function refreshLikesStatus(uid: string) {
     try {
-      setLoadingLimits(true);
-      const lim = await apiGetLimits(uid);
-      setLimits(lim);
+      setLoadingLikesStatus(true);
+      const status = await apiGetLikesStatus(uid);
+      setLikesStatus(status);
+
+      // Clear any prior timer
+      if (resetTimerRef.current) {
+        window.clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+
+      // Schedule refresh shortly AFTER reset time (add 1.2 seconds buffer)
+      const resetAt = new Date(status.resetsAtUTC).getTime();
+      const now = Date.now();
+      const msUntilReset = resetAt - now;
+
+      if (Number.isFinite(msUntilReset) && msUntilReset > 0 && msUntilReset < 24 * 60 * 60 * 1000) {
+        resetTimerRef.current = window.setTimeout(() => {
+          refreshLikesStatus(uid).catch(() => {});
+        }, msUntilReset + 1200);
+      }
     } catch (e: any) {
-      // limits are nice-to-have; don’t break the page if it fails
-      console.warn("Limits load failed:", e);
-      setLimits(null);
+      console.warn("Likes status load failed:", e);
+      setLikesStatus(null);
     } finally {
-      setLoadingLimits(false);
+      setLoadingLikesStatus(false);
     }
   }
 
   function logout() {
-    // ✅ Simple logout: remove likely user-id keys, then go back to /auth
+    // ✅ Simple logout: clear local auth + identity, then go back to /auth
     try {
       const keysToTry = [
         "bw_user_id",
+        "bw_session_token",
+        "bw_email",
         "black_within_user_id",
         "user_id",
         "userid",
@@ -287,7 +322,7 @@ export default function DiscoverPage() {
         setLoadingProfiles(false);
       }
 
-      await Promise.all([refreshSavedAndLikes(uid), refreshLimits(uid)]);
+      await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -297,6 +332,16 @@ export default function DiscoverPage() {
     refreshSavedAndLikes(userId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableProfileIds]);
+
+  useEffect(() => {
+    // Cleanup timer when page unmounts
+    return () => {
+      if (resetTimerRef.current) {
+        window.clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, []);
 
   async function onToggleSave(p: ApiProfile) {
     if (!userId) return;
@@ -328,23 +373,35 @@ export default function DiscoverPage() {
     if (!userId) return;
     if (likedIds.includes(p.id)) return;
 
+    // Optional UX: if likesLeft is 0, show message immediately
+    if (likesStatus && likesStatus.likesLeft <= 0) {
+      showToast(
+        likesStatus.windowType === "test_seconds"
+          ? `Daily like limit reached (${likesStatus.limit}). Resets soon.`
+          : `Daily like limit reached (${likesStatus.limit}). Try again tomorrow.`
+      );
+      return;
+    }
+
     const prev = likedIds;
     setLikedIds((curr) => (curr.includes(p.id) ? curr : [p.id, ...curr]));
 
     try {
       await apiLikeProfile(userId, p.id);
 
-      // ✅ Refresh likes AND limits after a like
-      await Promise.all([refreshSavedAndLikes(userId), refreshLimits(userId)]);
+      // ✅ Refresh likes AND status after a like
+      await Promise.all([refreshSavedAndLikes(userId), refreshLikesStatus(userId)]);
 
       showToast("Like sent.");
     } catch (e: any) {
       setLikedIds(prev);
 
-      // ✅ If you hit the 429 limit, you’ll see the friendly API message here
       const msg = e?.message || "Like failed.";
       setApiError(msg);
       showToast(msg);
+
+      // ✅ Also refresh status in case it hit the limit
+      refreshLikesStatus(userId).catch(() => {});
     }
   }
 
@@ -357,6 +414,8 @@ export default function DiscoverPage() {
     background: "white",
     display: "inline-block",
   };
+
+  const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
 
   return (
     <main
@@ -381,15 +440,22 @@ export default function DiscoverPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <h1 style={{ margin: 0 }}>Discover</h1>
 
-            {/* ✅ Likes counter (Option A) */}
+            {/* ✅ Likes counter (test_seconds or daily_utc) */}
             <div style={{ fontSize: 13, color: "#555" }}>
-              {loadingLimits ? (
+              {loadingLikesStatus ? (
                 <span>Likes today: loading…</span>
-              ) : limits ? (
+              ) : likesStatus ? (
                 <span>
-                  Likes today: <strong>{limits.likesUsedToday}</strong> /{" "}
-                  <strong>{limits.likesLimit}</strong> ·{" "}
-                  <strong>{limits.likesRemaining}</strong> left
+                  Likes left:{" "}
+                  <strong>{likesStatus.likesLeft}</strong> /{" "}
+                  <strong>{likesStatus.limit}</strong>
+                  {resetHint ? (
+                    <span style={{ color: "#777" }}>
+                      {" "}
+                      · resets {likesStatus.windowType === "test_seconds" ? "at" : "after"}{" "}
+                      <strong>{resetHint}</strong>
+                    </span>
+                  ) : null}
                 </span>
               ) : (
                 <span>Likes today: unavailable</span>
@@ -422,7 +488,6 @@ export default function DiscoverPage() {
               Notifications
             </Link>
 
-            {/* ✅ NEW: Logout button */}
             <button
               onClick={logout}
               style={{
@@ -502,6 +567,25 @@ export default function DiscoverPage() {
               ))}
             </select>
           </label>
+
+          {/* ✅ Manual refresh button (nice for testing) */}
+          <button
+            onClick={() => {
+              if (!userId) return;
+              refreshLikesStatus(userId).catch(() => {});
+              showToast("Refreshed likes status.");
+            }}
+            style={{
+              padding: "0.5rem 0.8rem",
+              border: "1px solid #ccc",
+              borderRadius: 10,
+              background: "white",
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+          >
+            Refresh likes
+          </button>
         </div>
 
         {/* Grid */}
