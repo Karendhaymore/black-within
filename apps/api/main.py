@@ -2,8 +2,10 @@ import os
 import re
 import secrets
 import hashlib
+import hmac
 import json
-from datetime import datetime, timedelta, timezone
+import base64
+from datetime import datetime, timedelta, date
 from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -14,6 +16,7 @@ from sqlalchemy import (
     create_engine,
     String,
     DateTime,
+    Date,
     UniqueConstraint,
     select,
     delete,
@@ -21,12 +24,11 @@ from sqlalchemy import (
     Text,
     Boolean,
     text,
-    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
 
-# SendGrid
+# SendGrid (still supported, optional)
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
@@ -53,9 +55,13 @@ AUTH_CODE_TTL_MINUTES = int(os.getenv("AUTH_CODE_TTL_MINUTES", "15"))
 AUTH_PREVIEW_MODE = os.getenv("AUTH_PREVIEW_MODE", "true").lower() in ("1", "true", "yes")
 AUTH_USERID_PEPPER = os.getenv("AUTH_USERID_PEPPER", "")
 
+# NEW: password auth config (required for /auth/signup + /auth/login)
+AUTH_SECRET = os.getenv("AUTH_SECRET", "").strip()  # set this in Render env vars
+PBKDF2_ITERS = int(os.getenv("PBKDF2_ITERS", "200000"))
+
 NOTIFICATIONS_LIMIT = int(os.getenv("NOTIFICATIONS_LIMIT", "200"))
 
-# ✅ Free likes/day (Option A counter will use this)
+# NEW: free likes/day limit
 FREE_LIKES_PER_DAY = int(os.getenv("FREE_LIKES_PER_DAY", "5"))
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
@@ -76,6 +82,18 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AuthAccount(Base):
+    """
+    Email + password login (password is stored hashed, never plaintext).
+    user_id is stable and derived from email (via _make_user_id_from_email()).
+    """
+    __tablename__ = "auth_accounts"
+    user_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
 class Profile(Base):
@@ -126,9 +144,23 @@ class Like(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)       # liker
     profile_id: Mapped[str] = mapped_column(String(60), index=True)    # liked profile
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
+
+
+class DailyLikeCount(Base):
+    """
+    Tracks how many likes a user has sent today (UTC date).
+    """
+    __tablename__ = "daily_like_counts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "day", name="uq_daily_like_user_day"),)
 
 
 class Notification(Base):
@@ -215,6 +247,41 @@ def _auto_migrate_notifications_table():
         conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_profile_id VARCHAR(60);"""))
 
 
+def _auto_migrate_auth_accounts_table():
+    """
+    Create auth_accounts table if missing (email + password auth).
+    """
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS auth_accounts (
+              user_id VARCHAR(40) PRIMARY KEY,
+              email VARCHAR(320) UNIQUE,
+              password_hash VARCHAR(500),
+              created_at TIMESTAMP DEFAULT NOW()
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_auth_accounts_email ON auth_accounts(email);"""))
+
+
+def _auto_migrate_daily_like_counts_table():
+    """
+    Create daily_like_counts if missing (for free likes/day limit).
+    """
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS daily_like_counts (
+              id SERIAL PRIMARY KEY,
+              user_id VARCHAR(40),
+              day DATE,
+              count INTEGER DEFAULT 0,
+              updated_at TIMESTAMP DEFAULT NOW(),
+              CONSTRAINT uq_daily_like_user_day UNIQUE (user_id, day)
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_user_id ON daily_like_counts(user_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_day ON daily_like_counts(day);"""))
+
+
 # Create tables if missing
 Base.metadata.create_all(bind=engine)
 
@@ -228,6 +295,16 @@ try:
     _auto_migrate_notifications_table()
 except Exception as e:
     print("AUTO_MIGRATE_NOTIFICATIONS failed:", str(e))
+
+try:
+    _auto_migrate_auth_accounts_table()
+except Exception as e:
+    print("AUTO_MIGRATE_AUTH_ACCOUNTS failed:", str(e))
+
+try:
+    _auto_migrate_daily_like_counts_table()
+except Exception as e:
+    print("AUTO_MIGRATE_DAILY_LIKES failed:", str(e))
 
 
 # -----------------------------
@@ -255,6 +332,16 @@ class VerifyCodePayload(BaseModel):
     code: str
 
 
+class SignupPayload(BaseModel):
+    email: str
+    password: str
+
+
+class LoginPayload(BaseModel):
+    email: str
+    password: str
+
+
 class NotificationItem(BaseModel):
     id: str
     user_id: str
@@ -262,11 +349,15 @@ class NotificationItem(BaseModel):
     message: str
     created_at: str
 
+    # Who caused it
     actor_user_id: Optional[str] = None
     actor_profile_id: Optional[str] = None
     actor_display_name: Optional[str] = None
+
+    # photo URL for the actor (liker)
     actor_photo: Optional[str] = None
 
+    # What it was about (e.g., the profile that got liked)
     profile_id: Optional[str] = None
 
 
@@ -289,6 +380,7 @@ class ProfileItem(BaseModel):
     tags: List[str]
     isAvailable: bool
 
+    # alignment fields
     culturalIdentity: List[str] = []
     spiritualFramework: List[str] = []
     relationshipIntent: Optional[str] = None
@@ -304,22 +396,17 @@ class ProfilesListResponse(BaseModel):
     items: List[ProfileItem]
 
 
-# ✅ NEW: likes/day counter response
-class LimitsResponse(BaseModel):
-    likesLimit: int
-    likesUsedToday: int
-    likesRemaining: int
-    resetsAtUtc: str
-
-
+# Accept BOTH camelCase and snake_case (frontend may send either)
 class UpsertMyProfilePayload(BaseModel):
-    owner_user_id: str
+    owner_user_id: str  # keep this key name for your frontend
 
+    # existing camelCase
     displayName: Optional[str] = None
     stateUS: Optional[str] = None
     identityPreview: Optional[str] = None
     isAvailable: Optional[bool] = True
 
+    # existing snake_case fallbacks
     display_name: Optional[str] = None
     state_us: Optional[str] = None
     identity_preview: Optional[str] = None
@@ -331,12 +418,14 @@ class UpsertMyProfilePayload(BaseModel):
     intention: str
     tags: List[str] = []
 
+    # alignment fields (camelCase)
     culturalIdentity: Optional[List[str]] = None
     spiritualFramework: Optional[List[str]] = None
     relationshipIntent: Optional[str] = None
     datingChallenge: Optional[str] = None
     personalTruth: Optional[str] = None
 
+    # alignment fields (snake_case fallbacks)
     cultural_identity: Optional[List[str]] = None
     spiritual_framework: Optional[List[str]] = None
     relationship_intent: Optional[str] = None
@@ -347,7 +436,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.0.9")
+app = FastAPI(title="Black Within API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -438,33 +527,62 @@ def _coerce_str_list(v: Any) -> List[str]:
     return out
 
 
-def _utc_day_start(dt: Optional[datetime] = None) -> datetime:
+def _hash_password(password: str) -> str:
     """
-    Returns today's midnight in UTC.
-    We treat the free-like reset as UTC midnight.
+    PBKDF2 hash: pbkdf2$iters$salt$derived_key
     """
-    now = dt or datetime.now(timezone.utc)
-    return datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    password = (password or "").strip()
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    if not AUTH_SECRET:
+        # Not strictly required for hashing, but required as a signal you configured auth securely.
+        raise HTTPException(status_code=500, detail="Server auth is not configured (AUTH_SECRET missing).")
+
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERS)
+    return "pbkdf2$%d$%s$%s" % (
+        PBKDF2_ITERS,
+        base64.urlsafe_b64encode(salt).decode("utf-8"),
+        base64.urlsafe_b64encode(dk).decode("utf-8"),
+    )
 
 
-def _utc_next_midnight(dt: Optional[datetime] = None) -> datetime:
-    start = _utc_day_start(dt)
-    return start + timedelta(days=1)
+def _verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, iters_str, salt_b64, dk_b64 = stored.split("$", 3)
+        if algo != "pbkdf2":
+            return False
+        iters = int(iters_str)
+        salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
+        expected = base64.urlsafe_b64decode(dk_b64.encode("utf-8"))
+        got = hashlib.pbkdf2_hmac("sha256", (password or "").encode("utf-8"), salt, iters)
+        return hmac.compare_digest(got, expected)
+    except Exception:
+        return False
 
 
-def _likes_used_today(session: Session, user_id: str) -> int:
-    day_start = _utc_day_start()
-    # likes.created_at is stored as UTC via datetime.utcnow(); compare as naive/aware safely
-    # We'll compare against naive UTC for compatibility.
-    day_start_naive = day_start.replace(tzinfo=None)
+def _today_utc() -> date:
+    return datetime.utcnow().date()
 
-    count = session.execute(
-        select(func.count(Like.id)).where(
-            Like.user_id == user_id,
-            Like.created_at >= day_start_naive,
-        )
-    ).scalar_one()
-    return int(count or 0)
+
+def _get_or_create_daily_like_counter(session: Session, user_id: str, day: date) -> DailyLikeCount:
+    row = session.execute(
+        select(DailyLikeCount).where(DailyLikeCount.user_id == user_id, DailyLikeCount.day == day)
+    ).scalar_one_or_none()
+    if row:
+        return row
+    row = DailyLikeCount(user_id=user_id, day=day, count=0, updated_at=datetime.utcnow())
+    session.add(row)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        # Another request created it; fetch it
+        row = session.execute(
+            select(DailyLikeCount).where(DailyLikeCount.user_id == user_id, DailyLikeCount.day == day)
+        ).scalar_one()
+        return row
+    return row
 
 
 @app.get("/")
@@ -478,9 +596,10 @@ def health():
         "status": "ok",
         "previewMode": AUTH_PREVIEW_MODE,
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
-        "corsOrigins": origins,
-        "version": "1.0.9",
+        "passwordAuthConfigured": bool(AUTH_SECRET),
         "freeLikesPerDay": FREE_LIKES_PER_DAY,
+        "corsOrigins": origins,
+        "version": "1.1.0",
     }
 
 
@@ -494,31 +613,51 @@ def me(user_id: str = Query(...)):
 
 
 # -----------------------------
-# LIMITS (Option A)
+# AUTH (Password-based)
 # -----------------------------
-@app.get("/limits", response_model=LimitsResponse)
-def limits(user_id: str = Query(...)):
-    """
-    Simple "what can I do today?" endpoint.
-    Right now it only reports free likes/day usage.
-    """
-    user_id = _ensure_user(user_id)
+@app.post("/auth/signup")
+def signup(payload: SignupPayload):
+    email = _normalize_email(payload.email)
+    password = payload.password or ""
+
+    user_id = _make_user_id_from_email(email)
+    pwd_hash = _hash_password(password)
+
     with Session(engine) as session:
-        used = _likes_used_today(session, user_id)
-        limit = FREE_LIKES_PER_DAY
-        remaining = max(0, limit - used)
-        resets_at = _utc_next_midnight().isoformat()
+        existing = session.execute(
+            select(AuthAccount).where(AuthAccount.email == email)
+        ).scalar_one_or_none()
+        if existing:
+            raise HTTPException(status_code=409, detail="An account with that email already exists. Please log in.")
 
-    return LimitsResponse(
-        likesLimit=limit,
-        likesUsedToday=used,
-        likesRemaining=remaining,
-        resetsAtUtc=resets_at,
-    )
+        session.add(AuthAccount(user_id=user_id, email=email, password_hash=pwd_hash))
+        session.commit()
+
+    _ensure_user(user_id)
+    return {"ok": True, "userId": user_id, "email": email}
+
+
+@app.post("/auth/login")
+def login(payload: LoginPayload):
+    email = _normalize_email(payload.email)
+    password = payload.password or ""
+
+    with Session(engine) as session:
+        acct = session.execute(
+            select(AuthAccount).where(AuthAccount.email == email)
+        ).scalar_one_or_none()
+        if not acct:
+            raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+
+        if not _verify_password(password, acct.password_hash):
+            raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+
+    _ensure_user(acct.user_id)
+    return {"ok": True, "userId": acct.user_id, "email": email}
 
 
 # -----------------------------
-# AUTH
+# AUTH (Email-code; still supported)
 # -----------------------------
 @app.post("/auth/request-code")
 def request_code(payload: RequestCodePayload):
@@ -542,6 +681,7 @@ def request_code(payload: RequestCodePayload):
         session.commit()
 
     if AUTH_PREVIEW_MODE:
+        # devCode is used by your frontend preview mode
         return {"ok": True, "devCode": code, "sent": False, "previewMode": True}
 
     try:
@@ -571,7 +711,9 @@ def verify_code(payload: VerifyCodePayload):
         raise HTTPException(status_code=400, detail="A 6-digit code is required")
 
     with Session(engine) as session:
-        row = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
+        row = session.execute(
+            select(LoginCode).where(LoginCode.email == email)
+        ).scalar_one_or_none()
 
         if not row:
             raise HTTPException(status_code=401, detail="Invalid or expired code")
@@ -775,6 +917,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
         )
 
 
+# IMPORTANT: your frontend currently POSTs to /profiles (keep this alias)
 @app.post("/profiles", response_model=ProfileItem)
 def upsert_profile_alias(payload: UpsertMyProfilePayload):
     return upsert_my_profile(payload)
@@ -853,8 +996,8 @@ def get_notifications(user_id: str = Query(...)):
     """
     Returns notifications with enriched actor info:
       - actor_display_name
-      - actor_profile_id
-      - actor_photo
+      - actor_profile_id (so frontend can link to /profiles/{actor_profile_id})
+      - actor_photo (so frontend can show photo instead of initials)
     """
     user_id = _ensure_user(user_id)
 
@@ -888,6 +1031,7 @@ def get_notifications(user_id: str = Query(...)):
             actor_profile_id = actor_info.get("actor_profile_id")
             actor_photo = actor_info.get("actor_photo")
 
+            # Prefer stored actor_profile_id if present
             if n.actor_profile_id:
                 actor_profile_id = n.actor_profile_id
 
@@ -919,7 +1063,7 @@ def clear_notifications(user_id: str = Query(...)):
 
 
 # -----------------------------
-# Likes
+# Likes (with daily limit)
 # -----------------------------
 @app.get("/likes", response_model=IdListResponse)
 def get_likes(user_id: str = Query(...)):
@@ -934,6 +1078,9 @@ def get_likes(user_id: str = Query(...)):
 
 @app.get("/likes/sent", response_model=IdListResponse)
 def get_likes_sent(user_id: str = Query(...)):
+    """
+    Alias of /likes (explicit naming).
+    """
     return get_likes(user_id=user_id)
 
 
@@ -1010,29 +1157,37 @@ def like(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        prof = session.get(Profile, profile_id)
-        if not prof:
-            raise HTTPException(status_code=404, detail="Profile not found")
+        # Enforce free likes/day
+        today = _today_utc()
+        counter = _get_or_create_daily_like_counter(session, liker_user_id, today)
 
-        # If already liked, don't count again
+        # If already liked, don't count it again
         existing = session.execute(
             select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
         ).scalar_one_or_none()
         if existing:
-            return {"ok": True}
+            return {"ok": True, "likesLeft": max(0, FREE_LIKES_PER_DAY - int(counter.count))}
 
-        # ✅ Enforce free likes/day (UTC midnight reset)
-        used_today = _likes_used_today(session, liker_user_id)
-        if used_today >= FREE_LIKES_PER_DAY:
+        if int(counter.count) >= FREE_LIKES_PER_DAY:
             raise HTTPException(
                 status_code=429,
-                detail=f"You’ve used your {FREE_LIKES_PER_DAY} free likes for today. Come back tomorrow.",
+                detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.",
             )
 
+        prof = session.get(Profile, profile_id)
+        if not prof:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # Write the like
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+
+        # Increment daily counter
+        counter.count = int(counter.count) + 1
+        counter.updated_at = datetime.utcnow()
 
         recipient_user_id = prof.owner_user_id
 
+        # Find the actor's profile (if they have one) so we can link to it in Notifications UI
         actor_profile = session.execute(
             select(Profile).where(Profile.owner_user_id == liker_user_id)
         ).scalar_one_or_none()
@@ -1054,6 +1209,7 @@ def like(payload: ProfileAction):
             session.commit()
         except IntegrityError:
             session.rollback()
-            return {"ok": True}
+            return {"ok": True, "likesLeft": max(0, FREE_LIKES_PER_DAY - int(counter.count))}
 
-    return {"ok": True}
+        likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
+        return {"ok": True, "likesLeft": likes_left}
