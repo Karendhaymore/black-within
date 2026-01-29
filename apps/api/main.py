@@ -263,6 +263,9 @@ class NotificationItem(BaseModel):
     actor_profile_id: Optional[str] = None
     actor_display_name: Optional[str] = None
 
+    # ✅ NEW: photo URL for the actor (liker)
+    actor_photo: Optional[str] = None
+
     # What it was about (e.g., the profile that got liked)
     profile_id: Optional[str] = None
 
@@ -342,7 +345,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.0.6")
+app = FastAPI(title="Black Within API", version="1.0.7")
 
 app.add_middleware(
     CORSMiddleware,
@@ -445,7 +448,7 @@ def health():
         "previewMode": AUTH_PREVIEW_MODE,
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
         "corsOrigins": origins,
-        "version": "1.0.6",
+        "version": "1.0.7",
     }
 
 
@@ -797,6 +800,7 @@ def get_notifications(user_id: str = Query(...)):
     Returns notifications with enriched actor info:
       - actor_display_name
       - actor_profile_id (so frontend can link to /profiles/{actor_profile_id})
+      - actor_photo (so frontend can show photo instead of initials)
     """
     user_id = _ensure_user(user_id)
 
@@ -820,6 +824,8 @@ def get_notifications(user_id: str = Query(...)):
                 actor_map[p.owner_user_id] = {
                     "actor_display_name": p.display_name,
                     "actor_profile_id": p.id,
+                    # ✅ ADD THIS
+                    "actor_photo": p.photo,
                 }
 
         items: List[NotificationItem] = []
@@ -827,6 +833,7 @@ def get_notifications(user_id: str = Query(...)):
             actor_info = actor_map.get(n.actor_user_id or "", {})
             actor_display_name = actor_info.get("actor_display_name")
             actor_profile_id = actor_info.get("actor_profile_id")
+            actor_photo = actor_info.get("actor_photo")  # ✅ ADD
 
             # Prefer stored actor_profile_id if present
             if n.actor_profile_id:
@@ -842,6 +849,7 @@ def get_notifications(user_id: str = Query(...)):
                     actor_user_id=n.actor_user_id,
                     actor_profile_id=actor_profile_id,
                     actor_display_name=actor_display_name,
+                    actor_photo=actor_photo,  # ✅ ADD
                     profile_id=n.profile_id,
                 )
             )
