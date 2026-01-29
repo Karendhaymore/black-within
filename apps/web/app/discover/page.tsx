@@ -69,11 +69,7 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
   if (!res.ok) throw new Error(`Unsave failed (${res.status}).`);
 }
 
-async function apiLikeProfile(
-  userId: string,
-  profileId: string,
-  recipientUserId?: string
-) {
+async function apiLikeProfile(userId: string, profileId: string, recipientUserId?: string) {
   const res = await fetch(`${API_BASE}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -83,7 +79,20 @@ async function apiLikeProfile(
       recipient_user_id: recipientUserId || null,
     }),
   });
-  if (!res.ok) throw new Error(`Like failed (${res.status}).`);
+
+  // ✅ Friendlier handling for the free-like limit
+  if (res.status === 429) {
+    // FastAPI usually returns { detail: "..." }
+    const msg =
+      (await res.json().catch(() => null))?.detail ||
+      "You’ve used your 5 free likes for today. Come back tomorrow.";
+    throw new Error(msg);
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Like failed (${res.status}). ${text}`.trim());
+  }
 }
 
 async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[]> {
@@ -109,19 +118,15 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
  */
 function logoutAndGoToAuth() {
   try {
-    // Remove common keys safely (even if some don't exist)
     localStorage.removeItem("bw_user_id");
     localStorage.removeItem("user_id");
     localStorage.removeItem("userId");
     localStorage.removeItem("email");
     localStorage.removeItem("bw_email");
-
-    // If your getOrCreateUserId() stores a different key, this still helps:
     sessionStorage.clear();
   } catch (e) {
     // ignore
   }
-
   window.location.href = "/auth";
 }
 
@@ -140,6 +145,9 @@ export default function DiscoverPage() {
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
+
+  // ✅ NEW: once we hit the daily limit, disable Like buttons
+  const [likeLimitReached, setLikeLimitReached] = useState<boolean>(false);
 
   const availableProfiles = useMemo(
     () => profiles.filter((p) => p.isAvailable),
@@ -175,7 +183,7 @@ export default function DiscoverPage() {
 
   function showToast(msg: string) {
     setToast(msg);
-    window.setTimeout(() => setToast(null), 2200);
+    window.setTimeout(() => setToast(null), 2600);
   }
 
   function getInitials(displayName: string) {
@@ -193,10 +201,7 @@ export default function DiscoverPage() {
       setApiError(null);
       setLoadingSets(true);
 
-      const [saved, likes] = await Promise.all([
-        apiGetSavedIds(uid),
-        apiGetLikes(uid),
-      ]);
+      const [saved, likes] = await Promise.all([apiGetSavedIds(uid), apiGetLikes(uid)]);
 
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
       setLikedIds(likes.filter((id) => availableProfileIds.has(id)));
@@ -266,6 +271,10 @@ export default function DiscoverPage() {
   async function onLike(p: ApiProfile) {
     if (!userId) return;
     if (likedIds.includes(p.id)) return;
+    if (likeLimitReached) {
+      showToast("You’ve used your 5 free likes for today. Come back tomorrow.");
+      return;
+    }
 
     const prev = likedIds;
     setLikedIds((curr) => (curr.includes(p.id) ? curr : [p.id, ...curr]));
@@ -276,8 +285,16 @@ export default function DiscoverPage() {
       showToast("Like sent.");
     } catch (e: any) {
       setLikedIds(prev);
-      setApiError(e?.message || "Like failed.");
-      showToast("Could not like right now.");
+
+      const msg = e?.message || "Like failed.";
+      // ✅ If we hit the daily limit, freeze Like buttons to prevent repeated errors
+      if (String(msg).toLowerCase().includes("free likes") || String(msg).toLowerCase().includes("come back")) {
+        setLikeLimitReached(true);
+        showToast(msg);
+      } else {
+        setApiError(msg);
+        showToast("Could not like right now.");
+      }
     }
   }
 
@@ -324,14 +341,7 @@ export default function DiscoverPage() {
           <h1 style={{ margin: 0 }}>Discover</h1>
 
           {/* ✅ Discover Navigation */}
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <Link href="/profile" style={navBtnStyle}>
               My Profile
             </Link>
@@ -348,7 +358,6 @@ export default function DiscoverPage() {
               Notifications
             </Link>
 
-            {/* ✅ NEW: LOG OUT BUTTON */}
             <button
               onClick={() => {
                 const ok = window.confirm(
@@ -364,14 +373,30 @@ export default function DiscoverPage() {
           </div>
         </div>
 
+        {/* ✅ Friendly banner when like limit is reached */}
+        {likeLimitReached && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 12,
+              border: "1px solid #f0d58a",
+              background: "#fffaf0",
+              color: "#6b4e00",
+            }}
+          >
+            <strong>Daily limit reached:</strong> You’ve used your 5 free likes for today.
+            Come back tomorrow (resets at midnight UTC).
+          </div>
+        )}
+
         {/* Debug + status */}
         <div style={{ marginTop: 10, fontSize: 13, color: "#666" }}>
           <div>
             <strong>API:</strong> {API_BASE}
           </div>
           <div>
-            <strong>Profiles loaded:</strong> {profiles.length}{" "}
-            {loadingProfiles ? "(loading…)" : ""}
+            <strong>Profiles loaded:</strong> {profiles.length} {loadingProfiles ? "(loading…)" : ""}
           </div>
           <div>
             <strong>Saved/likes loading:</strong> {loadingSets ? "yes" : "no"}
@@ -406,10 +431,7 @@ export default function DiscoverPage() {
         >
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Intention:
-            <select
-              value={intentionFilter}
-              onChange={(e) => setIntentionFilter(e.target.value)}
-            >
+            <select value={intentionFilter} onChange={(e) => setIntentionFilter(e.target.value)}>
               {intentionOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -420,10 +442,7 @@ export default function DiscoverPage() {
 
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Tag:
-            <select
-              value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
-            >
+            <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
               {tagOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -436,15 +455,11 @@ export default function DiscoverPage() {
         {/* Grid */}
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
-            <div
-              style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}
-            >
+            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
               Loading profiles…
             </div>
           ) : filteredProfiles.length === 0 ? (
-            <div
-              style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}
-            >
+            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
               No profiles match your filters yet.
             </div>
           ) : (
@@ -458,6 +473,7 @@ export default function DiscoverPage() {
               {filteredProfiles.map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
+                const likeDisabled = isLiked || likeLimitReached;
 
                 return (
                   <div
@@ -478,9 +494,7 @@ export default function DiscoverPage() {
                           width={56}
                           height={56}
                           style={{ borderRadius: 14, objectFit: "cover" }}
-                          onError={() =>
-                            setBrokenImages((curr) => ({ ...curr, [p.id]: true }))
-                          }
+                          onError={() => setBrokenImages((curr) => ({ ...curr, [p.id]: true }))}
                         />
                       ) : (
                         <div
@@ -499,16 +513,8 @@ export default function DiscoverPage() {
                       )}
 
                       <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 10,
-                          }}
-                        >
-                          <div style={{ fontWeight: 800, fontSize: 18 }}>
-                            {p.displayName}
-                          </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <div style={{ fontWeight: 800, fontSize: 18 }}>{p.displayName}</div>
                           <div style={{ color: "#666" }}>{p.age}</div>
                         </div>
                         <div style={{ marginTop: 4, color: "#666", fontSize: 13 }}>
@@ -525,14 +531,7 @@ export default function DiscoverPage() {
                     </div>
 
                     {Array.isArray(p.tags) && p.tags.length > 0 && (
-                      <div
-                        style={{
-                          marginTop: 10,
-                          display: "flex",
-                          gap: 6,
-                          flexWrap: "wrap",
-                        }}
-                      >
+                      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {p.tags.slice(0, 10).map((t, idx) => (
                           <span
                             key={`${p.id}-tag-${idx}`}
@@ -550,14 +549,7 @@ export default function DiscoverPage() {
                       </div>
                     )}
 
-                    <div
-                      style={{
-                        marginTop: 12,
-                        display: "flex",
-                        gap: 10,
-                        flexWrap: "wrap",
-                      }}
-                    >
+                    <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                       <Link
                         href={`/profiles/${p.id}`}
                         style={{
@@ -587,16 +579,23 @@ export default function DiscoverPage() {
 
                       <button
                         onClick={() => onLike(p)}
-                        disabled={isLiked}
+                        disabled={likeDisabled}
                         style={{
                           padding: "10px 12px",
                           borderRadius: 10,
                           border: "1px solid #ccc",
-                          background: isLiked ? "#f5f5f5" : "white",
-                          cursor: isLiked ? "not-allowed" : "pointer",
+                          background: likeDisabled ? "#f5f5f5" : "white",
+                          cursor: likeDisabled ? "not-allowed" : "pointer",
                         }}
+                        title={
+                          likeLimitReached
+                            ? "Daily limit reached (5 free likes/day)"
+                            : isLiked
+                            ? "Already liked"
+                            : "Like"
+                        }
                       >
-                        {isLiked ? "Liked" : "Like"}
+                        {isLiked ? "Liked" : likeLimitReached ? "Limit reached" : "Like"}
                       </button>
                     </div>
                   </div>
