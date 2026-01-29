@@ -29,6 +29,11 @@ function setStableUserId(stableUserId: string) {
   localStorage.setItem("bw_user_id", cleaned);
 }
 
+// ✅ NEW: simple "session" flag for MVP
+function setLoggedInFlag(isLoggedIn: boolean) {
+  localStorage.setItem("bw_logged_in", isLoggedIn ? "1" : "0");
+}
+
 export default function AuthPage() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -38,11 +43,17 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // If already logged in, you can auto-send to /discover (optional)
-    const existing = localStorage.getItem("bw_user_id");
-    if (existing) {
+    // Optional: if already logged in, go to /discover
+    const existingUserId = localStorage.getItem("bw_user_id");
+    const loggedIn = localStorage.getItem("bw_logged_in") === "1";
+    if (existingUserId && loggedIn) {
       // window.location.href = "/discover"; // uncomment if you want auto-redirect
     }
+
+    // Optional nicety: prefill email if remembered
+    const savedEmail = localStorage.getItem("bw_email");
+    if (savedEmail && !email) setEmail(savedEmail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function onSubmit() {
@@ -67,6 +78,10 @@ export default function AuthPage() {
       });
 
       setStableUserId(data.userId);
+
+      // ✅ mark as logged in (instead of relying on "userId exists")
+      setLoggedInFlag(true);
+
       localStorage.setItem("bw_email", data.email);
 
       window.location.href = "/discover";
@@ -164,11 +179,7 @@ export default function AuthPage() {
           />
 
           <button onClick={onSubmit} disabled={loading} style={buttonPrimary}>
-            {loading
-              ? "Please wait..."
-              : mode === "signup"
-              ? "Create account"
-              : "Log in"}
+            {loading ? "Please wait..." : mode === "signup" ? "Create account" : "Log in"}
           </button>
 
           <button
