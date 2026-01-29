@@ -3,21 +3,47 @@
 import { useEffect, useState } from "react";
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "https://black-within-api.onrender.com";
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+  "https://black-within-api.onrender.com";
 
-function getOrCreateUserId() {
+/**
+ * IMPORTANT (plain language):
+ * - Before login, we allow a temporary anonymous id (so the page can still call /me).
+ * - After login, we REPLACE bw_user_id with the real/stable userId returned by your API.
+ *   This prevents "logout/login resets likes" because the same email always gets the same userId.
+ */
+
+function getStoredUserIdOrAnon() {
   if (typeof window === "undefined") return "server";
-  const key = "bw_user_id";
-  const existing = window.localStorage.getItem(key);
+
+  // If already logged in before, use the real stable id
+  const existing = window.localStorage.getItem("bw_user_id");
   if (existing) return existing;
 
-  const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `bw_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+  // Otherwise use a temporary anonymous id (DO NOT store this as bw_user_id)
+  const anonKey = "bw_anon_id";
+  const anonExisting = window.localStorage.getItem(anonKey);
+  if (anonExisting) return anonExisting;
 
-  window.localStorage.setItem(key, id);
-  return id;
+  const anonId =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? `anon_${crypto.randomUUID()}`
+      : `anon_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+
+  window.localStorage.setItem(anonKey, anonId);
+  return anonId;
+}
+
+function setStableUserId(stableUserId: string) {
+  if (typeof window === "undefined") return;
+  const cleaned = (stableUserId || "").trim();
+  if (!cleaned) return;
+
+  // Save the real stable id for the logged-in email
+  window.localStorage.setItem("bw_user_id", cleaned);
+
+  // Optional cleanup: we no longer need the anonymous id
+  window.localStorage.removeItem("bw_anon_id");
 }
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -49,13 +75,14 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const uid = getOrCreateUserId();
+    const uid = getStoredUserIdOrAnon();
     setUserId(uid);
 
     // best-effort: ensure user exists in DB
     apiJson(`/me?user_id=${encodeURIComponent(uid)}`).catch(() => {
       // ignore; UI still works, but saved/likes will fail until API is reachable
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function requestCode() {
@@ -67,26 +94,27 @@ export default function AuthPage() {
       setStatus("Please enter a valid email address.");
       return;
     }
-    if (!userId) {
-      setStatus("Missing user id. Please refresh and try again.");
-      return;
-    }
 
     setLoading(true);
     try {
-      const data = await apiJson<{ ok: boolean; message?: string; dev_code?: string }>(
-        `/auth/request-code`,
-        {
-          method: "POST",
-          body: JSON.stringify({ user_id: userId, email: normalizedEmail }),
-        }
-      );
+      // Your backend only needs email, but it has been tolerant of extra fields.
+      // We'll keep user_id here for compatibility with what you're already running.
+      const data = await apiJson<any>(`/auth/request-code`, {
+        method: "POST",
+        body: JSON.stringify({
+          email: normalizedEmail,
+          user_id: userId || null,
+        }),
+      });
 
-      if (data?.dev_code) setDevCode(data.dev_code);
+      // Support both naming styles (devCode vs dev_code)
+      const possibleDev =
+        data?.devCode || data?.dev_code || data?.dev_code?.toString?.();
+      if (possibleDev) setDevCode(String(possibleDev));
 
       setEmail(normalizedEmail);
       setStep("code");
-      setStatus(data?.message || "A one-time code was created. Enter it below.");
+      setStatus("A one-time code was sent. Enter it below.");
     } catch (e: any) {
       setStatus(e?.message || "Could not send a code. Please try again.");
     } finally {
@@ -104,31 +132,42 @@ export default function AuthPage() {
       setStatus("Enter the code you received.");
       return;
     }
-    if (!userId) {
-      setStatus("Missing user id. Please refresh and try again.");
-      return;
-    }
 
     setLoading(true);
     try {
-      const data = await apiJson<{
-        ok: boolean;
-        token: string;
-        user_id: string;
-        email: string;
-      }>(`/auth/verify-code`, {
+      const data = await apiJson<any>(`/auth/verify-code`, {
         method: "POST",
         body: JSON.stringify({
-          user_id: userId,
           email: normalizedEmail,
           code: normalizedCode,
+          user_id: userId || null, // harmless if backend ignores it
         }),
       });
 
-      // Keep bw_user_id as the stable client id (already saved)
-      // Store token separately for future authenticated endpoints
-      localStorage.setItem("bw_session_token", data.token);
-      localStorage.setItem("bw_email", data.email);
+      /**
+       * Your backend may return different shapes depending on version.
+       * We support all of these:
+       * - data.userId  (your FastAPI example)
+       * - data.user_id
+       * - data.userId from other builds
+       */
+      const stable =
+        (data?.userId || data?.user_id || data?.userID || "").toString().trim();
+
+      if (!stable) {
+        throw new Error(
+          "Login worked but the server did not return a user id. Please try again."
+        );
+      }
+
+      // ✅ CRITICAL FIX: lock this email to the stable user id
+      setStableUserId(stable);
+      setUserId(stable);
+
+      // Optional: store token/email if your backend provides them
+      if (data?.token) localStorage.setItem("bw_session_token", String(data.token));
+      if (data?.email) localStorage.setItem("bw_email", String(data.email));
+      else localStorage.setItem("bw_email", normalizedEmail);
 
       window.location.href = "/discover";
     } catch (e: any) {
@@ -221,11 +260,10 @@ export default function AuthPage() {
             </div>
 
             <div style={{ color: "#999", fontSize: "0.85rem" }}>
-              (Preview profiles + saved/likes are tied to your device id for now:
+              Current session id:
               <span style={{ marginLeft: 6, fontFamily: "monospace" }}>
                 {userId || "—"}
               </span>
-              )
             </div>
           </div>
         )}
