@@ -134,6 +134,45 @@ async function apiLikeProfile(userId: string, profileId: string) {
   });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 }
+// ✅ Create (or fetch) a chat thread between the current user and a PROFILE
+// Your backend error shows it expects: { user_id, with_profile_id }
+async function apiGetOrCreateThread(userId: string, withProfileId: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/threads/get-or-create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: userId,
+      with_profile_id: withProfileId,
+    }),
+  });
+
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+
+  const data = (await res.json()) as any;
+  const threadId = data?.threadId || data?.thread_id || data?.id || "";
+  if (!threadId) throw new Error("Thread created but no thread id returned.");
+  return threadId;
+}
+
+// ✅ Optional paywall check. If your backend doesn't have this endpoint yet,
+// you can comment this out and still navigate to /messages.
+async function apiMessagingAccess(userId: string, threadId: string) {
+  const res = await fetch(
+    `${API_BASE}/messaging/access?user_id=${encodeURIComponent(
+      userId
+    )}&thread_id=${encodeURIComponent(threadId)}`,
+    { cache: "no-store" }
+  );
+
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return (await res.json()) as {
+    canMessage: boolean;
+    isPremium: boolean;
+    unlockedUntilUTC?: string | null;
+    reason?: string | null;
+  };
+}
+
 
 async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[]> {
   const url =
@@ -157,24 +196,34 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
  * - user_id_a/user_id_b
  * - user_id/other_user_id
  */
-async function apiGetOrCreateThread(user1: string, user2: string): Promise<string> {
+async function apiGetOrCreateThread(userId: string, withProfileId: string): Promise<string> {
+  // ✅ Your backend requires with_profile_id
   const payload = {
-    // camelCase
-    user1,
-    user2,
+    // required (based on your FastAPI error)
+    user_id: userId,
+    with_profile_id: withProfileId,
 
-    // common snake_case patterns
-    user_id_1: user1,
-    user_id_2: user2,
-    user_id_a: user1,
-    user_id_b: user2,
-    user_id: user1,
-    other_user_id: user2,
-
-    // alternate naming
-    userId1: user1,
-    userId2: user2,
+    // extra compatibility (harmless if backend ignores)
+    userId,
+    withProfileId,
+    profile_id: withProfileId,
+    other_profile_id: withProfileId,
   };
+
+  const res = await fetch(`${API_BASE}/threads/get-or-create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+
+  const data = (await res.json()) as ThreadGetOrCreateResponse;
+  const threadId = data.threadId || data.thread_id || data.id || "";
+  if (!threadId) throw new Error("Thread created, but no threadId returned.");
+  return threadId;
+}
+
 
   const res = await fetch(`${API_BASE}/threads/get-or-create`, {
     method: "POST",
@@ -401,7 +450,31 @@ export default function DiscoverPage() {
       );
       return;
     }
+// ===============================
+// MESSAGE BUTTON HANDLER
+// ===============================
+async function onMessage(p: ApiProfile) {
+  if (!userId) return;
 
+  try {
+    setApiError(null);
+    showToast("Opening chat…");
+
+    // Create thread using PROFILE id (backend requires with_profile_id)
+    const threadId = await apiGetOrCreateThread(userId, p.id);
+
+    // Navigate to messages page
+    window.location.href = `/messages?threadId=${encodeURIComponent(
+      threadId
+    )}&with=${encodeURIComponent(p.displayName)}`;
+  } catch (e: any) {
+    const msg = e?.message || "Could not start a chat right now.";
+    setApiError(String(msg));
+    showToast(String(msg));
+  }
+}
+
+    
     const prev = likedIds;
     setLikedIds((curr) => (curr.includes(p.id) ? curr : [p.id, ...curr]));
 
