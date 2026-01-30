@@ -26,15 +26,13 @@ type ApiProfile = {
 type IdListResponse = { ids: string[] };
 type ProfilesResponse = { items: ApiProfile[] };
 
-// Matches /likes/status
 type LikesStatusResponse = {
   likesLeft: number;
   limit: number;
   windowType: "daily_utc" | "test_seconds";
-  resetsAtUTC: string; // ISO datetime string
+  resetsAtUTC: string;
 };
 
-// Threads/get-or-create response (support a few possible shapes)
 type ThreadGetOrCreateResponse = {
   threadId?: string;
   thread_id?: string;
@@ -58,21 +56,25 @@ function getLoggedInUserId(): string | null {
   }
 }
 
-function stringifyError(e: any): string {
-  if (!e) return "Unknown error";
-  if (typeof e === "string") return e;
-  if (e?.message) return String(e.message);
+function toNiceString(x: any): string {
+  if (x == null) return "";
+  if (typeof x === "string") return x;
   try {
-    return JSON.stringify(e);
+    return JSON.stringify(x, null, 2);
   } catch {
-    return String(e);
+    return String(x);
   }
 }
 
 async function safeReadErrorDetail(res: Response): Promise<string> {
+  // FastAPI often returns: { detail: [...] } where detail is an array of objects
   try {
     const data = await res.json();
-    if (data?.detail) return String(data.detail);
+    if (data?.detail != null) {
+      if (typeof data.detail === "string") return data.detail;
+      return toNiceString(data.detail);
+    }
+    return toNiceString(data);
   } catch {}
   try {
     const text = await res.text();
@@ -82,31 +84,28 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
 }
 
 async function apiGetSavedIds(userId: string): Promise<string[]> {
-  const res = await fetch(
-    `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`,
-    { cache: "no-store" }
-  );
-  if (!res.ok) throw new Error(`Failed to load saved profiles (${res.status}).`);
+  const res = await fetch(`${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
 }
 
 async function apiGetLikes(userId: string): Promise<string[]> {
-  const res = await fetch(
-    `${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`,
-    { cache: "no-store" }
-  );
-  if (!res.ok) throw new Error(`Failed to load likes (${res.status}).`);
+  const res = await fetch(`${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
 }
 
 async function apiGetLikesStatus(userId: string): Promise<LikesStatusResponse> {
-  const res = await fetch(
-    `${API_BASE}/likes/status?user_id=${encodeURIComponent(userId)}`,
-    { cache: "no-store" }
-  );
-  if (!res.ok) throw new Error(`Failed to load like status (${res.status}).`);
+  const res = await fetch(`${API_BASE}/likes/status?user_id=${encodeURIComponent(userId)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   return (await res.json()) as LikesStatusResponse;
 }
 
@@ -116,10 +115,7 @@ async function apiSaveProfile(userId: string, profileId: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, profile_id: profileId }),
   });
-  if (!res.ok) {
-    const msg = await safeReadErrorDetail(res);
-    throw new Error(msg);
-  }
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 }
 
 async function apiUnsaveProfile(userId: string, profileId: string) {
@@ -127,10 +123,7 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
     userId
   )}&profile_id=${encodeURIComponent(profileId)}`;
   const res = await fetch(url, { method: "DELETE" });
-  if (!res.ok) {
-    const msg = await safeReadErrorDetail(res);
-    throw new Error(msg);
-  }
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 }
 
 async function apiLikeProfile(userId: string, profileId: string) {
@@ -139,11 +132,7 @@ async function apiLikeProfile(userId: string, profileId: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, profile_id: profileId }),
   });
-
-  if (!res.ok) {
-    const msg = await safeReadErrorDetail(res);
-    throw new Error(msg);
-  }
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 }
 
 async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[]> {
@@ -154,10 +143,7 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
       : "");
 
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Failed to load profiles (${res.status}). ${text}`);
-  }
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
   const json = (await res.json()) as ProfilesResponse;
   return Array.isArray(json?.items) ? json.items : [];
@@ -165,21 +151,41 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
 
 /**
  * ✅ Threads API: POST /threads/get-or-create
- * Expected response: { threadId: "..." } (or similar)
+ * We send a compatibility payload so it works whether backend expects:
+ * - user1/user2
+ * - user_id_1/user_id_2
+ * - user_id_a/user_id_b
+ * - user_id/other_user_id
  */
 async function apiGetOrCreateThread(user1: string, user2: string): Promise<string> {
+  const payload = {
+    // camelCase
+    user1,
+    user2,
+
+    // common snake_case patterns
+    user_id_1: user1,
+    user_id_2: user2,
+    user_id_a: user1,
+    user_id_b: user2,
+    user_id: user1,
+    other_user_id: user2,
+
+    // alternate naming
+    userId1: user1,
+    userId2: user2,
+  };
+
   const res = await fetch(`${API_BASE}/threads/get-or-create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user1, user2 }),
+    body: JSON.stringify(payload),
   });
 
-  if (!res.ok) {
-    const msg = await safeReadErrorDetail(res);
-    throw new Error(msg);
-  }
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
   const data = (await res.json()) as ThreadGetOrCreateResponse;
+
   const threadId = data.threadId || data.thread_id || data.id || "";
   if (!threadId) throw new Error("Thread created, but no threadId returned.");
   return threadId;
@@ -237,16 +243,15 @@ export default function DiscoverPage() {
 
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
-      const intentionMatch =
-        intentionFilter === "All" || p.intention === intentionFilter;
+      const intentionMatch = intentionFilter === "All" || p.intention === intentionFilter;
       const tags = Array.isArray(p.tags) ? p.tags : [];
       const tagMatch = tagFilter === "All" || tags.includes(tagFilter);
       return intentionMatch && tagMatch;
     });
   }, [availableProfiles, intentionFilter, tagFilter]);
 
-  function showToast(msg: string) {
-    setToast(msg);
+  function showToast(msg: any) {
+    setToast(typeof msg === "string" ? msg : toNiceString(msg));
     window.setTimeout(() => setToast(null), 2400);
   }
 
@@ -271,7 +276,7 @@ export default function DiscoverPage() {
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
       setLikedIds(likes.filter((id) => availableProfileIds.has(id)));
     } catch (e: any) {
-      setApiError(stringifyError(e) || `Could not reach API at ${API_BASE}`);
+      setApiError(toNiceString(e?.message || e));
     } finally {
       setLoadingSets(false);
     }
@@ -292,17 +297,12 @@ export default function DiscoverPage() {
       const now = Date.now();
       const msUntilReset = resetAt - now;
 
-      if (
-        Number.isFinite(msUntilReset) &&
-        msUntilReset > 0 &&
-        msUntilReset < 24 * 60 * 60 * 1000
-      ) {
+      if (Number.isFinite(msUntilReset) && msUntilReset > 0 && msUntilReset < 24 * 60 * 60 * 1000) {
         resetTimerRef.current = window.setTimeout(() => {
           refreshLikesStatus(uid).catch(() => {});
         }, msUntilReset + 1200);
       }
-    } catch (e: any) {
-      console.warn("Likes status load failed:", e);
+    } catch {
       setLikesStatus(null);
     } finally {
       setLoadingLikesStatus(false);
@@ -339,8 +339,7 @@ export default function DiscoverPage() {
         const items = await apiListProfiles(uid);
         setProfiles(items);
       } catch (e: any) {
-        console.error("Discover profiles load error:", e);
-        setApiError(stringifyError(e) || "Could not load profiles.");
+        setApiError(toNiceString(e?.message || e));
         setProfiles([]);
       } finally {
         setLoadingProfiles(false);
@@ -372,9 +371,7 @@ export default function DiscoverPage() {
     const currentlySaved = savedIds.includes(p.id);
     const prev = savedIds;
 
-    setSavedIds((curr) =>
-      curr.includes(p.id) ? curr.filter((x) => x !== p.id) : [p.id, ...curr]
-    );
+    setSavedIds((curr) => (curr.includes(p.id) ? curr.filter((x) => x !== p.id) : [p.id, ...curr]));
 
     try {
       if (currentlySaved) {
@@ -387,7 +384,7 @@ export default function DiscoverPage() {
       await refreshSavedAndLikes(userId);
     } catch (e: any) {
       setSavedIds(prev);
-      setApiError(stringifyError(e) || "Save/Unsave failed.");
+      setApiError(toNiceString(e?.message || e));
       showToast("Could not update saved status right now.");
     }
   }
@@ -414,7 +411,7 @@ export default function DiscoverPage() {
       showToast("Like sent.");
     } catch (e: any) {
       setLikedIds(prev);
-      const msg = stringifyError(e) || "Like failed.";
+      const msg = toNiceString(e?.message || e) || "Like failed.";
       setApiError(msg);
       showToast(msg);
       refreshLikesStatus(userId).catch(() => {});
@@ -424,19 +421,23 @@ export default function DiscoverPage() {
   async function onMessage(p: ApiProfile) {
     if (!userId) return;
 
+    if (!p.owner_user_id) {
+      showToast("That profile is missing an owner_user_id, so chat cannot start yet.");
+      return;
+    }
+
     try {
       setApiError(null);
       showToast("Opening chat…");
 
-      // Create or fetch the real thread id
       const threadId = await apiGetOrCreateThread(userId, p.owner_user_id);
 
-      // Go to messages UI WITH a threadId (this fixes your “threadId missing” issue)
-      window.location.href = `/messages?threadId=${encodeURIComponent(
-        threadId
-      )}&with=${encodeURIComponent(p.displayName)}`;
+      // ✅ Must include threadId in URL
+      window.location.href = `/messages?threadId=${encodeURIComponent(threadId)}&with=${encodeURIComponent(
+        p.displayName
+      )}`;
     } catch (e: any) {
-      const msg = stringifyError(e) || "Could not start a chat right now.";
+      const msg = toNiceString(e?.message || e) || "Could not start a chat right now.";
       setApiError(msg);
       showToast(msg);
     }
@@ -455,24 +456,9 @@ export default function DiscoverPage() {
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "2rem",
-        display: "grid",
-        placeItems: "start center",
-      }}
-    >
+    <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
       <div style={{ width: "100%", maxWidth: 1100 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <h1 style={{ margin: 0 }}>Discover</h1>
 
@@ -481,14 +467,11 @@ export default function DiscoverPage() {
                 <span>Likes today: loading…</span>
               ) : likesStatus ? (
                 <span>
-                  Likes left: <strong>{likesStatus.likesLeft}</strong> /{" "}
-                  <strong>{likesStatus.limit}</strong>
+                  Likes left: <strong>{likesStatus.likesLeft}</strong> / <strong>{likesStatus.limit}</strong>
                   {resetHint ? (
                     <span style={{ color: "#777" }}>
                       {" "}
-                      · resets{" "}
-                      {likesStatus.windowType === "test_seconds" ? "at" : "after"}{" "}
-                      <strong>{resetHint}</strong>
+                      · resets {likesStatus.windowType === "test_seconds" ? "at" : "after"} <strong>{resetHint}</strong>
                     </span>
                   ) : null}
                 </span>
@@ -498,41 +481,23 @@ export default function DiscoverPage() {
             </div>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <Link href="/profile" style={navBtnStyle}>
               My Profile
             </Link>
-
             <Link href="/saved" style={navBtnStyle}>
               Saved
             </Link>
-
             <Link href="/liked" style={navBtnStyle}>
               Liked
             </Link>
-
             <Link href="/notifications" style={navBtnStyle}>
               Notifications
             </Link>
-
             <Link href="/messages" style={navBtnStyle}>
               Messages
             </Link>
-
-            <button
-              onClick={logout}
-              style={{
-                ...navBtnStyle,
-                cursor: "pointer",
-              }}
-            >
+            <button onClick={logout} style={{ ...navBtnStyle, cursor: "pointer" }}>
               Log out
             </button>
           </div>
@@ -543,8 +508,7 @@ export default function DiscoverPage() {
             <strong>API:</strong> {API_BASE}
           </div>
           <div>
-            <strong>Profiles loaded:</strong> {profiles.length}{" "}
-            {loadingProfiles ? "(loading…)" : ""}
+            <strong>Profiles loaded:</strong> {profiles.length} {loadingProfiles ? "(loading…)" : ""}
           </div>
           <div>
             <strong>Saved/likes loading:</strong> {loadingSets ? "yes" : "no"}
@@ -567,21 +531,10 @@ export default function DiscoverPage() {
           </div>
         )}
 
-        <div
-          style={{
-            marginTop: 16,
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
+        <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Intention:
-            <select
-              value={intentionFilter}
-              onChange={(e) => setIntentionFilter(e.target.value)}
-            >
+            <select value={intentionFilter} onChange={(e) => setIntentionFilter(e.target.value)}>
               {intentionOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -622,46 +575,25 @@ export default function DiscoverPage() {
 
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
-            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
-              Loading profiles…
-            </div>
+            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>Loading profiles…</div>
           ) : filteredProfiles.length === 0 ? (
             <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
               No profiles match your filters yet.
             </div>
           ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-                gap: 14,
-              }}
-            >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
               {filteredProfiles.map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
 
-                const isLimitReached =
-                  !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
+                const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
 
                 const likeDisabled = isLiked || loadingLikesStatus || isLimitReached;
 
-                const likeLabel = isLiked
-                  ? "Liked"
-                  : isLimitReached
-                  ? "Limit reached"
-                  : "Like";
+                const likeLabel = isLiked ? "Liked" : isLimitReached ? "Limit reached" : "Like";
 
                 return (
-                  <div
-                    key={p.id}
-                    style={{
-                      border: "1px solid #eee",
-                      borderRadius: 14,
-                      padding: 14,
-                      background: "white",
-                    }}
-                  >
+                  <div key={p.id} style={{ border: "1px solid #eee", borderRadius: 14, padding: 14, background: "white" }}>
                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                       {p.photo && !brokenImages[p.id] ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -671,9 +603,7 @@ export default function DiscoverPage() {
                           width={56}
                           height={56}
                           style={{ borderRadius: 14, objectFit: "cover" }}
-                          onError={() =>
-                            setBrokenImages((curr) => ({ ...curr, [p.id]: true }))
-                          }
+                          onError={() => setBrokenImages((curr) => ({ ...curr, [p.id]: true }))}
                         />
                       ) : (
                         <div
@@ -692,16 +622,8 @@ export default function DiscoverPage() {
                       )}
 
                       <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 10,
-                          }}
-                        >
-                          <div style={{ fontWeight: 800, fontSize: 18 }}>
-                            {p.displayName}
-                          </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <div style={{ fontWeight: 800, fontSize: 18 }}>{p.displayName}</div>
                           <div style={{ color: "#666" }}>{p.age}</div>
                         </div>
                         <div style={{ marginTop: 4, color: "#666", fontSize: 13 }}>
@@ -768,13 +690,6 @@ export default function DiscoverPage() {
                       <button
                         onClick={() => onLike(p)}
                         disabled={likeDisabled}
-                        title={
-                          isLimitReached
-                            ? "Daily like limit reached. Please wait for reset."
-                            : loadingLikesStatus
-                            ? "Loading like limits..."
-                            : undefined
-                        }
                         style={{
                           padding: "10px 12px",
                           borderRadius: 10,
@@ -787,7 +702,6 @@ export default function DiscoverPage() {
                         {likeLabel}
                       </button>
 
-                      {/* ✅ Message always visible */}
                       <button
                         onClick={() => onMessage(p)}
                         style={{
@@ -821,6 +735,8 @@ export default function DiscoverPage() {
               background: "white",
               boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
               zIndex: 9999,
+              whiteSpace: "pre-wrap",
+              maxWidth: 900,
             }}
           >
             {toast}
