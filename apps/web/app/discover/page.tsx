@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { getOrCreateUserId } from "../lib/user";
 
 /**
  * IMPORTANT:
