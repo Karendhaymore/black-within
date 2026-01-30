@@ -38,14 +38,15 @@ function getLoggedInUserId(): string | null {
   }
 }
 
-function toErrorMessage(e: any, fallback: string) {
-  if (typeof e?.message === "string" && e.message.trim()) return e.message;
-  if (typeof e === "string" && e.trim()) return e;
+function stringifyError(e: any): string {
+  if (!e) return "Unknown error";
+  if (typeof e === "string") return e;
+  if (e?.message) return String(e.message);
   try {
-    const s = JSON.stringify(e);
-    if (s && s !== "{}") return s;
-  } catch {}
-  return fallback;
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
 }
 
 async function safeReadErrorDetail(res: Response): Promise<string> {
@@ -110,35 +111,8 @@ async function apiSendMessage(userId: string, threadId: string, body: string) {
 }
 
 /**
- * ADMIN/TEST ONLY (matches your backend):
- * POST /messaging/unlock?key=...
- * body: { user_id, minutes, make_premium }
- */
-async function apiAdminUnlockMessaging(
-  userId: string,
-  minutes: number,
-  key: string,
-  makePremium: boolean
-): Promise<MessagingAccessResponse> {
-  const url = `${API_BASE}/messaging/unlock?key=${encodeURIComponent(key || "")}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_id: userId, minutes, make_premium: makePremium }),
-  });
-
-  if (!res.ok) {
-    const msg = await safeReadErrorDetail(res);
-    throw new Error(msg);
-  }
-
-  return (await res.json()) as MessagingAccessResponse;
-}
-
-/**
  * ✅ IMPORTANT:
  * Next.js requires useSearchParams() to be wrapped in <Suspense>.
- * This wrapper component is the default export for the route.
  */
 export default function MessagesPage() {
   return (
@@ -162,15 +136,11 @@ function MessagesInner() {
   const [text, setText] = useState("");
   const [err, setErr] = useState<string>("");
 
-  // Admin/test unlock controls (optional)
-  const [adminKey, setAdminKey] = useState("");
-  const [unlockMinutes, setUnlockMinutes] = useState<number>(60);
-  const [makePremium, setMakePremium] = useState<boolean>(false);
-
-  // Simple polling when unlocked (new messages)
+  // Polling for new messages (optional)
   const pollRef = useRef<number | null>(null);
 
-  // Auto-scroll anchor
+  // Auto-scroll refs
+  const listRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   function stopPolling() {
@@ -180,39 +150,32 @@ function MessagesInner() {
     }
   }
 
-  async function refreshAll(uid: string, tid: string) {
-    const a = await apiMessagingAccess(uid, tid);
+  async function refreshAll(uid: string) {
+    // threadId must exist before calling backend
+    const a = await apiMessagingAccess(uid, threadId);
     setAccess(a);
 
-    const items = await apiGetMessages(uid, tid);
+    const items = await apiGetMessages(uid, threadId);
     setMessages(items);
 
     return a;
   }
 
-  // Auto-scroll to newest message when list changes
-  useEffect(() => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages.length]);
-
+  // Load chat
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      if (!userId) {
-        window.location.href = "/auth";
+      // ✅ If threadId missing, do NOT call API. Just show guidance.
+      if (!threadId) {
+        setStatus("error");
+        setErr("Missing threadId in the URL. Go back and open a chat from a profile.");
+        stopPolling();
         return;
       }
 
-      // ✅ If user clicks top nav "Messages" (no threadId), show inbox screen (not error)
-      if (!threadId) {
-        setStatus("ready");
-        setAccess(null);
-        setMessages([]);
-        setErr("");
-        stopPolling();
+      if (!userId) {
+        window.location.href = "/auth";
         return;
       }
 
@@ -220,12 +183,12 @@ function MessagesInner() {
       setErr("");
 
       try {
-        const a = await refreshAll(userId, threadId);
+        const a = await refreshAll(userId);
         if (cancelled) return;
 
         setStatus("ready");
 
-        // Poll messages every 4s if messaging is allowed
+        // Poll every 4s (only if messaging is allowed)
         stopPolling();
         if (a?.canMessage) {
           pollRef.current = window.setInterval(async () => {
@@ -239,7 +202,7 @@ function MessagesInner() {
         }
       } catch (e: any) {
         setStatus("error");
-        setErr(toErrorMessage(e, "Something went wrong loading this chat."));
+        setErr(stringifyError(e) || "Something went wrong loading this chat.");
       }
     }
 
@@ -251,6 +214,12 @@ function MessagesInner() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, userId]);
+
+  // ✅ Auto-scroll to newest message whenever messages change
+  useEffect(() => {
+    if (!bottomRef.current) return;
+    bottomRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length]);
 
   async function handleSend() {
     if (!userId) return;
@@ -274,14 +243,14 @@ function MessagesInner() {
         body,
         created_at: new Date().toISOString(),
       };
+
       setMessages((prev) => [...prev, temp]);
       setText("");
 
       const saved = await apiSendMessage(userId, threadId, body);
-
       setMessages((prev) => prev.map((m) => (String(m.id) === tempId ? saved : m)));
     } catch (e: any) {
-      setErr(toErrorMessage(e, "Failed to send message."));
+      setErr(stringifyError(e) || "Failed to send message.");
     }
   }
 
@@ -291,41 +260,7 @@ function MessagesInner() {
 
     setErr("");
     try {
-      const a = await refreshAll(userId, threadId);
-      stopPolling();
-      if (a?.canMessage) {
-        pollRef.current = window.setInterval(async () => {
-          try {
-            const latest = await apiGetMessages(userId, threadId);
-            setMessages(latest);
-          } catch {}
-        }, 4000);
-      }
-    } catch (e: any) {
-      setErr(toErrorMessage(e, "Refresh failed."));
-    }
-  }
-
-  async function handleAdminUnlock() {
-    if (!userId) return;
-    if (!threadId) return;
-
-    setErr("");
-
-    try {
-      if (!adminKey.trim()) throw new Error("Enter your ADMIN unlock key.");
-      if (!unlockMinutes || unlockMinutes <= 0) throw new Error("Minutes must be > 0.");
-
-      const a = await apiAdminUnlockMessaging(
-        userId,
-        Number(unlockMinutes),
-        adminKey.trim(),
-        makePremium
-      );
-      setAccess(a);
-
-      const items = await apiGetMessages(userId, threadId);
-      setMessages(items);
+      const a = await refreshAll(userId);
 
       stopPolling();
       if (a?.canMessage) {
@@ -337,7 +272,7 @@ function MessagesInner() {
         }, 4000);
       }
     } catch (e: any) {
-      setErr(toErrorMessage(e, "Unlock failed."));
+      setErr(stringifyError(e) || "Refresh failed.");
     }
   }
 
@@ -377,15 +312,7 @@ function MessagesInner() {
             Back to Discover
           </Link>
 
-          <button
-            onClick={handleRefresh}
-            style={{
-              ...navBtnStyle,
-              cursor: threadId ? "pointer" : "not-allowed",
-              opacity: threadId ? 1 : 0.6,
-            }}
-            disabled={!threadId}
-          >
+          <button onClick={handleRefresh} style={{ ...navBtnStyle, cursor: "pointer" }}>
             Refresh
           </button>
         </div>
@@ -407,32 +334,8 @@ function MessagesInner() {
         </div>
       ) : null}
 
-      {status === "ready" && !threadId ? (
-        <div
-          style={{
-            marginTop: 20,
-            padding: 16,
-            border: "1px solid #ddd",
-            borderRadius: 12,
-            background: "#fafafa",
-          }}
-        >
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>No chat selected yet</div>
-          <div style={{ opacity: 0.85 }}>
-            Go to <strong>Discover</strong> and click <strong>Message</strong> on a profile to open a
-            chat.
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <Link href="/discover" style={navBtnStyle}>
-              Go to Discover
-            </Link>
-          </div>
-        </div>
-      ) : null}
-
-      {status === "ready" && threadId ? (
+      {status === "ready" ? (
         <>
-          {/* Paywall / access banner */}
           {access ? (
             <div
               style={{
@@ -451,11 +354,6 @@ function MessagesInner() {
                   <div style={{ marginTop: 6 }}>
                     {access.reason || "Messaging is for paid members or pay-per-message users."}
                   </div>
-                  {access.unlockedUntilUTC ? (
-                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
-                      Unlocked until: <code>{access.unlockedUntilUTC}</code>
-                    </div>
-                  ) : null}
                 </>
               ) : (
                 <>
@@ -474,82 +372,16 @@ function MessagesInner() {
             </div>
           ) : null}
 
-          {/* Admin/test unlock panel (optional) */}
-          <div
-            style={{
-              marginTop: 14,
-              padding: 12,
-              borderRadius: 12,
-              border: "1px dashed #ddd",
-              background: "#fafafa",
-            }}
-          >
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Admin/Test Unlock (optional)</div>
-            <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 10 }}>
-              Uses <code>POST /messaging/unlock</code>. Only works if your backend has
-              <code> ADMIN_UNLOCK_KEY</code> set. This key is NOT stored—type it each time.
-            </div>
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <input
-                value={adminKey}
-                onChange={(e) => setAdminKey(e.target.value)}
-                placeholder="ADMIN unlock key"
-                style={{
-                  flex: 1,
-                  minWidth: 220,
-                  padding: "0.65rem 0.8rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
-              />
-
-              <input
-                type="number"
-                value={unlockMinutes}
-                onChange={(e) => setUnlockMinutes(Number(e.target.value))}
-                min={1}
-                style={{
-                  width: 120,
-                  padding: "0.65rem 0.8rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
-              />
-
-              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  checked={makePremium}
-                  onChange={(e) => setMakePremium(e.target.checked)}
-                />
-                Make premium
-              </label>
-
-              <button
-                onClick={handleAdminUnlock}
-                style={{
-                  padding: "0.65rem 1rem",
-                  borderRadius: 10,
-                  border: "1px solid #111",
-                  background: "#111",
-                  color: "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                Unlock
-              </button>
-            </div>
-          </div>
-
-          {/* Messages list */}
           <div style={{ marginTop: 16 }}>
             <div
+              ref={listRef}
               style={{
                 border: "1px solid #ddd",
                 borderRadius: 12,
                 padding: 12,
                 minHeight: 320,
+                maxHeight: 520,
+                overflowY: "auto",
               }}
             >
               {messages.length === 0 ? (
@@ -579,12 +411,13 @@ function MessagesInner() {
                       </div>
                     );
                   })}
-                  <div ref={bottomRef} />
                 </div>
               )}
+
+              {/* auto-scroll anchor */}
+              <div ref={bottomRef} />
             </div>
 
-            {/* Composer */}
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <input
                 value={text}
