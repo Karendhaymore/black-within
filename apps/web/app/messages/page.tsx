@@ -9,6 +9,14 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
+/**
+ * Path A (Testing Unlock)
+ * - If NEXT_PUBLIC_AUTH_PREVIEW_MODE=true on the WEB app, the UI will unlock messaging.
+ * - You should ALSO set AUTH_PREVIEW_MODE=true on the API so POST /messages succeeds.
+ */
+const PREVIEW_MODE =
+  (process.env.NEXT_PUBLIC_AUTH_PREVIEW_MODE || "").trim().toLowerCase() === "true";
+
 type MessageItem = {
   id: number | string;
   thread_id: string;
@@ -38,6 +46,16 @@ function getLoggedInUserId(): string | null {
   }
 }
 
+function toNiceString(x: any): string {
+  if (x == null) return "";
+  if (typeof x === "string") return x;
+  try {
+    return JSON.stringify(x, null, 2);
+  } catch {
+    return String(x);
+  }
+}
+
 function stringifyError(e: any): string {
   if (!e) return "Unknown error";
   if (typeof e === "string") return e;
@@ -50,9 +68,15 @@ function stringifyError(e: any): string {
 }
 
 async function safeReadErrorDetail(res: Response): Promise<string> {
+  // Handles FastAPI:
+  // { detail: "..." } OR { detail: [ ... ] }
   try {
     const data = await res.json();
-    if (data?.detail) return String(data.detail);
+    if (data?.detail != null) {
+      if (typeof data.detail === "string") return data.detail;
+      return toNiceString(data.detail);
+    }
+    return toNiceString(data);
   } catch {}
   try {
     const text = await res.text();
@@ -140,7 +164,6 @@ function MessagesInner() {
   const pollRef = useRef<number | null>(null);
 
   // Auto-scroll refs
-  const listRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   function stopPolling() {
@@ -151,8 +174,31 @@ function MessagesInner() {
   }
 
   async function refreshAll(uid: string) {
-    // threadId must exist before calling backend
-    const a = await apiMessagingAccess(uid, threadId);
+    // In preview mode, we still try to read access (so you can see it),
+    // but we "force unlock" the UI even if it comes back locked.
+    let a: MessagingAccessResponse | null = null;
+    try {
+      a = await apiMessagingAccess(uid, threadId);
+    } catch (e: any) {
+      // If access endpoint errors, we still allow you to view messages in preview mode
+      if (!PREVIEW_MODE) throw e;
+      a = {
+        canMessage: true,
+        isPremium: false,
+        reason: "Preview mode: bypassed access check error.",
+      };
+    }
+
+    if (PREVIEW_MODE && a && !a.canMessage) {
+      a = {
+        ...a,
+        canMessage: true,
+        isPremium: a.isPremium ?? false,
+        reason:
+          "Preview mode enabled (NEXT_PUBLIC_AUTH_PREVIEW_MODE=true). UI unlocked for testing.",
+      };
+    }
+
     setAccess(a);
 
     const items = await apiGetMessages(uid, threadId);
@@ -166,7 +212,6 @@ function MessagesInner() {
     let cancelled = false;
 
     async function load() {
-      // ✅ If threadId missing, do NOT call API. Just show guidance.
       if (!threadId) {
         setStatus("error");
         setErr("Missing threadId in the URL. Go back and open a chat from a profile.");
@@ -221,6 +266,8 @@ function MessagesInner() {
     bottomRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
 
+  const locked = !!access && !access.canMessage;
+
   async function handleSend() {
     if (!userId) return;
     if (!threadId) return;
@@ -231,8 +278,8 @@ function MessagesInner() {
     setErr("");
 
     try {
-      if (access && !access.canMessage) {
-        throw new Error(access.reason || "Messaging locked.");
+      if (locked) {
+        throw new Error(access?.reason || "Messaging locked.");
       }
 
       const tempId = `temp-${Date.now()}`;
@@ -287,8 +334,6 @@ function MessagesInner() {
     display: "inline-block",
   };
 
-  const locked = !!access && !access.canMessage;
-
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "1rem" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -305,6 +350,11 @@ function MessagesInner() {
           <div style={{ opacity: 0.75, marginTop: 6, fontSize: 12 }}>
             <strong>API:</strong> {API_BASE}
           </div>
+          {PREVIEW_MODE ? (
+            <div style={{ marginTop: 6, fontSize: 12, color: "#0a5" }}>
+              Preview mode enabled (NEXT_PUBLIC_AUTH_PREVIEW_MODE=true)
+            </div>
+          ) : null}
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -327,6 +377,7 @@ function MessagesInner() {
             padding: 12,
             border: "1px solid #f2b8b5",
             borderRadius: 12,
+            whiteSpace: "pre-wrap",
           }}
         >
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Error</div>
@@ -374,7 +425,6 @@ function MessagesInner() {
 
           <div style={{ marginTop: 16 }}>
             <div
-              ref={listRef}
               style={{
                 border: "1px solid #ddd",
                 borderRadius: 12,
@@ -414,7 +464,6 @@ function MessagesInner() {
                 </div>
               )}
 
-              {/* auto-scroll anchor */}
               <div ref={bottomRef} />
             </div>
 
@@ -449,7 +498,7 @@ function MessagesInner() {
               </button>
             </div>
 
-            {err ? <div style={{ marginTop: 10, color: "#b00020" }}>{err}</div> : null}
+            {err ? <div style={{ marginTop: 10, color: "#b00020", whiteSpace: "pre-wrap" }}>{err}</div> : null}
           </div>
         </>
       ) : null}
