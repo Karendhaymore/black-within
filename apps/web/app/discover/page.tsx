@@ -34,6 +34,21 @@ type LikesStatusResponse = {
   resetsAtUTC: string; // ISO datetime string
 };
 
+// Threads/get-or-create response (support a few possible shapes)
+type ThreadGetOrCreateResponse = {
+  threadId?: string;
+  thread_id?: string;
+  id?: string;
+};
+
+// Messaging access response
+type MessagingAccessResponse = {
+  canMessage: boolean;
+  isPremium: boolean;
+  unlockedUntilUTC?: string | null;
+  reason?: string | null;
+};
+
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
@@ -48,23 +63,6 @@ function getLoggedInUserId(): string | null {
     return uid && uid.trim() ? uid.trim() : null;
   } catch {
     return null;
-  }
-}
-
-/**
- * ✅ Messaging Gate (simple)
- * - Set bw_paid = "1" for paid members
- * - OR set bw_message_unlocked = "1" for pay-per-message users
- */
-function canUserMessage(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return (
-      window.localStorage.getItem("bw_paid") === "1" ||
-      window.localStorage.getItem("bw_message_unlocked") === "1"
-    );
-  } catch {
-    return false;
   }
 }
 
@@ -178,15 +176,31 @@ async function apiGetOrCreateThread(user1: string, user2: string): Promise<strin
     throw new Error(msg);
   }
 
-  const data = await res.json().catch(() => ({} as any));
-  const threadId =
-    (data?.threadId as string) ||
-    (data?.thread_id as string) ||
-    (data?.id as string) ||
-    "";
-
+  const data = (await res.json()) as ThreadGetOrCreateResponse;
+  const threadId = data.threadId || data.thread_id || data.id || "";
   if (!threadId) throw new Error("Thread created, but no threadId returned.");
   return threadId;
+}
+
+/**
+ * ✅ Messaging paywall check:
+ * GET /messaging/access?user_id=...&thread_id=...
+ */
+async function apiMessagingAccess(
+  userId: string,
+  threadId: string
+): Promise<MessagingAccessResponse> {
+  const url =
+    `${API_BASE}/messaging/access` +
+    `?user_id=${encodeURIComponent(userId)}` +
+    `&thread_id=${encodeURIComponent(threadId)}`;
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
+  }
+  return (await res.json()) as MessagingAccessResponse;
 }
 
 function formatResetHint(status: LikesStatusResponse | null) {
@@ -428,23 +442,30 @@ export default function DiscoverPage() {
   async function onMessage(p: ApiProfile) {
     if (!userId) return;
 
-    // Always show the button, but block if not paid/unlocked
-    if (!canUserMessage()) {
-      showToast("Messaging is for paid members or pay-per-message users.");
-      // If you have an upgrade page later, route there:
-      window.setTimeout(() => {
-        window.location.href = "/messages"; // or "/upgrade"
-      }, 350);
-      return;
-    }
-
     try {
       setApiError(null);
       showToast("Opening chat…");
 
+      // 1) Get a real thread id
       const threadId = await apiGetOrCreateThread(userId, p.owner_user_id);
 
-      // Go to messages UI
+      // 2) Paywall check (button always visible, but access controls sending)
+      const access = await apiMessagingAccess(userId, threadId);
+
+      if (!access.canMessage) {
+        const reason = access.reason || "Messaging is for paid members or pay-per-message users.";
+        showToast(reason);
+
+        // Route to messages page anyway so it can show the paywall UI there
+        window.setTimeout(() => {
+          window.location.href = `/messages?threadId=${encodeURIComponent(
+            threadId
+          )}&with=${encodeURIComponent(p.displayName)}&locked=1`;
+        }, 250);
+        return;
+      }
+
+      // Allowed: go to messages UI
       window.location.href = `/messages?threadId=${encodeURIComponent(
         threadId
       )}&with=${encodeURIComponent(p.displayName)}`;
@@ -712,7 +733,9 @@ export default function DiscoverPage() {
                             gap: 10,
                           }}
                         >
-                          <div style={{ fontWeight: 800, fontSize: 18 }}>{p.displayName}</div>
+                          <div style={{ fontWeight: 800, fontSize: 18 }}>
+                            {p.displayName}
+                          </div>
                           <div style={{ color: "#666" }}>{p.age}</div>
                         </div>
                         <div style={{ marginTop: 4, color: "#666", fontSize: 13 }}>
@@ -724,6 +747,7 @@ export default function DiscoverPage() {
                     <div style={{ marginTop: 10, fontSize: 13 }}>
                       <strong>Identity:</strong> {p.identityPreview}
                     </div>
+
                     <div style={{ marginTop: 8, fontSize: 13 }}>
                       <strong>Intention:</strong> {p.intention}
                     </div>
@@ -797,7 +821,7 @@ export default function DiscoverPage() {
                         {likeLabel}
                       </button>
 
-                      {/* ✅ REAL THREAD MESSAGE BUTTON */}
+                      {/* ✅ REAL THREAD MESSAGE BUTTON (always visible) */}
                       <button
                         onClick={() => onMessage(p)}
                         style={{
