@@ -8,7 +8,7 @@ import base64
 from datetime import datetime, timedelta, date, time
 from typing import List, Optional, Dict, Any, Tuple
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -66,6 +66,9 @@ FREE_LIKES_PER_DAY = int(os.getenv("FREE_LIKES_PER_DAY", "5"))
 
 # NEW: test-mode reset (seconds). If > 0, likes reset every N seconds (for testing).
 LIKES_RESET_TEST_SECONDS = int(os.getenv("LIKES_RESET_TEST_SECONDS", "0") or "0")
+
+# ✅ ADMIN KEY (add this)
+ADMIN_KEY = os.getenv("ADMIN_KEY", "").strip()
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "").strip()
@@ -444,10 +447,39 @@ class UpsertMyProfilePayload(BaseModel):
     personal_truth_text: Optional[str] = None
 
 
+# ✅ ADMIN SCHEMAS (add these)
+class AdminCreateProfilePayload(BaseModel):
+    # If you provide owner_user_id, the profile is tied to that user.
+    # If not provided, backend will create a new user_id automatically.
+    owner_user_id: Optional[str] = None
+
+    displayName: str
+    age: int
+    city: str
+    stateUS: str
+    photo: Optional[str] = None
+
+    intention: str
+    identityPreview: str
+    tags: List[str] = []
+
+    culturalIdentity: Optional[List[str]] = None
+    spiritualFramework: Optional[List[str]] = None
+    relationshipIntent: Optional[str] = None
+    datingChallenge: Optional[str] = None
+    personalTruth: Optional[str] = None
+
+    isAvailable: Optional[bool] = True
+
+
+class AdminSeedPayload(BaseModel):
+    count: int = 10
+
+
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.1.1")
+app = FastAPI(title="Black Within API", version="1.1.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -488,6 +520,14 @@ def _ensure_user(user_id: str) -> str:
             session.commit()
 
     return user_id
+
+
+# ✅ ADMIN GUARD (add this)
+def _require_admin(x_admin_key: Optional[str]) -> None:
+    if not ADMIN_KEY:
+        raise HTTPException(status_code=500, detail="Admin is not configured (ADMIN_KEY missing).")
+    if not x_admin_key or x_admin_key.strip() != ADMIN_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized (bad admin key).")
 
 
 def _send_email_sendgrid(to_email: str, subject: str, html: str) -> None:
@@ -571,10 +611,6 @@ def _verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def _today_utc() -> date:
-    return datetime.utcnow().date()
-
-
 def _utc_midnight_of_day(d: date) -> datetime:
     return datetime.combine(d, time.min)
 
@@ -616,7 +652,6 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
 
     # TEST MODE (for you while building)
     if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
-        # We still store it in today's row (simple + safe), but we reset using window_started_at.
         today = now.date()
         counter = _get_or_create_daily_like_counter(session, user_id, today)
 
@@ -627,7 +662,6 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
 
         reset_at = counter.window_started_at + timedelta(seconds=LIKES_RESET_TEST_SECONDS)
 
-        # If the window expired, reset the count
         if now >= reset_at:
             counter.count = 0
             counter.window_started_at = now
@@ -638,7 +672,7 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
         likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
         return counter, likes_left, reset_at, "test_seconds"
 
-    # NORMAL MODE (real product behavior)
+    # NORMAL MODE
     today = now.date()
     counter = _get_or_create_daily_like_counter(session, user_id, today)
     reset_at = _next_utc_midnight(now)
@@ -661,7 +695,8 @@ def health():
         "freeLikesPerDay": FREE_LIKES_PER_DAY,
         "likesResetTestSeconds": LIKES_RESET_TEST_SECONDS,
         "corsOrigins": origins,
-        "version": "1.1.1",
+        "version": "1.1.2",
+        "adminConfigured": bool(ADMIN_KEY),
     }
 
 
@@ -796,7 +831,7 @@ def verify_code(payload: VerifyCodePayload):
 
 
 # -----------------------------
-# Likes status (lets frontend show "likes left" + when it resets)
+# Likes status
 # -----------------------------
 @app.get("/likes/status", response_model=LikesStatusResponse)
 def likes_status(user_id: str = Query(...)):
@@ -1001,6 +1036,228 @@ def upsert_profile_alias(payload: UpsertMyProfilePayload):
 
 
 # -----------------------------
+# ✅ ADMIN endpoints (add these)
+# -----------------------------
+@app.post("/admin/create-profile", response_model=ProfileItem)
+def admin_create_profile(
+    payload: AdminCreateProfilePayload,
+    x_admin_key: Optional[str] = Header(default=None),
+):
+    _require_admin(x_admin_key)
+
+    # Determine owner user id
+    owner_user_id = (payload.owner_user_id or "").strip()
+    if owner_user_id:
+        owner_user_id = _ensure_user(owner_user_id)
+    else:
+        owner_user_id = _ensure_user(_new_id())
+
+    # Validate basics
+    display = (payload.displayName or "").strip()
+    state = (payload.stateUS or "").strip()
+    preview = (payload.identityPreview or "").strip()
+    city = (payload.city or "").strip()
+    intention = (payload.intention or "").strip()
+
+    if not display:
+        raise HTTPException(status_code=400, detail="displayName is required")
+    if payload.age < 18:
+        raise HTTPException(status_code=400, detail="age must be 18+")
+    if not city:
+        raise HTTPException(status_code=400, detail="city is required")
+    if not state:
+        raise HTTPException(status_code=400, detail="stateUS is required")
+    if not intention:
+        raise HTTPException(status_code=400, detail="intention is required")
+    if not preview:
+        raise HTTPException(status_code=400, detail="identityPreview is required")
+
+    tags_csv = json.dumps(_coerce_str_list(payload.tags)[:25])
+
+    cultural_list = _coerce_str_list(payload.culturalIdentity or [])[:50]
+    spiritual_list = _coerce_str_list(payload.spiritualFramework or [])[:50]
+    cultural_csv = json.dumps(cultural_list)
+    spiritual_csv = json.dumps(spiritual_list)
+
+    rel_intent = (payload.relationshipIntent or "").strip() or None
+    dating_challenge = (payload.datingChallenge or "").strip() or None
+    personal_truth = (payload.personalTruth or "").strip() or None
+
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        pid = _new_id()
+        session.add(
+            Profile(
+                id=pid,
+                owner_user_id=owner_user_id,
+                display_name=display,
+                age=int(payload.age),
+                city=city,
+                state_us=state,
+                photo=(payload.photo or "").strip() or None,
+                identity_preview=preview,
+                intention=intention,
+                tags_csv=tags_csv,
+                cultural_identity_csv=cultural_csv,
+                spiritual_framework_csv=spiritual_csv,
+                relationship_intent=rel_intent,
+                dating_challenge_text=dating_challenge,
+                personal_truth_text=personal_truth,
+                is_available=bool(payload.isAvailable if payload.isAvailable is not None else True),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.commit()
+
+        p = session.get(Profile, pid)
+        tags = _parse_json_list(p.tags_csv)
+        cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
+        spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
+
+        return ProfileItem(
+            id=p.id,
+            owner_user_id=p.owner_user_id,
+            displayName=p.display_name,
+            age=p.age,
+            city=p.city,
+            stateUS=p.state_us,
+            photo=p.photo,
+            identityPreview=p.identity_preview,
+            intention=p.intention,
+            tags=tags,
+            isAvailable=bool(p.is_available),
+            culturalIdentity=cultural,
+            spiritualFramework=spiritual,
+            relationshipIntent=getattr(p, "relationship_intent", None),
+            datingChallenge=getattr(p, "dating_challenge_text", None),
+            personalTruth=getattr(p, "personal_truth_text", None),
+        )
+
+
+@app.post("/admin/seed-profiles", response_model=ProfilesResponse)
+def admin_seed_profiles(
+    payload: AdminSeedPayload,
+    x_admin_key: Optional[str] = Header(default=None),
+):
+    _require_admin(x_admin_key)
+
+    count = int(payload.count or 0)
+    if count < 1 or count > 50:
+        raise HTTPException(status_code=400, detail="count must be between 1 and 50")
+
+    # Simple seed data (you can edit these anytime)
+    names = [
+        "NubianGrace", "SankofaSoul", "KemeticKing", "AncestralMuse", "UbuntuHeart",
+        "PanAfricanPoise", "RootedRhythm", "MaatAligned", "DiasporaDream", "ConsciousClassic",
+        "LotusLogic", "CrownChakra", "SunStone", "MelaninMystic", "HeritageHorizon",
+    ]
+    cities = [
+        ("Atlanta", "GA"), ("Houston", "TX"), ("Chicago", "IL"), ("Los Angeles", "CA"),
+        ("New York", "NY"), ("Dallas", "TX"), ("Denver", "CO"), ("Charlotte", "NC"),
+        ("Baltimore", "MD"), ("Oakland", "CA"),
+    ]
+    intentions = [
+        "Intentional partnership",
+        "Marriage-minded",
+        "Conscious companionship",
+        "Community-first connection",
+    ]
+    cultural_opts = [
+        "Pan-African - Identifies with the global African family, regardless of nationality",
+        "Ancestrally Rooted - Identity defined by lineage consciousness, not geography alone",
+        "African American - Retrieves cultural identity from the American experience.",
+        "African-Centered - Lives and thinks from African worldviews",
+    ]
+    spiritual_opts = [
+        "Kemetic Philosophy",
+        "Ifa / Orisha Traditions (Yoruba)",
+        "Hoodoo / Rootwork",
+        "Ubuntu",
+        "Sankofa",
+        "Ancestral Veneration Systems",
+    ]
+
+    created: List[ProfileItem] = []
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        for i in range(count):
+            owner_user_id = _ensure_user(_new_id())
+            display = names[i % len(names)] + (f" {i+1}" if i >= len(names) else "")
+            city, state = cities[i % len(cities)]
+            age = 26 + (i % 12)
+
+            cultural_list = [cultural_opts[i % len(cultural_opts)]]
+            spiritual_list = [spiritual_opts[i % len(spiritual_opts)]]
+
+            identity_preview = (
+                f"Cultural Identity: {cultural_list[0]}\n\n"
+                f"Spiritual Framework: {spiritual_list[0]}\n\n"
+                f"One Thing You Need to Know About Me: I move with intention, boundaries, and warmth."
+            )
+
+            tags = (cultural_list + spiritual_list)[:25]
+
+            pid = _new_id()
+            p = Profile(
+                id=pid,
+                owner_user_id=owner_user_id,
+                display_name=display,
+                age=age,
+                city=city,
+                state_us=state,
+                photo=None,
+                identity_preview=identity_preview,
+                intention=intentions[i % len(intentions)],
+                tags_csv=json.dumps(tags),
+                cultural_identity_csv=json.dumps(cultural_list),
+                spiritual_framework_csv=json.dumps(spiritual_list),
+                relationship_intent=None,
+                dating_challenge_text=None,
+                personal_truth_text=None,
+                is_available=True,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(p)
+
+        session.commit()
+
+        rows = session.execute(
+            select(Profile)
+            .where(Profile.is_available == True)
+            .order_by(Profile.updated_at.desc())
+            .limit(count)
+        ).scalars().all()
+
+        for p in rows:
+            created.append(
+                ProfileItem(
+                    id=p.id,
+                    owner_user_id=p.owner_user_id,
+                    displayName=p.display_name,
+                    age=p.age,
+                    city=p.city,
+                    stateUS=p.state_us,
+                    photo=p.photo,
+                    identityPreview=p.identity_preview,
+                    intention=p.intention,
+                    tags=_parse_json_list(p.tags_csv),
+                    isAvailable=bool(p.is_available),
+                    culturalIdentity=_parse_json_list(getattr(p, "cultural_identity_csv", "[]")),
+                    spiritualFramework=_parse_json_list(getattr(p, "spiritual_framework_csv", "[]")),
+                    relationshipIntent=getattr(p, "relationship_intent", None),
+                    datingChallenge=getattr(p, "dating_challenge_text", None),
+                    personalTruth=getattr(p, "personal_truth_text", None),
+                )
+            )
+
+    return ProfilesResponse(items=created)
+
+
+# -----------------------------
 # Saved profiles
 # -----------------------------
 @app.get("/saved", response_model=IdListResponse)
@@ -1043,260 +1300,4 @@ def save_profile(payload: ProfileAction):
             session.rollback()
             return {"ok": True}
 
-    return {"ok": True}
-
-
-@app.delete("/saved")
-def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
-    user_id = _ensure_user(user_id)
-    profile_id = (profile_id or "").strip()
-    if not profile_id:
-        raise HTTPException(status_code=400, detail="profile_id is required")
-
-    with Session(engine) as session:
-        session.execute(
-            delete(SavedProfile).where(
-                SavedProfile.user_id == user_id,
-                SavedProfile.profile_id == profile_id,
-            )
-        )
-        session.commit()
-
-    return {"ok": True}
-
-
-# -----------------------------
-# Notifications
-# -----------------------------
-@app.get("/notifications", response_model=NotificationsResponse)
-def get_notifications(user_id: str = Query(...)):
-    """
-    Returns notifications with enriched actor info:
-      - actor_display_name
-      - actor_profile_id (so frontend can link to /profiles/{actor_profile_id})
-      - actor_photo (so frontend can show photo instead of initials)
-    """
-    user_id = _ensure_user(user_id)
-
-    with Session(engine) as session:
-        rows = session.execute(
-            select(Notification)
-            .where(Notification.user_id == user_id)
-            .order_by(Notification.created_at.desc())
-            .limit(NOTIFICATIONS_LIMIT)
-        ).scalars().all()
-
-        actor_ids = [n.actor_user_id for n in rows if n.actor_user_id]
-        actor_map: Dict[str, Dict[str, Optional[str]]] = {}
-
-        if actor_ids:
-            prof_rows = session.execute(
-                select(Profile).where(Profile.owner_user_id.in_(actor_ids))
-            ).scalars().all()
-
-            for p in prof_rows:
-                actor_map[p.owner_user_id] = {
-                    "actor_display_name": p.display_name,
-                    "actor_profile_id": p.id,
-                    "actor_photo": p.photo,
-                }
-
-        items: List[NotificationItem] = []
-        for n in rows:
-            actor_info = actor_map.get(n.actor_user_id or "", {})
-            actor_display_name = actor_info.get("actor_display_name")
-            actor_profile_id = actor_info.get("actor_profile_id")
-            actor_photo = actor_info.get("actor_photo")
-
-            if n.actor_profile_id:
-                actor_profile_id = n.actor_profile_id
-
-            items.append(
-                NotificationItem(
-                    id=str(n.id),
-                    user_id=n.user_id,
-                    type=n.type or "notice",
-                    message=n.message,
-                    created_at=n.created_at.isoformat(),
-                    actor_user_id=n.actor_user_id,
-                    actor_profile_id=actor_profile_id,
-                    actor_display_name=actor_display_name,
-                    actor_photo=actor_photo,
-                    profile_id=n.profile_id,
-                )
-            )
-
-        return NotificationsResponse(items=items)
-
-
-@app.delete("/notifications")
-def clear_notifications(user_id: str = Query(...)):
-    user_id = _ensure_user(user_id)
-    with Session(engine) as session:
-        session.execute(delete(Notification).where(Notification.user_id == user_id))
-        session.commit()
-    return {"ok": True}
-
-
-# -----------------------------
-# Likes (with daily reset + test reset)
-# -----------------------------
-@app.get("/likes", response_model=IdListResponse)
-def get_likes(user_id: str = Query(...)):
-    """
-    Backward compatible: returns profile_ids that THIS user has liked.
-    """
-    user_id = _ensure_user(user_id)
-    with Session(engine) as session:
-        rows = session.execute(select(Like.profile_id).where(Like.user_id == user_id)).all()
-        return IdListResponse(ids=[r[0] for r in rows])
-
-
-@app.get("/likes/sent", response_model=IdListResponse)
-def get_likes_sent(user_id: str = Query(...)):
-    return get_likes(user_id=user_id)
-
-
-@app.get("/likes/received", response_model=ProfilesListResponse)
-def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
-    """
-    Returns PROFILES of people who liked *your* profile.
-    """
-    user_id = _ensure_user(user_id)
-
-    with Session(engine) as session:
-        my_profile = session.execute(
-            select(Profile).where(Profile.owner_user_id == user_id)
-        ).scalar_one_or_none()
-
-        if not my_profile:
-            return ProfilesListResponse(items=[])
-
-        liker_rows = session.execute(
-            select(Like.user_id)
-            .where(Like.profile_id == my_profile.id)
-            .order_by(Like.created_at.desc())
-            .limit(limit)
-        ).all()
-        liker_user_ids = [r[0] for r in liker_rows]
-
-        if not liker_user_ids:
-            return ProfilesListResponse(items=[])
-
-        prof_rows = session.execute(
-            select(Profile)
-            .where(Profile.owner_user_id.in_(liker_user_ids))
-            .where(Profile.is_available == True)
-        ).scalars().all()
-
-        prof_by_owner = {p.owner_user_id: p for p in prof_rows}
-        ordered_profiles = [prof_by_owner[uid] for uid in liker_user_ids if uid in prof_by_owner]
-
-        items: List[ProfileItem] = []
-        for p in ordered_profiles:
-            tags = _parse_json_list(p.tags_csv)
-            cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
-            spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
-
-            items.append(
-                ProfileItem(
-                    id=p.id,
-                    owner_user_id=p.owner_user_id,
-                    displayName=p.display_name,
-                    age=p.age,
-                    city=p.city,
-                    stateUS=p.state_us,
-                    photo=p.photo,
-                    identityPreview=p.identity_preview,
-                    intention=p.intention,
-                    tags=tags,
-                    isAvailable=bool(p.is_available),
-                    culturalIdentity=cultural,
-                    spiritualFramework=spiritual,
-                    relationshipIntent=getattr(p, "relationship_intent", None),
-                    datingChallenge=getattr(p, "dating_challenge_text", None),
-                    personalTruth=getattr(p, "personal_truth_text", None),
-                )
-            )
-
-        return ProfilesListResponse(items=items)
-
-
-@app.post("/likes")
-def like(payload: ProfileAction):
-    liker_user_id = _ensure_user(payload.user_id)
-    profile_id = (payload.profile_id or "").strip()
-    if not profile_id:
-        raise HTTPException(status_code=400, detail="profile_id is required")
-
-    with Session(engine) as session:
-        # Read the current window (daily or test seconds)
-        counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
-
-        # If already liked, don't count it again
-        existing = session.execute(
-            select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
-        ).scalar_one_or_none()
-        if existing:
-            return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
-
-        # Enforce limit
-        if int(counter.count) >= FREE_LIKES_PER_DAY:
-            # Friendly + specific message
-            if window_type == "test_seconds":
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.",
-                )
-            raise HTTPException(
-                status_code=429,
-                detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.",
-            )
-
-        prof = session.get(Profile, profile_id)
-        if not prof:
-            raise HTTPException(status_code=404, detail="Profile not found")
-
-        # Write the like
-        session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
-
-        # Increment the counter
-        counter.count = int(counter.count) + 1
-        counter.updated_at = datetime.utcnow()
-
-        # In test mode, ensure window_started_at exists
-        if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
-            if not counter.window_started_at:
-                counter.window_started_at = datetime.utcnow()
-
-        recipient_user_id = prof.owner_user_id
-
-        # Find actor profile (if they have one)
-        actor_profile = session.execute(
-            select(Profile).where(Profile.owner_user_id == liker_user_id)
-        ).scalar_one_or_none()
-
-        if recipient_user_id and recipient_user_id != liker_user_id:
-            session.add(
-                Notification(
-                    user_id=recipient_user_id,
-                    type="like",
-                    message="Someone liked your profile.",
-                    created_at=datetime.utcnow(),
-                    actor_user_id=liker_user_id,
-                    profile_id=profile_id,
-                    actor_profile_id=(actor_profile.id if actor_profile else None),
-                )
-            )
-
-        try:
-            session.commit()
-        except IntegrityError:
-            session.rollback()
-            # If something raced, still return a safe value
-            likes_left_safe = max(0, FREE_LIKES_PER_DAY - int(counter.count))
-            return {"ok": True, "likesLeft": likes_left_safe, "resetsAtUTC": reset_at.isoformat()}
-
-        # Recompute likes left and reset time after commit (test mode might have reset logic)
-        counter2, likes_left_final, reset_at2, window_type2 = _get_likes_window(session, liker_user_id)
-        return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
+    return {"ok
