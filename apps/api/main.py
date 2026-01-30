@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import base64
+import stripe
 from datetime import datetime, timedelta, date, time
 from typing import List, Optional, Dict, Any, Tuple
 
@@ -73,6 +74,7 @@ SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 # -----------------------------
 # Database models
@@ -196,6 +198,30 @@ class LoginCode(Base):
     code: Mapped[str] = mapped_column(String(10))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Thread(Base):
+    __tablename__ = "threads"
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    user_a: Mapped[str] = mapped_column(String(40))
+    user_b: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Message(Base):
+    __tablename__ = "messages"
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    thread_id: Mapped[str] = mapped_column(String(60))
+    sender_user_id: Mapped[str] = mapped_column(String(40))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class ThreadUnlock(Base):
+    __tablename__ = "thread_unlocks"
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    thread_id: Mapped[str] = mapped_column(String(60))
+    user_id: Mapped[str] = mapped_column(String(40))
+    stripe_payment_id: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 
 
 # -----------------------------
@@ -1300,3 +1326,92 @@ def like(payload: ProfileAction):
         # Recompute likes left and reset time after commit (test mode might have reset logic)
         counter2, likes_left_final, reset_at2, window_type2 = _get_likes_window(session, liker_user_id)
         return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
+# ==============================
+# THREAD CREATION
+# ==============================
+@app.post("/threads")
+def create_thread(user_a: str, user_b: str):
+    tid = _new_id()
+    with Session(engine) as session:
+        session.add(Thread(id=tid, user_a=user_a, user_b=user_b))
+        session.commit()
+    return {"threadId": tid}
+
+
+# ==============================
+# SEND MESSAGE (requires unlock)
+# ==============================
+@app.post("/messages")
+def send_message(thread_id: str, sender_user_id: str, body: str):
+    with Session(engine) as session:
+        unlocked = session.execute(
+            select(ThreadUnlock).where(
+                ThreadUnlock.thread_id == thread_id,
+                ThreadUnlock.user_id == sender_user_id
+            )
+        ).first()
+
+        if not unlocked:
+            raise HTTPException(status_code=402, detail="Thread locked")
+
+        session.add(Message(
+            id=_new_id(),
+            thread_id=thread_id,
+            sender_user_id=sender_user_id,
+            body=body
+        ))
+        session.commit()
+
+    return {"ok": True}
+
+
+# ==============================
+# STRIPE CHECKOUT
+# ==============================
+@app.post("/create-checkout")
+def create_checkout(thread_id: str, user_id: str):
+    session = stripe.checkout.Session.create(
+        payment_method_types=["card"],
+        mode="payment",
+        line_items=[{
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": "Unlock Chat"},
+                "unit_amount": 199,
+            },
+            "quantity": 1,
+        }],
+        metadata={"thread_id": thread_id, "user_id": user_id},
+        success_url="https://black-within.onrender.com/messages?success=true",
+        cancel_url="https://black-within.onrender.com/messages",
+    )
+    return {"url": session.url}
+
+
+# ==============================
+# STRIPE WEBHOOK
+# ==============================
+@app.post("/stripe-webhook")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature")
+
+    event = stripe.Webhook.construct_event(
+        payload, sig, os.getenv("STRIPE_WEBHOOK_SECRET")
+    )
+
+    if event["type"] == "checkout.session.completed":
+        data = event["data"]["object"]
+        thread_id = data["metadata"]["thread_id"]
+        user_id = data["metadata"]["user_id"]
+
+        with Session(engine) as session:
+            session.add(ThreadUnlock(
+                id=_new_id(),
+                thread_id=thread_id,
+                user_id=user_id,
+                stripe_payment_id=data["payment_intent"]
+            ))
+            session.commit()
+
+    return {"status": "ok"}
