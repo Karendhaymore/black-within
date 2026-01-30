@@ -1,69 +1,128 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { getOrCreateUserId } from "../lib/user";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+  process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
-type Msg = {
-  id?: number | string;
-  thread_id?: string;
-  sender_user_id?: string;
-  body?: string;
-  created_at?: string;
+type MessageItem = {
+  id: number | string;
+  thread_id: string;
+  sender_user_id: string;
+  body: string;
+  created_at: string; // ISO string
 };
 
-async function apiUnlockStatus(threadId: string, userId: string) {
-  const res = await fetch(
-    `${API_BASE}/threads/unlock-status?thread_id=${encodeURIComponent(
-      threadId
-    )}&user_id=${encodeURIComponent(userId)}`,
-    { cache: "no-store" }
-  );
-  if (!res.ok) throw new Error("Failed to load unlock status");
-  return (await res.json()) as { unlocked: boolean };
+type MessagesResponse = { items: MessageItem[] };
+
+type MessagingAccessResponse = {
+  canMessage: boolean;
+  isPremium: boolean;
+  unlockedUntilUTC?: string | null;
+  reason?: string | null;
+};
+
+function getLoggedInUserId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const uid = window.localStorage.getItem("bw_user_id");
+    const loggedIn = window.localStorage.getItem("bw_logged_in") === "1";
+    if (!loggedIn) return null;
+    return uid && uid.trim() ? uid.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
-async function apiGetMessages(threadId: string, userId: string) {
-  const res = await fetch(
-    `${API_BASE}/messages?thread_id=${encodeURIComponent(
-      threadId
-    )}&user_id=${encodeURIComponent(userId)}`,
-    { cache: "no-store" }
-  );
-  if (res.status === 402) return { locked: true, messages: [] as Msg[] };
-  if (!res.ok) throw new Error("Failed to load messages");
-  return { locked: false, messages: (await res.json()) as Msg[] };
+async function safeReadErrorDetail(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    if (data?.detail) return String(data.detail);
+  } catch {}
+  try {
+    const text = await res.text();
+    if (text) return text;
+  } catch {}
+  return `Request failed (${res.status}).`;
 }
 
-async function apiSendMessage(
-  threadId: string,
-  senderUserId: string,
-  body: string
-) {
+async function apiMessagingAccess(
+  userId: string,
+  threadId: string
+): Promise<MessagingAccessResponse> {
+  const url =
+    `${API_BASE}/messaging/access` +
+    `?user_id=${encodeURIComponent(userId)}` +
+    `&thread_id=${encodeURIComponent(threadId)}`;
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
+  }
+  return (await res.json()) as MessagingAccessResponse;
+}
+
+async function apiGetMessages(userId: string, threadId: string): Promise<MessageItem[]> {
+  const url =
+    `${API_BASE}/messages` +
+    `?user_id=${encodeURIComponent(userId)}` +
+    `&thread_id=${encodeURIComponent(threadId)}` +
+    `&limit=200`;
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
+  }
+
+  const json = (await res.json()) as MessagesResponse;
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
+async function apiSendMessage(userId: string, threadId: string, body: string) {
   const res = await fetch(`${API_BASE}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ threadId, senderUserId, body }),
+    body: JSON.stringify({ user_id: userId, thread_id: threadId, body }),
   });
-  if (res.status === 402)
-    throw new Error("Thread is locked. Please unlock to message.");
-  if (!res.ok) throw new Error("Failed to send message");
-  return (await res.json()) as Msg;
+
+  if (!res.ok) {
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
+  }
+
+  return (await res.json()) as MessageItem;
 }
 
-async function apiCreateCheckout(threadId: string, userId: string) {
-  const res = await fetch(`${API_BASE}/stripe/create-checkout`, {
+/**
+ * ADMIN/TEST ONLY (matches your backend):
+ * POST /messaging/unlock?key=...
+ * body: { user_id, minutes, make_premium }
+ */
+async function apiAdminUnlockMessaging(
+  userId: string,
+  minutes: number,
+  key: string,
+  makePremium: boolean
+): Promise<MessagingAccessResponse> {
+  const url = `${API_BASE}/messaging/unlock?key=${encodeURIComponent(key || "")}`;
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ threadId, userId }),
+    body: JSON.stringify({ user_id: userId, minutes, make_premium: makePremium }),
   });
-  if (!res.ok) throw new Error("Failed to start checkout");
-  return (await res.json()) as { url: string };
+
+  if (!res.ok) {
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
+  }
+
+  return (await res.json()) as MessagingAccessResponse;
 }
 
 /**
@@ -84,27 +143,54 @@ function MessagesInner() {
   const threadId = sp.get("threadId") || "";
   const withName = sp.get("with") || "";
 
-  const userId = useMemo(() => getOrCreateUserId(), []);
+  const userId = useMemo(() => getLoggedInUserId(), []);
 
-  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">(
-    "idle"
-  );
-  const [unlocked, setUnlocked] = useState(false);
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+
+  const [access, setAccess] = useState<MessagingAccessResponse | null>(null);
+  const [messages, setMessages] = useState<MessageItem[]>([]);
   const [text, setText] = useState("");
   const [err, setErr] = useState<string>("");
 
-  // A small “post-checkout” poll: if Stripe redirects back before webhook finishes,
-  // this will keep checking a few times.
+  // Admin/test unlock controls (optional)
+  const [adminKey, setAdminKey] = useState("");
+  const [unlockMinutes, setUnlockMinutes] = useState<number>(60);
+  const [makePremium, setMakePremium] = useState<boolean>(false);
+
+  // Simple polling when unlocked (new messages)
+  const pollRef = useRef<number | null>(null);
+
+  function stopPolling() {
+    if (pollRef.current) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  async function refreshAll(uid: string) {
+    // 1) get paywall/access status
+    const a = await apiMessagingAccess(uid, threadId);
+    setAccess(a);
+
+    // 2) load messages regardless (your backend allows reading if participant)
+    const items = await apiGetMessages(uid, threadId);
+    setMessages(items);
+
+    return a;
+  }
+
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       if (!threadId) {
         setStatus("error");
-        setErr(
-          "Missing threadId in the URL. Go back and open a chat from a profile."
-        );
+        setErr("Missing threadId in the URL. Go back and open a chat from a profile.");
+        return;
+      }
+      if (!userId) {
+        // Not logged in
+        window.location.href = "/auth";
         return;
       }
 
@@ -112,39 +198,22 @@ function MessagesInner() {
       setErr("");
 
       try {
-        // First: check unlock status
-        const s = await apiUnlockStatus(threadId, userId);
+        const a = await refreshAll(userId);
         if (cancelled) return;
-        setUnlocked(!!s.unlocked);
 
-        // If unlocked: load messages immediately
-        if (s.unlocked) {
-          const m = await apiGetMessages(threadId, userId);
-          if (cancelled) return;
-          setMessages(m.messages || []);
-          setStatus("ready");
-          return;
-        }
-
-        // If locked: we still set ready, and show the unlock screen
         setStatus("ready");
 
-        // Optional: short poll after landing here (helps after Stripe success redirect)
-        // Poll up to ~20 seconds.
-        let tries = 0;
-        const maxTries = 10;
-        while (!cancelled && tries < maxTries) {
-          await new Promise((r) => setTimeout(r, 2000));
-          const s2 = await apiUnlockStatus(threadId, userId);
-          if (cancelled) return;
-          if (s2.unlocked) {
-            setUnlocked(true);
-            const m2 = await apiGetMessages(threadId, userId);
-            if (cancelled) return;
-            setMessages(m2.messages || []);
-            break;
-          }
-          tries++;
+        // Poll messages every 4s if messaging is allowed (or premium/unlocked)
+        stopPolling();
+        if (a?.canMessage) {
+          pollRef.current = window.setInterval(async () => {
+            try {
+              const latest = await apiGetMessages(userId, threadId);
+              if (!cancelled) setMessages(latest);
+            } catch {
+              // ignore polling errors
+            }
+          }, 4000);
         }
       } catch (e: any) {
         setStatus("error");
@@ -153,31 +222,31 @@ function MessagesInner() {
     }
 
     load();
+
     return () => {
       cancelled = true;
+      stopPolling();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, userId]);
 
-  async function handleUnlock() {
-    setErr("");
-    try {
-      const { url } = await apiCreateCheckout(threadId, userId);
-      if (!url) throw new Error("Checkout URL missing.");
-      window.location.href = url; // Stripe redirect
-    } catch (e: any) {
-      setErr(e?.message || "Could not start checkout.");
-    }
-  }
-
   async function handleSend() {
+    if (!userId) return;
     const body = text.trim();
     if (!body) return;
+
     setErr("");
 
     try {
-      // Optimistic UI: add a temp message
-      const temp: Msg = {
-        id: `temp-${Date.now()}`,
+      // Block sending if paywall says no
+      if (access && !access.canMessage) {
+        throw new Error(access.reason || "Messaging locked.");
+      }
+
+      // Optimistic UI temp message
+      const tempId = `temp-${Date.now()}`;
+      const temp: MessageItem = {
+        id: tempId,
         thread_id: threadId,
         sender_user_id: userId,
         body,
@@ -186,18 +255,88 @@ function MessagesInner() {
       setMessages((prev) => [...prev, temp]);
       setText("");
 
-      const saved = await apiSendMessage(threadId, userId, body);
+      const saved = await apiSendMessage(userId, threadId, body);
 
       // Replace temp with saved
-      setMessages((prev) => prev.map((m) => (m.id === temp.id ? saved : m)));
+      setMessages((prev) => prev.map((m) => (String(m.id) === tempId ? saved : m)));
     } catch (e: any) {
       setErr(e?.message || "Failed to send message.");
     }
   }
 
+  async function handleRefresh() {
+    if (!userId) return;
+    setErr("");
+    try {
+      const a = await refreshAll(userId);
+      stopPolling();
+      if (a?.canMessage) {
+        pollRef.current = window.setInterval(async () => {
+          try {
+            const latest = await apiGetMessages(userId, threadId);
+            setMessages(latest);
+          } catch {}
+        }, 4000);
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Refresh failed.");
+    }
+  }
+
+  async function handleAdminUnlock() {
+    if (!userId) return;
+    setErr("");
+
+    try {
+      if (!adminKey.trim()) {
+        throw new Error("Enter your ADMIN unlock key.");
+      }
+      if (!unlockMinutes || unlockMinutes <= 0) {
+        throw new Error("Minutes must be > 0.");
+      }
+
+      const a = await apiAdminUnlockMessaging(
+        userId,
+        Number(unlockMinutes),
+        adminKey.trim(),
+        makePremium
+      );
+      setAccess(a);
+
+      // Reload messages and begin polling if allowed
+      const items = await apiGetMessages(userId, threadId);
+      setMessages(items);
+
+      stopPolling();
+      if (a?.canMessage) {
+        pollRef.current = window.setInterval(async () => {
+          try {
+            const latest = await apiGetMessages(userId, threadId);
+            setMessages(latest);
+          } catch {}
+        }, 4000);
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Unlock failed.");
+    }
+  }
+
+  const navBtnStyle: React.CSSProperties = {
+    padding: "0.65rem 1rem",
+    border: "1px solid #ccc",
+    borderRadius: 10,
+    textDecoration: "none",
+    color: "inherit",
+    height: "fit-content",
+    background: "white",
+    display: "inline-block",
+  };
+
+  const locked = !!access && !access.canMessage;
+
   return (
     <div style={{ maxWidth: 720, margin: "0 auto", padding: "1rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ margin: 0 }}>Messages</h1>
           <div style={{ opacity: 0.75, marginTop: 4 }}>
@@ -208,22 +347,25 @@ function MessagesInner() {
               </>
             ) : null}
           </div>
+          <div style={{ opacity: 0.75, marginTop: 6, fontSize: 12 }}>
+            <strong>API:</strong> {API_BASE}
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Link
-            href="/discover"
-            style={{
-              padding: "0.65rem 1rem",
-              border: "1px solid #ccc",
-              borderRadius: 10,
-              textDecoration: "none",
-              color: "inherit",
-              height: "fit-content",
-            }}
-          >
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <Link href="/discover" style={navBtnStyle}>
             Back to Discover
           </Link>
+
+          <button
+            onClick={handleRefresh}
+            style={{
+              ...navBtnStyle,
+              cursor: "pointer",
+            }}
+          >
+            Refresh
+          </button>
         </div>
       </div>
 
@@ -245,111 +387,192 @@ function MessagesInner() {
 
       {status === "ready" ? (
         <>
-          {!unlocked ? (
+          {/* Paywall / access banner */}
+          {access ? (
             <div
               style={{
-                marginTop: 20,
-                padding: 16,
-                border: "1px solid #ddd",
+                marginTop: 16,
+                padding: 12,
                 borderRadius: 12,
+                border: locked ? "1px solid #f2c7c7" : "1px solid #d8e9d8",
+                background: locked ? "#fff7f7" : "#f5fff5",
+                color: locked ? "#7a1b1b" : "#1f5b1f",
+                whiteSpace: "pre-wrap",
               }}
             >
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Chat is locked</div>
-              <div style={{ opacity: 0.85, marginBottom: 12 }}>
-                Unlock this chat to message. Price: <strong>$1.99</strong>
-              </div>
-              <button
-                onClick={handleUnlock}
+              {locked ? (
+                <>
+                  <div style={{ fontWeight: 800 }}>Messaging locked</div>
+                  <div style={{ marginTop: 6 }}>
+                    {access.reason ||
+                      "Messaging is for paid members or pay-per-message users."}
+                  </div>
+                  {access.unlockedUntilUTC ? (
+                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
+                      Unlocked until: <code>{access.unlockedUntilUTC}</code>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div style={{ fontWeight: 800 }}>Messaging active</div>
+                  <div style={{ marginTop: 6, fontSize: 13 }}>
+                    {access.isPremium ? "Premium access" : "Unlocked access"}
+                    {access.unlockedUntilUTC ? (
+                      <>
+                        {" "}
+                        • until <code>{access.unlockedUntilUTC}</code>
+                      </>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
+
+          {/* Admin/test unlock panel (optional) */}
+          <div
+            style={{
+              marginTop: 14,
+              padding: 12,
+              borderRadius: 12,
+              border: "1px dashed #ddd",
+              background: "#fafafa",
+            }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>Admin/Test Unlock (optional)</div>
+            <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 10 }}>
+              Uses <code>POST /messaging/unlock</code>. Only works if your backend has
+              <code> ADMIN_UNLOCK_KEY</code> set. This key is NOT stored—type it each time.
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <input
+                value={adminKey}
+                onChange={(e) => setAdminKey(e.target.value)}
+                placeholder="ADMIN unlock key"
                 style={{
-                  padding: "0.75rem 1rem",
-                  borderRadius: 12,
+                  flex: 1,
+                  minWidth: 220,
+                  padding: "0.65rem 0.8rem",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                }}
+              />
+
+              <input
+                type="number"
+                value={unlockMinutes}
+                onChange={(e) => setUnlockMinutes(Number(e.target.value))}
+                min={1}
+                style={{
+                  width: 120,
+                  padding: "0.65rem 0.8rem",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                }}
+              />
+
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={makePremium}
+                  onChange={(e) => setMakePremium(e.target.checked)}
+                />
+                Make premium
+              </label>
+
+              <button
+                onClick={handleAdminUnlock}
+                style={{
+                  padding: "0.65rem 1rem",
+                  borderRadius: 10,
                   border: "1px solid #111",
                   background: "#111",
                   color: "#fff",
                   cursor: "pointer",
                 }}
               >
-                Unlock chat for $1.99
+                Unlock
               </button>
-
-              {err ? <div style={{ marginTop: 12, color: "#b00020" }}>{err}</div> : null}
-
-              <div style={{ marginTop: 12, fontSize: 12, opacity: 0.75 }}>
-                If you just paid and got redirected back, please wait a few seconds while we
-                finalize your unlock.
-              </div>
             </div>
-          ) : (
-            <div style={{ marginTop: 20 }}>
-              <div
+          </div>
+
+          {/* Messages list */}
+          <div style={{ marginTop: 16 }}>
+            <div
+              style={{
+                border: "1px solid #ddd",
+                borderRadius: 12,
+                padding: 12,
+                minHeight: 320,
+              }}
+            >
+              {messages.length === 0 ? (
+                <div style={{ opacity: 0.7 }}>No messages yet.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {messages.map((m) => {
+                    const mine = (m.sender_user_id || "") === (userId || "");
+                    const ts = (m.created_at || "").slice(0, 19).replace("T", " ");
+                    return (
+                      <div
+                        key={String(m.id)}
+                        style={{
+                          alignSelf: mine ? "flex-end" : "flex-start",
+                          maxWidth: "85%",
+                          padding: "10px 12px",
+                          borderRadius: 12,
+                          border: "1px solid #ddd",
+                          background: mine ? "#f5f5f5" : "#fff",
+                          whiteSpace: "pre-wrap",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, opacity: 0.65, marginBottom: 4 }}>
+                          {mine ? "You" : "Them"} • {ts}
+                        </div>
+                        <div>{m.body}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Composer */}
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={locked ? "Messaging locked…" : "Type a message…"}
+                disabled={locked}
                 style={{
-                  border: "1px solid #ddd",
+                  flex: 1,
+                  padding: "0.75rem 0.9rem",
                   borderRadius: 12,
-                  padding: 12,
-                  minHeight: 320,
+                  border: "1px solid #ccc",
+                  background: locked ? "#f7f7f7" : "white",
+                }}
+              />
+              <button
+                onClick={handleSend}
+                disabled={locked}
+                style={{
+                  padding: "0.75rem 1rem",
+                  borderRadius: 12,
+                  border: "1px solid #111",
+                  background: locked ? "#999" : "#111",
+                  color: "#fff",
+                  cursor: locked ? "not-allowed" : "pointer",
+                  opacity: locked ? 0.85 : 1,
                 }}
               >
-                {messages.length === 0 ? (
-                  <div style={{ opacity: 0.7 }}>No messages yet.</div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {messages.map((m) => {
-                      const mine = (m.sender_user_id || "") === userId;
-                      return (
-                        <div
-                          key={String(m.id)}
-                          style={{
-                            alignSelf: mine ? "flex-end" : "flex-start",
-                            maxWidth: "85%",
-                            padding: "10px 12px",
-                            borderRadius: 12,
-                            border: "1px solid #ddd",
-                            background: mine ? "#f5f5f5" : "#fff",
-                            whiteSpace: "pre-wrap",
-                          }}
-                        >
-                          <div style={{ fontSize: 12, opacity: 0.65, marginBottom: 4 }}>
-                            {mine ? "You" : "Them"} •{" "}
-                            {(m.created_at || "").slice(0, 19).replace("T", " ")}
-                          </div>
-                          <div>{m.body}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <input
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder="Type a message…"
-                  style={{
-                    flex: 1,
-                    padding: "0.75rem 0.9rem",
-                    borderRadius: 12,
-                    border: "1px solid #ccc",
-                  }}
-                />
-                <button
-                  onClick={handleSend}
-                  style={{
-                    padding: "0.75rem 1rem",
-                    borderRadius: 12,
-                    border: "1px solid #111",
-                    background: "#111",
-                    color: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  Send
-                </button>
-              </div>
-
-              {err ? <div style={{ marginTop: 10, color: "#b00020" }}>{err}</div> : null}
+                Send
+              </button>
             </div>
-          )}
+
+            {err ? <div style={{ marginTop: 10, color: "#b00020" }}>{err}</div> : null}
+          </div>
         </>
       ) : null}
     </div>
