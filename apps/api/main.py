@@ -1709,8 +1709,11 @@ def send_message(payload: MessageCreatePayload):
         other_user_id = _ensure_thread_participant(thread, user_id)
 
         can_msg, is_premium, unlocked_until, reason = _can_message(session, user_id)
-        if not can_msg:
-            raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
+
+# ✅ Path A: Preview mode bypass (allow messaging while AUTH_PREVIEW_MODE=true)
+if not can_msg and not AUTH_PREVIEW_MODE:
+    raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
+
 
         m = Message(thread_id=thread_id, sender_user_id=user_id, body=body, created_at=datetime.utcnow())
         session.add(m)
