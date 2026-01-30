@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
-import { getOrCreateUserId } from "../lib/user";
 
 /**
  * IMPORTANT:
@@ -49,6 +48,23 @@ function getLoggedInUserId(): string | null {
     return uid && uid.trim() ? uid.trim() : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * ✅ Messaging Gate (simple)
+ * - Set bw_paid = "1" for paid members
+ * - OR set bw_message_unlocked = "1" for pay-per-message users
+ */
+function canUserMessage(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return (
+      window.localStorage.getItem("bw_paid") === "1" ||
+      window.localStorage.getItem("bw_message_unlocked") === "1"
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -146,6 +162,33 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
   return Array.isArray(json?.items) ? json.items : [];
 }
 
+/**
+ * ✅ Threads API: POST /threads/get-or-create
+ * Expected response: { threadId: "..." } (or similar)
+ */
+async function apiGetOrCreateThread(user1: string, user2: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/threads/get-or-create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user1, user2 }),
+  });
+
+  if (!res.ok) {
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
+  }
+
+  const data = await res.json().catch(() => ({} as any));
+  const threadId =
+    (data?.threadId as string) ||
+    (data?.thread_id as string) ||
+    (data?.id as string) ||
+    "";
+
+  if (!threadId) throw new Error("Thread created, but no threadId returned.");
+  return threadId;
+}
+
 function formatResetHint(status: LikesStatusResponse | null) {
   if (!status?.resetsAtUTC) return "";
   const d = new Date(status.resetsAtUTC);
@@ -215,6 +258,7 @@ export default function DiscoverPage() {
     return (displayName || "")
       .trim()
       .split(" ")
+      .filter(Boolean)
       .map((w) => w[0])
       .join("")
       .slice(0, 2)
@@ -226,10 +270,7 @@ export default function DiscoverPage() {
       setApiError(null);
       setLoadingSets(true);
 
-      const [saved, likes] = await Promise.all([
-        apiGetSavedIds(uid),
-        apiGetLikes(uid),
-      ]);
+      const [saved, likes] = await Promise.all([apiGetSavedIds(uid), apiGetLikes(uid)]);
 
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
       setLikedIds(likes.filter((id) => availableProfileIds.has(id)));
@@ -274,10 +315,7 @@ export default function DiscoverPage() {
 
   function logout() {
     try {
-      // ✅ Log out without erasing the account/user id
       window.localStorage.setItem("bw_logged_in", "0");
-
-      // Optional: if you add tokens later, clear them here
       try {
         window.localStorage.removeItem("bw_session_token");
       } catch {}
@@ -387,7 +425,37 @@ export default function DiscoverPage() {
     }
   }
 
-  const navBtnStyle: React.CSSProperties = {
+  async function onMessage(p: ApiProfile) {
+    if (!userId) return;
+
+    // Always show the button, but block if not paid/unlocked
+    if (!canUserMessage()) {
+      showToast("Messaging is for paid members or pay-per-message users.");
+      // If you have an upgrade page later, route there:
+      window.setTimeout(() => {
+        window.location.href = "/messages"; // or "/upgrade"
+      }, 350);
+      return;
+    }
+
+    try {
+      setApiError(null);
+      showToast("Opening chat…");
+
+      const threadId = await apiGetOrCreateThread(userId, p.owner_user_id);
+
+      // Go to messages UI
+      window.location.href = `/messages?threadId=${encodeURIComponent(
+        threadId
+      )}&with=${encodeURIComponent(p.displayName)}`;
+    } catch (e: any) {
+      const msg = e?.message || "Could not start a chat right now.";
+      setApiError(msg);
+      showToast(msg);
+    }
+  }
+
+  const navBtnStyle: CSSProperties = {
     padding: "0.65rem 1rem",
     border: "1px solid #ccc",
     borderRadius: 10,
@@ -467,7 +535,6 @@ export default function DiscoverPage() {
               Notifications
             </Link>
 
-            {/* ✅ UPDATED: use Link instead of <a> */}
             <Link href="/messages" style={navBtnStyle}>
               Messages
             </Link>
@@ -587,7 +654,6 @@ export default function DiscoverPage() {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
 
-                // ✅ Disable Like when no likes left (or still loading status)
                 const isLimitReached =
                   !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
 
@@ -693,62 +759,57 @@ export default function DiscoverPage() {
                           display: "inline-block",
                         }}
                       >
-                        <button
-  onClick={async () => {
-    try {
-      const res = await fetch(
-        "https://black-within-api.onrender.com/threads/get-or-create",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user1: userId,
-            user2: p.owner_user_id,
-          }),
-        }
-      );
+                        View
+                      </Link>
 
-      const data = await res.json();
-
-      if (data.threadId) {
-        window.location.href = `/messages?threadId=${data.threadId}&with=${encodeURIComponent(
-          p.displayName
-        )}`;
-      } else {
-        showToast("Could not start conversation.");
-      }
-    } catch {
-      showToast("Connection error starting chat.");
-    }
-  }}
-  style={{
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid #ccc",
-    background: "white",
-    cursor: "pointer",
-  }}
->
-  Message
-</button>
-
-
-                      {/* ✅ NEW: Message button (builds correct URL) */}
-                      <Link
-                        href={`/messages?threadId=${encodeURIComponent(
-                          p.id
-                        )}&with=${encodeURIComponent(p.displayName)}`}
+                      <button
+                        onClick={() => onToggleSave(p)}
                         style={{
                           padding: "10px 12px",
                           borderRadius: 10,
                           border: "1px solid #ccc",
-                          textDecoration: "none",
-                          color: "inherit",
-                          display: "inline-block",
+                          background: "white",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {isSaved ? "Unsave" : "Save"}
+                      </button>
+
+                      <button
+                        onClick={() => onLike(p)}
+                        disabled={likeDisabled}
+                        title={
+                          isLimitReached
+                            ? "Daily like limit reached. Please wait for reset."
+                            : loadingLikesStatus
+                            ? "Loading like limits..."
+                            : undefined
+                        }
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          border: "1px solid #ccc",
+                          background: likeDisabled ? "#f5f5f5" : "white",
+                          cursor: likeDisabled ? "not-allowed" : "pointer",
+                          opacity: likeDisabled ? 0.85 : 1,
+                        }}
+                      >
+                        {likeLabel}
+                      </button>
+
+                      {/* ✅ REAL THREAD MESSAGE BUTTON */}
+                      <button
+                        onClick={() => onMessage(p)}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          border: "1px solid #ccc",
+                          background: "white",
+                          cursor: "pointer",
                         }}
                       >
                         Message
-                      </Link>
+                      </button>
                     </div>
                   </div>
                 );
