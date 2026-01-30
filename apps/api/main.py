@@ -5,12 +5,10 @@ import hashlib
 import hmac
 import json
 import base64
-import stripe
 from datetime import datetime, timedelta, date, time
 from typing import List, Optional, Dict, Any, Tuple
 
-# ✅ UPDATED IMPORT (added Request)
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -74,8 +72,6 @@ SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "").strip()
 SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
-
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 
 # -----------------------------
@@ -199,32 +195,6 @@ class LoginCode(Base):
     email: Mapped[str] = mapped_column(String(320), index=True, unique=True)
     code: Mapped[str] = mapped_column(String(10))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class Thread(Base):
-    __tablename__ = "threads"
-    id: Mapped[str] = mapped_column(String(60), primary_key=True)
-    user_a: Mapped[str] = mapped_column(String(40))
-    user_b: Mapped[str] = mapped_column(String(40))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class Message(Base):
-    __tablename__ = "messages"
-    id: Mapped[str] = mapped_column(String(60), primary_key=True)
-    thread_id: Mapped[str] = mapped_column(String(60))
-    sender_user_id: Mapped[str] = mapped_column(String(40))
-    body: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class ThreadUnlock(Base):
-    __tablename__ = "thread_unlocks"
-    id: Mapped[str] = mapped_column(String(60), primary_key=True)
-    thread_id: Mapped[str] = mapped_column(String(60))
-    user_id: Mapped[str] = mapped_column(String(40))
-    stripe_payment_id: Mapped[str] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -472,23 +442,6 @@ class UpsertMyProfilePayload(BaseModel):
     relationship_intent: Optional[str] = None
     dating_challenge_text: Optional[str] = None
     personal_truth_text: Optional[str] = None
-
-
-# ✅ ADDED: Messaging/Stripe payload schemas
-class CreateThreadPayload(BaseModel):
-    user_a: str
-    user_b: str
-
-
-class SendMessagePayload(BaseModel):
-    thread_id: str
-    sender_user_id: str
-    body: str
-
-
-class CheckoutPayload(BaseModel):
-    thread_id: str
-    user_id: str
 
 
 # -----------------------------
@@ -1043,4 +996,307 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
 
 # IMPORTANT: your frontend currently POSTs to /profiles (keep this alias)
 @app.post("/profiles", response_model=ProfileItem)
-def
+def upsert_profile_alias(payload: UpsertMyProfilePayload):
+    return upsert_my_profile(payload)
+
+
+# -----------------------------
+# Saved profiles
+# -----------------------------
+@app.get("/saved", response_model=IdListResponse)
+def get_saved(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+    with Session(engine) as session:
+        rows = session.execute(
+            select(SavedProfile.profile_id).where(SavedProfile.user_id == user_id)
+        ).all()
+        return IdListResponse(ids=[r[0] for r in rows])
+
+
+@app.post("/saved")
+def save_profile(payload: ProfileAction):
+    user_id = _ensure_user(payload.user_id)
+    profile_id = (payload.profile_id or "").strip()
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
+    with Session(engine) as session:
+        existing = session.execute(
+            select(SavedProfile).where(
+                SavedProfile.user_id == user_id,
+                SavedProfile.profile_id == profile_id,
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return {"ok": True}
+
+        session.add(
+            SavedProfile(
+                user_id=user_id,
+                profile_id=profile_id,
+                created_at=datetime.utcnow(),
+            )
+        )
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            return {"ok": True}
+
+    return {"ok": True}
+
+
+@app.delete("/saved")
+def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+    profile_id = (profile_id or "").strip()
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
+    with Session(engine) as session:
+        session.execute(
+            delete(SavedProfile).where(
+                SavedProfile.user_id == user_id,
+                SavedProfile.profile_id == profile_id,
+            )
+        )
+        session.commit()
+
+    return {"ok": True}
+
+
+# -----------------------------
+# Notifications
+# -----------------------------
+@app.get("/notifications", response_model=NotificationsResponse)
+def get_notifications(user_id: str = Query(...)):
+    """
+    Returns notifications with enriched actor info:
+      - actor_display_name
+      - actor_profile_id (so frontend can link to /profiles/{actor_profile_id})
+      - actor_photo (so frontend can show photo instead of initials)
+    """
+    user_id = _ensure_user(user_id)
+
+    with Session(engine) as session:
+        rows = session.execute(
+            select(Notification)
+            .where(Notification.user_id == user_id)
+            .order_by(Notification.created_at.desc())
+            .limit(NOTIFICATIONS_LIMIT)
+        ).scalars().all()
+
+        actor_ids = [n.actor_user_id for n in rows if n.actor_user_id]
+        actor_map: Dict[str, Dict[str, Optional[str]]] = {}
+
+        if actor_ids:
+            prof_rows = session.execute(
+                select(Profile).where(Profile.owner_user_id.in_(actor_ids))
+            ).scalars().all()
+
+            for p in prof_rows:
+                actor_map[p.owner_user_id] = {
+                    "actor_display_name": p.display_name,
+                    "actor_profile_id": p.id,
+                    "actor_photo": p.photo,
+                }
+
+        items: List[NotificationItem] = []
+        for n in rows:
+            actor_info = actor_map.get(n.actor_user_id or "", {})
+            actor_display_name = actor_info.get("actor_display_name")
+            actor_profile_id = actor_info.get("actor_profile_id")
+            actor_photo = actor_info.get("actor_photo")
+
+            if n.actor_profile_id:
+                actor_profile_id = n.actor_profile_id
+
+            items.append(
+                NotificationItem(
+                    id=str(n.id),
+                    user_id=n.user_id,
+                    type=n.type or "notice",
+                    message=n.message,
+                    created_at=n.created_at.isoformat(),
+                    actor_user_id=n.actor_user_id,
+                    actor_profile_id=actor_profile_id,
+                    actor_display_name=actor_display_name,
+                    actor_photo=actor_photo,
+                    profile_id=n.profile_id,
+                )
+            )
+
+        return NotificationsResponse(items=items)
+
+
+@app.delete("/notifications")
+def clear_notifications(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+    with Session(engine) as session:
+        session.execute(delete(Notification).where(Notification.user_id == user_id))
+        session.commit()
+    return {"ok": True}
+
+
+# -----------------------------
+# Likes (with daily reset + test reset)
+# -----------------------------
+@app.get("/likes", response_model=IdListResponse)
+def get_likes(user_id: str = Query(...)):
+    """
+    Backward compatible: returns profile_ids that THIS user has liked.
+    """
+    user_id = _ensure_user(user_id)
+    with Session(engine) as session:
+        rows = session.execute(select(Like.profile_id).where(Like.user_id == user_id)).all()
+        return IdListResponse(ids=[r[0] for r in rows])
+
+
+@app.get("/likes/sent", response_model=IdListResponse)
+def get_likes_sent(user_id: str = Query(...)):
+    return get_likes(user_id=user_id)
+
+
+@app.get("/likes/received", response_model=ProfilesListResponse)
+def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
+    """
+    Returns PROFILES of people who liked *your* profile.
+    """
+    user_id = _ensure_user(user_id)
+
+    with Session(engine) as session:
+        my_profile = session.execute(
+            select(Profile).where(Profile.owner_user_id == user_id)
+        ).scalar_one_or_none()
+
+        if not my_profile:
+            return ProfilesListResponse(items=[])
+
+        liker_rows = session.execute(
+            select(Like.user_id)
+            .where(Like.profile_id == my_profile.id)
+            .order_by(Like.created_at.desc())
+            .limit(limit)
+        ).all()
+        liker_user_ids = [r[0] for r in liker_rows]
+
+        if not liker_user_ids:
+            return ProfilesListResponse(items=[])
+
+        prof_rows = session.execute(
+            select(Profile)
+            .where(Profile.owner_user_id.in_(liker_user_ids))
+            .where(Profile.is_available == True)
+        ).scalars().all()
+
+        prof_by_owner = {p.owner_user_id: p for p in prof_rows}
+        ordered_profiles = [prof_by_owner[uid] for uid in liker_user_ids if uid in prof_by_owner]
+
+        items: List[ProfileItem] = []
+        for p in ordered_profiles:
+            tags = _parse_json_list(p.tags_csv)
+            cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
+            spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
+
+            items.append(
+                ProfileItem(
+                    id=p.id,
+                    owner_user_id=p.owner_user_id,
+                    displayName=p.display_name,
+                    age=p.age,
+                    city=p.city,
+                    stateUS=p.state_us,
+                    photo=p.photo,
+                    identityPreview=p.identity_preview,
+                    intention=p.intention,
+                    tags=tags,
+                    isAvailable=bool(p.is_available),
+                    culturalIdentity=cultural,
+                    spiritualFramework=spiritual,
+                    relationshipIntent=getattr(p, "relationship_intent", None),
+                    datingChallenge=getattr(p, "dating_challenge_text", None),
+                    personalTruth=getattr(p, "personal_truth_text", None),
+                )
+            )
+
+        return ProfilesListResponse(items=items)
+
+
+@app.post("/likes")
+def like(payload: ProfileAction):
+    liker_user_id = _ensure_user(payload.user_id)
+    profile_id = (payload.profile_id or "").strip()
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
+    with Session(engine) as session:
+        # Read the current window (daily or test seconds)
+        counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
+
+        # If already liked, don't count it again
+        existing = session.execute(
+            select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
+        ).scalar_one_or_none()
+        if existing:
+            return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
+
+        # Enforce limit
+        if int(counter.count) >= FREE_LIKES_PER_DAY:
+            # Friendly + specific message
+            if window_type == "test_seconds":
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.",
+                )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.",
+            )
+
+        prof = session.get(Profile, profile_id)
+        if not prof:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # Write the like
+        session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+
+        # Increment the counter
+        counter.count = int(counter.count) + 1
+        counter.updated_at = datetime.utcnow()
+
+        # In test mode, ensure window_started_at exists
+        if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
+            if not counter.window_started_at:
+                counter.window_started_at = datetime.utcnow()
+
+        recipient_user_id = prof.owner_user_id
+
+        # Find actor profile (if they have one)
+        actor_profile = session.execute(
+            select(Profile).where(Profile.owner_user_id == liker_user_id)
+        ).scalar_one_or_none()
+
+        if recipient_user_id and recipient_user_id != liker_user_id:
+            session.add(
+                Notification(
+                    user_id=recipient_user_id,
+                    type="like",
+                    message="Someone liked your profile.",
+                    created_at=datetime.utcnow(),
+                    actor_user_id=liker_user_id,
+                    profile_id=profile_id,
+                    actor_profile_id=(actor_profile.id if actor_profile else None),
+                )
+            )
+
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            # If something raced, still return a safe value
+            likes_left_safe = max(0, FREE_LIKES_PER_DAY - int(counter.count))
+            return {"ok": True, "likesLeft": likes_left_safe, "resetsAtUTC": reset_at.isoformat()}
+
+        # Recompute likes left and reset time after commit (test mode might have reset logic)
+        counter2, likes_left_final, reset_at2, window_type2 = _get_likes_window(session, liker_user_id)
+        return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
