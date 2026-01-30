@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { getOrCreateUserId } from "../lib/user";
@@ -40,13 +40,18 @@ async function apiGetMessages(threadId: string, userId: string) {
   return { locked: false, messages: (await res.json()) as Msg[] };
 }
 
-async function apiSendMessage(threadId: string, senderUserId: string, body: string) {
+async function apiSendMessage(
+  threadId: string,
+  senderUserId: string,
+  body: string
+) {
   const res = await fetch(`${API_BASE}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ threadId, senderUserId, body }),
   });
-  if (res.status === 402) throw new Error("Thread is locked. Please unlock to message.");
+  if (res.status === 402)
+    throw new Error("Thread is locked. Please unlock to message.");
   if (!res.ok) throw new Error("Failed to send message");
   return (await res.json()) as Msg;
 }
@@ -61,14 +66,29 @@ async function apiCreateCheckout(threadId: string, userId: string) {
   return (await res.json()) as { url: string };
 }
 
+/**
+ * ✅ IMPORTANT:
+ * Next.js requires useSearchParams() to be wrapped in <Suspense>.
+ * This wrapper component is the default export for the route.
+ */
 export default function MessagesPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 16 }}>Loading messages…</div>}>
+      <MessagesInner />
+    </Suspense>
+  );
+}
+
+function MessagesInner() {
   const sp = useSearchParams();
   const threadId = sp.get("threadId") || "";
   const withName = sp.get("with") || "";
 
   const userId = useMemo(() => getOrCreateUserId(), []);
 
-  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">(
+    "idle"
+  );
   const [unlocked, setUnlocked] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [text, setText] = useState("");
@@ -82,7 +102,9 @@ export default function MessagesPage() {
     async function load() {
       if (!threadId) {
         setStatus("error");
-        setErr("Missing threadId in the URL. Go back and open a chat from a profile.");
+        setErr(
+          "Missing threadId in the URL. Go back and open a chat from a profile."
+        );
         return;
       }
 
@@ -167,9 +189,7 @@ export default function MessagesPage() {
       const saved = await apiSendMessage(threadId, userId, body);
 
       // Replace temp with saved
-      setMessages((prev) =>
-        prev.map((m) => (m.id === temp.id ? saved : m))
-      );
+      setMessages((prev) => prev.map((m) => (m.id === temp.id ? saved : m)));
     } catch (e: any) {
       setErr(e?.message || "Failed to send message.");
     }
@@ -207,12 +227,17 @@ export default function MessagesPage() {
         </div>
       </div>
 
-      {status === "loading" ? (
-        <div style={{ marginTop: 20 }}>Loading…</div>
-      ) : null}
+      {status === "loading" ? <div style={{ marginTop: 20 }}>Loading…</div> : null}
 
       {status === "error" ? (
-        <div style={{ marginTop: 20, padding: 12, border: "1px solid #f2b8b5", borderRadius: 12 }}>
+        <div
+          style={{
+            marginTop: 20,
+            padding: 12,
+            border: "1px solid #f2b8b5",
+            borderRadius: 12,
+          }}
+        >
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Error</div>
           <div>{err || "Something went wrong."}</div>
         </div>
@@ -229,9 +254,7 @@ export default function MessagesPage() {
                 borderRadius: 12,
               }}
             >
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                Chat is locked
-              </div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Chat is locked</div>
               <div style={{ opacity: 0.85, marginBottom: 12 }}>
                 Unlock this chat to message. Price: <strong>$1.99</strong>
               </div>
@@ -249,12 +272,11 @@ export default function MessagesPage() {
                 Unlock chat for $1.99
               </button>
 
-              {err ? (
-                <div style={{ marginTop: 12, color: "#b00020" }}>{err}</div>
-              ) : null}
+              {err ? <div style={{ marginTop: 12, color: "#b00020" }}>{err}</div> : null}
 
               <div style={{ marginTop: 12, fontSize: 12, opacity: 0.75 }}>
-                If you just paid and got redirected back, please wait a few seconds while we finalize your unlock.
+                If you just paid and got redirected back, please wait a few seconds while we
+                finalize your unlock.
               </div>
             </div>
           ) : (
@@ -325,9 +347,7 @@ export default function MessagesPage() {
                 </button>
               </div>
 
-              {err ? (
-                <div style={{ marginTop: 10, color: "#b00020" }}>{err}</div>
-              ) : null}
+              {err ? <div style={{ marginTop: 10, color: "#b00020" }}>{err}</div> : null}
             </div>
           )}
         </>
