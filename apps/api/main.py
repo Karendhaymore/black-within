@@ -197,6 +197,53 @@ class LoginCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+# -----------------------------
+# Threads + Messages
+# -----------------------------
+class Thread(Base):
+    __tablename__ = "threads"
+
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)
+
+    # Store user pair in a stable order (low/high) so there is only ONE thread per pair
+    user_low: Mapped[str] = mapped_column(String(40), index=True)
+    user_high: Mapped[str] = mapped_column(String(40), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_low", "user_high", name="uq_threads_userpair"),
+    )
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[str] = mapped_column(String(60), index=True)
+
+    sender_user_id: Mapped[str] = mapped_column(String(40), index=True)
+    body: Mapped[str] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class MessagingEntitlement(Base):
+    """
+    Simple access control for messaging.
+    - Premium users: is_premium = True (or premium_until in future)
+    - Pay-per-message unlock: unlocked_until can be set for a period (ex: 24h)
+    """
+    __tablename__ = "messaging_entitlements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True, unique=True)
+
+    is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
+    unlocked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 # -----------------------------
 # MVP auto-migration
@@ -294,6 +341,10 @@ def _auto_migrate_daily_like_counts_table():
         # If the table already existed before window_started_at, add it safely:
         conn.execute(text("""ALTER TABLE daily_like_counts ADD COLUMN IF NOT EXISTS window_started_at TIMESTAMP NULL;"""))
 
+try:
+    _auto_migrate_threads_messages_tables()
+except Exception as e:
+    print("AUTO_MIGRATE_THREADS_MESSAGES failed:", str(e))
 
 # Create tables if missing
 Base.metadata.create_all(bind=engine)
@@ -318,6 +369,49 @@ try:
     _auto_migrate_daily_like_counts_table()
 except Exception as e:
     print("AUTO_MIGRATE_DAILY_LIKES failed:", str(e))
+
+
+def _auto_migrate_threads_messages_tables():
+    """
+    Create threads/messages/messaging_entitlements tables (if missing).
+    """
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS threads (
+              id VARCHAR(60) PRIMARY KEY,
+              user_low VARCHAR(40),
+              user_high VARCHAR(40),
+              created_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW(),
+              CONSTRAINT uq_threads_userpair UNIQUE (user_low, user_high)
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_low ON threads(user_low);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_high ON threads(user_high);"""))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS messages (
+              id SERIAL PRIMARY KEY,
+              thread_id VARCHAR(60),
+              sender_user_id VARCHAR(40),
+              body TEXT,
+              created_at TIMESTAMP DEFAULT NOW()
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_thread_id ON messages(thread_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_sender_user_id ON messages(sender_user_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages(created_at);"""))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS messaging_entitlements (
+              id SERIAL PRIMARY KEY,
+              user_id VARCHAR(40) UNIQUE,
+              is_premium BOOLEAN DEFAULT FALSE,
+              unlocked_until TIMESTAMP NULL,
+              updated_at TIMESTAMP DEFAULT NOW()
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"""))
 
 
 # -----------------------------
@@ -409,6 +503,56 @@ class LikesStatusResponse(BaseModel):
     limit: int
     windowType: str  # "daily_utc" or "test_seconds"
     resetsAtUTC: str
+class ThreadGetOrCreatePayload(BaseModel):
+    user_id: str
+    with_profile_id: str  # the profile you want to message
+
+
+class ThreadItem(BaseModel):
+    threadId: str
+    with_user_id: str
+    with_profile_id: Optional[str] = None
+    with_display_name: Optional[str] = None
+    with_photo: Optional[str] = None
+    last_message: Optional[str] = None
+    last_message_at: Optional[str] = None
+
+
+class ThreadsResponse(BaseModel):
+    items: List[ThreadItem]
+
+
+class MessageCreatePayload(BaseModel):
+    user_id: str
+    thread_id: str
+    body: str
+
+
+class MessageItem(BaseModel):
+    id: int
+    thread_id: str
+    sender_user_id: str
+    body: str
+    created_at: str
+
+
+class MessagesResponse(BaseModel):
+    items: List[MessageItem]
+
+
+class MessagingAccessResponse(BaseModel):
+    canMessage: bool
+    isPremium: bool
+    unlockedUntilUTC: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class MessagingUnlockPayload(BaseModel):
+    # admin/testing helper (until Stripe is wired)
+    user_id: str
+    minutes: int = 1440  # default unlock = 24 hours
+    make_premium: bool = False
+
 
 
 # Accept BOTH camelCase and snake_case (frontend may send either)
@@ -1300,3 +1444,299 @@ def like(payload: ProfileAction):
         # Recompute likes left and reset time after commit (test mode might have reset logic)
         counter2, likes_left_final, reset_at2, window_type2 = _get_likes_window(session, liker_user_id)
         return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
+# -----------------------------
+# Messaging helpers
+# -----------------------------
+ADMIN_UNLOCK_KEY = os.getenv("ADMIN_UNLOCK_KEY", "").strip()  # set this in Render for safety
+
+
+def _sorted_pair(a: str, b: str) -> Tuple[str, str]:
+    a = (a or "").strip()
+    b = (b or "").strip()
+    if not a or not b:
+        raise HTTPException(status_code=400, detail="Both user ids are required.")
+    return (a, b) if a < b else (b, a)
+
+
+def _get_entitlement(session: Session, user_id: str) -> MessagingEntitlement:
+    row = session.execute(
+        select(MessagingEntitlement).where(MessagingEntitlement.user_id == user_id)
+    ).scalar_one_or_none()
+    if row:
+        return row
+    row = MessagingEntitlement(user_id=user_id, is_premium=False, unlocked_until=None, updated_at=datetime.utcnow())
+    session.add(row)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        row = session.execute(
+            select(MessagingEntitlement).where(MessagingEntitlement.user_id == user_id)
+        ).scalar_one()
+    return row
+
+
+def _can_message(session: Session, user_id: str) -> Tuple[bool, bool, Optional[datetime], Optional[str]]:
+    """
+    Returns: (can_message, is_premium, unlocked_until, reason)
+    """
+    ent = _get_entitlement(session, user_id)
+    now = datetime.utcnow()
+
+    if ent.is_premium:
+        return True, True, ent.unlocked_until, None
+
+    if ent.unlocked_until and now < ent.unlocked_until:
+        return True, False, ent.unlocked_until, None
+
+    return False, False, ent.unlocked_until, "Messaging is locked. Upgrade to Premium or pay the message fee."
+
+
+def _ensure_thread_participant(thread: Thread, user_id: str) -> str:
+    if user_id != thread.user_low and user_id != thread.user_high:
+        raise HTTPException(status_code=403, detail="You are not a participant in this thread.")
+    other = thread.user_high if user_id == thread.user_low else thread.user_low
+    return other
+
+
+# -----------------------------
+# Threads
+# -----------------------------
+@app.post("/threads/get-or-create", response_model=ThreadItem)
+def threads_get_or_create(payload: ThreadGetOrCreatePayload):
+    user_id = _ensure_user(payload.user_id)
+
+    with Session(engine) as session:
+        # Convert profile -> owner_user_id (the person you're trying to message)
+        prof = session.get(Profile, (payload.with_profile_id or "").strip())
+        if not prof:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        other_user_id = (prof.owner_user_id or "").strip()
+        if not other_user_id:
+            raise HTTPException(status_code=400, detail="That profile is missing an owner_user_id.")
+
+        if other_user_id == user_id:
+            raise HTTPException(status_code=400, detail="You cannot message yourself.")
+
+        low, high = _sorted_pair(user_id, other_user_id)
+
+        existing = session.execute(
+            select(Thread).where(Thread.user_low == low, Thread.user_high == high)
+        ).scalar_one_or_none()
+
+        now = datetime.utcnow()
+
+        if existing:
+            thread = existing
+        else:
+            thread = Thread(id=_new_id(), user_low=low, user_high=high, created_at=now, updated_at=now)
+            session.add(thread)
+            session.commit()
+
+        # "with" profile info for UI
+        return ThreadItem(
+            threadId=thread.id,
+            with_user_id=other_user_id,
+            with_profile_id=prof.id,
+            with_display_name=prof.display_name,
+            with_photo=prof.photo,
+            last_message=None,
+            last_message_at=None,
+        )
+
+
+@app.get("/threads/inbox", response_model=ThreadsResponse)
+def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
+    user_id = _ensure_user(user_id)
+
+    with Session(engine) as session:
+        rows = session.execute(
+            select(Thread)
+            .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
+            .order_by(Thread.updated_at.desc())
+            .limit(limit)
+        ).scalars().all()
+
+        items: List[ThreadItem] = []
+
+        for t in rows:
+            other_user_id = t.user_high if t.user_low == user_id else t.user_low
+
+            other_profile = session.execute(
+                select(Profile).where(Profile.owner_user_id == other_user_id)
+            ).scalar_one_or_none()
+
+            last_msg = session.execute(
+                select(Message)
+                .where(Message.thread_id == t.id)
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+
+            items.append(
+                ThreadItem(
+                    threadId=t.id,
+                    with_user_id=other_user_id,
+                    with_profile_id=(other_profile.id if other_profile else None),
+                    with_display_name=(other_profile.display_name if other_profile else None),
+                    with_photo=(other_profile.photo if other_profile else None),
+                    last_message=(last_msg.body if last_msg else None),
+                    last_message_at=(last_msg.created_at.isoformat() if last_msg else None),
+                )
+            )
+
+        return ThreadsResponse(items=items)
+
+
+# -----------------------------
+# Messaging access / paywall
+# -----------------------------
+@app.get("/messaging/access", response_model=MessagingAccessResponse)
+def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+    thread_id = (thread_id or "").strip()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    with Session(engine) as session:
+        thread = session.get(Thread, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        _ensure_thread_participant(thread, user_id)
+
+        can_msg, is_premium, unlocked_until, reason = _can_message(session, user_id)
+        return MessagingAccessResponse(
+            canMessage=can_msg,
+            isPremium=is_premium,
+            unlockedUntilUTC=(unlocked_until.isoformat() if unlocked_until else None),
+            reason=reason,
+        )
+
+
+@app.post("/messaging/unlock", response_model=MessagingAccessResponse)
+def messaging_unlock(payload: MessagingUnlockPayload, key: str = Query(default="")):
+    """
+    ADMIN/TESTING ONLY.
+    Use this until Stripe is wired, so you can unlock messaging for a user.
+    Protect it by setting ADMIN_UNLOCK_KEY in Render, then calling with ?key=YOURKEY
+    """
+    if not ADMIN_UNLOCK_KEY or key != ADMIN_UNLOCK_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    user_id = _ensure_user(payload.user_id)
+    minutes = int(payload.minutes or 0)
+    if minutes <= 0:
+        raise HTTPException(status_code=400, detail="minutes must be > 0")
+
+    with Session(engine) as session:
+        ent = _get_entitlement(session, user_id)
+        now = datetime.utcnow()
+
+        if payload.make_premium:
+            ent.is_premium = True
+
+        ent.unlocked_until = now + timedelta(minutes=minutes)
+        ent.updated_at = now
+        session.commit()
+
+        can_msg, is_premium, unlocked_until, reason = _can_message(session, user_id)
+        return MessagingAccessResponse(
+            canMessage=can_msg,
+            isPremium=is_premium,
+            unlockedUntilUTC=(unlocked_until.isoformat() if unlocked_until else None),
+            reason=reason,
+        )
+
+
+# -----------------------------
+# Messages
+# -----------------------------
+@app.get("/messages", response_model=MessagesResponse)
+def list_messages(user_id: str = Query(...), thread_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)):
+    user_id = _ensure_user(user_id)
+    thread_id = (thread_id or "").strip()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    with Session(engine) as session:
+        thread = session.get(Thread, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        _ensure_thread_participant(thread, user_id)
+
+        msgs = session.execute(
+            select(Message)
+            .where(Message.thread_id == thread_id)
+            .order_by(Message.created_at.asc())
+            .limit(limit)
+        ).scalars().all()
+
+        return MessagesResponse(
+            items=[
+                MessageItem(
+                    id=m.id,
+                    thread_id=m.thread_id,
+                    sender_user_id=m.sender_user_id,
+                    body=m.body,
+                    created_at=m.created_at.isoformat(),
+                )
+                for m in msgs
+            ]
+        )
+
+
+@app.post("/messages", response_model=MessageItem)
+def send_message(payload: MessageCreatePayload):
+    user_id = _ensure_user(payload.user_id)
+    thread_id = (payload.thread_id or "").strip()
+    body = (payload.body or "").strip()
+
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+    if not body:
+        raise HTTPException(status_code=400, detail="body is required")
+    if len(body) > 2000:
+        raise HTTPException(status_code=400, detail="Message too long (max 2000 chars).")
+
+    with Session(engine) as session:
+        thread = session.get(Thread, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        other_user_id = _ensure_thread_participant(thread, user_id)
+
+        can_msg, is_premium, unlocked_until, reason = _can_message(session, user_id)
+        if not can_msg:
+            raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
+
+        m = Message(thread_id=thread_id, sender_user_id=user_id, body=body, created_at=datetime.utcnow())
+        session.add(m)
+
+        # bump thread activity
+        thread.updated_at = datetime.utcnow()
+
+        # optional: notify recipient
+        session.add(
+            Notification(
+                user_id=other_user_id,
+                type="message",
+                message="You have a new message.",
+                created_at=datetime.utcnow(),
+                actor_user_id=user_id,
+                profile_id=None,
+                actor_profile_id=None,
+            )
+        )
+
+        session.commit()
+
+        return MessageItem(
+            id=m.id,
+            thread_id=m.thread_id,
+            sender_user_id=m.sender_user_id,
+            body=m.body,
+            created_at=m.created_at.isoformat(),
+        )
