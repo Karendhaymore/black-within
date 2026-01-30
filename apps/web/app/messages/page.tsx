@@ -38,6 +38,16 @@ function getLoggedInUserId(): string | null {
   }
 }
 
+function toErrorMessage(e: any, fallback: string) {
+  if (typeof e?.message === "string" && e.message.trim()) return e.message;
+  if (typeof e === "string" && e.trim()) return e;
+  try {
+    const s = JSON.stringify(e);
+    if (s && s !== "{}") return s;
+  } catch {}
+  return fallback;
+}
+
 async function safeReadErrorDetail(res: Response): Promise<string> {
   try {
     const data = await res.json();
@@ -160,6 +170,9 @@ function MessagesInner() {
   // Simple polling when unlocked (new messages)
   const pollRef = useRef<number | null>(null);
 
+  // Auto-scroll anchor
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
   function stopPolling() {
     if (pollRef.current) {
       window.clearInterval(pollRef.current);
@@ -167,30 +180,39 @@ function MessagesInner() {
     }
   }
 
-  async function refreshAll(uid: string) {
-    // 1) get paywall/access status
-    const a = await apiMessagingAccess(uid, threadId);
+  async function refreshAll(uid: string, tid: string) {
+    const a = await apiMessagingAccess(uid, tid);
     setAccess(a);
 
-    // 2) load messages regardless (your backend allows reading if participant)
-    const items = await apiGetMessages(uid, threadId);
+    const items = await apiGetMessages(uid, tid);
     setMessages(items);
 
     return a;
   }
 
+  // Auto-scroll to newest message when list changes
+  useEffect(() => {
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages.length]);
+
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      if (!threadId) {
-        setStatus("error");
-        setErr("Missing threadId in the URL. Go back and open a chat from a profile.");
+      if (!userId) {
+        window.location.href = "/auth";
         return;
       }
-      if (!userId) {
-        // Not logged in
-        window.location.href = "/auth";
+
+      // ✅ If user clicks top nav "Messages" (no threadId), show inbox screen (not error)
+      if (!threadId) {
+        setStatus("ready");
+        setAccess(null);
+        setMessages([]);
+        setErr("");
+        stopPolling();
         return;
       }
 
@@ -198,12 +220,12 @@ function MessagesInner() {
       setErr("");
 
       try {
-        const a = await refreshAll(userId);
+        const a = await refreshAll(userId, threadId);
         if (cancelled) return;
 
         setStatus("ready");
 
-        // Poll messages every 4s if messaging is allowed (or premium/unlocked)
+        // Poll messages every 4s if messaging is allowed
         stopPolling();
         if (a?.canMessage) {
           pollRef.current = window.setInterval(async () => {
@@ -217,7 +239,7 @@ function MessagesInner() {
         }
       } catch (e: any) {
         setStatus("error");
-        setErr(e?.message || "Something went wrong loading this chat.");
+        setErr(toErrorMessage(e, "Something went wrong loading this chat."));
       }
     }
 
@@ -232,18 +254,18 @@ function MessagesInner() {
 
   async function handleSend() {
     if (!userId) return;
+    if (!threadId) return;
+
     const body = text.trim();
     if (!body) return;
 
     setErr("");
 
     try {
-      // Block sending if paywall says no
       if (access && !access.canMessage) {
         throw new Error(access.reason || "Messaging locked.");
       }
 
-      // Optimistic UI temp message
       const tempId = `temp-${Date.now()}`;
       const temp: MessageItem = {
         id: tempId,
@@ -257,18 +279,19 @@ function MessagesInner() {
 
       const saved = await apiSendMessage(userId, threadId, body);
 
-      // Replace temp with saved
       setMessages((prev) => prev.map((m) => (String(m.id) === tempId ? saved : m)));
     } catch (e: any) {
-      setErr(e?.message || "Failed to send message.");
+      setErr(toErrorMessage(e, "Failed to send message."));
     }
   }
 
   async function handleRefresh() {
     if (!userId) return;
+    if (!threadId) return;
+
     setErr("");
     try {
-      const a = await refreshAll(userId);
+      const a = await refreshAll(userId, threadId);
       stopPolling();
       if (a?.canMessage) {
         pollRef.current = window.setInterval(async () => {
@@ -279,21 +302,19 @@ function MessagesInner() {
         }, 4000);
       }
     } catch (e: any) {
-      setErr(e?.message || "Refresh failed.");
+      setErr(toErrorMessage(e, "Refresh failed."));
     }
   }
 
   async function handleAdminUnlock() {
     if (!userId) return;
+    if (!threadId) return;
+
     setErr("");
 
     try {
-      if (!adminKey.trim()) {
-        throw new Error("Enter your ADMIN unlock key.");
-      }
-      if (!unlockMinutes || unlockMinutes <= 0) {
-        throw new Error("Minutes must be > 0.");
-      }
+      if (!adminKey.trim()) throw new Error("Enter your ADMIN unlock key.");
+      if (!unlockMinutes || unlockMinutes <= 0) throw new Error("Minutes must be > 0.");
 
       const a = await apiAdminUnlockMessaging(
         userId,
@@ -303,7 +324,6 @@ function MessagesInner() {
       );
       setAccess(a);
 
-      // Reload messages and begin polling if allowed
       const items = await apiGetMessages(userId, threadId);
       setMessages(items);
 
@@ -317,7 +337,7 @@ function MessagesInner() {
         }, 4000);
       }
     } catch (e: any) {
-      setErr(e?.message || "Unlock failed.");
+      setErr(toErrorMessage(e, "Unlock failed."));
     }
   }
 
@@ -361,8 +381,10 @@ function MessagesInner() {
             onClick={handleRefresh}
             style={{
               ...navBtnStyle,
-              cursor: "pointer",
+              cursor: threadId ? "pointer" : "not-allowed",
+              opacity: threadId ? 1 : 0.6,
             }}
+            disabled={!threadId}
           >
             Refresh
           </button>
@@ -385,7 +407,30 @@ function MessagesInner() {
         </div>
       ) : null}
 
-      {status === "ready" ? (
+      {status === "ready" && !threadId ? (
+        <div
+          style={{
+            marginTop: 20,
+            padding: 16,
+            border: "1px solid #ddd",
+            borderRadius: 12,
+            background: "#fafafa",
+          }}
+        >
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>No chat selected yet</div>
+          <div style={{ opacity: 0.85 }}>
+            Go to <strong>Discover</strong> and click <strong>Message</strong> on a profile to open a
+            chat.
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <Link href="/discover" style={navBtnStyle}>
+              Go to Discover
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
+      {status === "ready" && threadId ? (
         <>
           {/* Paywall / access banner */}
           {access ? (
@@ -404,8 +449,7 @@ function MessagesInner() {
                 <>
                   <div style={{ fontWeight: 800 }}>Messaging locked</div>
                   <div style={{ marginTop: 6 }}>
-                    {access.reason ||
-                      "Messaging is for paid members or pay-per-message users."}
+                    {access.reason || "Messaging is for paid members or pay-per-message users."}
                   </div>
                   {access.unlockedUntilUTC ? (
                     <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
@@ -535,6 +579,7 @@ function MessagesInner() {
                       </div>
                     );
                   })}
+                  <div ref={bottomRef} />
                 </div>
               )}
             </div>
