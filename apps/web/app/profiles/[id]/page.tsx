@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { getOrCreateUserId } from "../../lib/user";
 
@@ -362,7 +363,7 @@ export default function ProfileDetailPage() {
           )}
 
           <div style={{ marginTop: "1rem" }}>
-            <a
+            <Link
               href="/discover"
               style={{
                 padding: "0.65rem 1rem",
@@ -374,7 +375,7 @@ export default function ProfileDetailPage() {
               }}
             >
               Back to Discover
-            </a>
+            </Link>
           </div>
         </div>
       </main>
@@ -384,6 +385,10 @@ export default function ProfileDetailPage() {
   const isSaved = savedIds.includes(profile.id);
   const isLiked = likedIds.includes(profile.id);
   const tags = Array.isArray(profile.tags) ? profile.tags : [];
+
+  const messageHref = `/messages?threadId=${encodeURIComponent(
+    profile.id
+  )}&with=${encodeURIComponent(profile.displayName)}`;
 
   return (
     <main
@@ -427,7 +432,7 @@ export default function ProfileDetailPage() {
               Back
             </button>
 
-            <a
+            <Link
               href="/saved"
               style={{
                 padding: "0.65rem 1rem",
@@ -438,7 +443,7 @@ export default function ProfileDetailPage() {
               }}
             >
               Saved ({savedIds.length})
-            </a>
+            </Link>
           </div>
         </div>
 
@@ -556,7 +561,13 @@ export default function ProfileDetailPage() {
                     <div style={{ fontWeight: 800, marginBottom: 6 }}>
                       {sec.title}
                     </div>
-                    <div style={{ color: "#555", fontSize: "1.02rem", whiteSpace: "pre-wrap" }}>
+                    <div
+                      style={{
+                        color: "#555",
+                        fontSize: "1.02rem",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
                       {sec.body}
                     </div>
                   </div>
@@ -637,7 +648,22 @@ export default function ProfileDetailPage() {
                 {isLiked ? "Liked" : "Like"}
               </button>
 
-              <a
+              {/* ✅ NEW: Message button (builds correct URL automatically) */}
+              <Link
+                href={messageHref}
+                style={{
+                  padding: "0.7rem 1rem",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  textDecoration: "none",
+                  color: "inherit",
+                  display: "inline-block",
+                }}
+              >
+                Message
+              </Link>
+
+              <Link
                 href="/discover"
                 style={{
                   padding: "0.7rem 1rem",
@@ -649,7 +675,7 @@ export default function ProfileDetailPage() {
                 }}
               >
                 Back to Discover
-              </a>
+              </Link>
             </div>
 
             <div style={{ marginTop: "0.9rem", color: "#777", fontSize: "0.92rem" }}>
