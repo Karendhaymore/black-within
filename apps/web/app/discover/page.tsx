@@ -10,8 +10,8 @@ import Link from "next/link";
  */
 
 type ApiProfile = {
-  id: string;
-  owner_user_id: string;
+  id: string; // profile id
+  owner_user_id: string; // user id of the owner (may exist, but not required for thread create)
   displayName: string;
   age: number;
   city: string;
@@ -26,17 +26,27 @@ type ApiProfile = {
 type IdListResponse = { ids: string[] };
 type ProfilesResponse = { items: ApiProfile[] };
 
+// Matches /likes/status
 type LikesStatusResponse = {
   likesLeft: number;
   limit: number;
   windowType: "daily_utc" | "test_seconds";
-  resetsAtUTC: string;
+  resetsAtUTC: string; // ISO datetime string
 };
 
+// Threads/get-or-create response (support a few possible shapes)
 type ThreadGetOrCreateResponse = {
   threadId?: string;
   thread_id?: string;
   id?: string;
+};
+
+// Messaging access response
+type MessagingAccessResponse = {
+  canMessage: boolean;
+  isPremium: boolean;
+  unlockedUntilUTC?: string | null;
+  reason?: string | null;
 };
 
 const API_BASE =
@@ -134,45 +144,6 @@ async function apiLikeProfile(userId: string, profileId: string) {
   });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 }
-// ✅ Create (or fetch) a chat thread between the current user and a PROFILE
-// Your backend error shows it expects: { user_id, with_profile_id }
-async function apiGetOrCreateThread(userId: string, withProfileId: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/threads/get-or-create`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user_id: userId,
-      with_profile_id: withProfileId,
-    }),
-  });
-
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-
-  const data = (await res.json()) as any;
-  const threadId = data?.threadId || data?.thread_id || data?.id || "";
-  if (!threadId) throw new Error("Thread created but no thread id returned.");
-  return threadId;
-}
-
-// ✅ Optional paywall check. If your backend doesn't have this endpoint yet,
-// you can comment this out and still navigate to /messages.
-async function apiMessagingAccess(userId: string, threadId: string) {
-  const res = await fetch(
-    `${API_BASE}/messaging/access?user_id=${encodeURIComponent(
-      userId
-    )}&thread_id=${encodeURIComponent(threadId)}`,
-    { cache: "no-store" }
-  );
-
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-  return (await res.json()) as {
-    canMessage: boolean;
-    isPremium: boolean;
-    unlockedUntilUTC?: string | null;
-    reason?: string | null;
-  };
-}
-
 
 async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[]> {
   const url =
@@ -190,54 +161,39 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
 
 /**
  * ✅ Threads API: POST /threads/get-or-create
- * We send a compatibility payload so it works whether backend expects:
- * - user1/user2
- * - user_id_1/user_id_2
- * - user_id_a/user_id_b
- * - user_id/other_user_id
+ * Your backend error showed it expects: { user_id, with_profile_id }
  */
 async function apiGetOrCreateThread(userId: string, withProfileId: string): Promise<string> {
-  // ✅ Your backend requires with_profile_id
-  const payload = {
-    // required (based on your FastAPI error)
-    user_id: userId,
-    with_profile_id: withProfileId,
-
-    // extra compatibility (harmless if backend ignores)
-    userId,
-    withProfileId,
-    profile_id: withProfileId,
-    other_profile_id: withProfileId,
-  };
-
   const res = await fetch(`${API_BASE}/threads/get-or-create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      user_id: userId,
+      with_profile_id: withProfileId,
+    }),
   });
 
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
   const data = (await res.json()) as ThreadGetOrCreateResponse;
   const threadId = data.threadId || data.thread_id || data.id || "";
-  if (!threadId) throw new Error("Thread created, but no threadId returned.");
+  if (!threadId) throw new Error("Thread created, but no thread id returned.");
   return threadId;
 }
 
+/**
+ * ✅ Messaging paywall check:
+ * GET /messaging/access?user_id=...&thread_id=...
+ */
+async function apiMessagingAccess(userId: string, threadId: string): Promise<MessagingAccessResponse> {
+  const url =
+    `${API_BASE}/messaging/access` +
+    `?user_id=${encodeURIComponent(userId)}` +
+    `&thread_id=${encodeURIComponent(threadId)}`;
 
-  const res = await fetch(`${API_BASE}/threads/get-or-create`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-
-  const data = (await res.json()) as ThreadGetOrCreateResponse;
-
-  const threadId = data.threadId || data.thread_id || data.id || "";
-  if (!threadId) throw new Error("Thread created, but no threadId returned.");
-  return threadId;
+  return (await res.json()) as MessagingAccessResponse;
 }
 
 function formatResetHint(status: LikesStatusResponse | null) {
@@ -450,31 +406,7 @@ export default function DiscoverPage() {
       );
       return;
     }
-// ===============================
-// MESSAGE BUTTON HANDLER
-// ===============================
-async function onMessage(p: ApiProfile) {
-  if (!userId) return;
 
-  try {
-    setApiError(null);
-    showToast("Opening chat…");
-
-    // Create thread using PROFILE id (backend requires with_profile_id)
-    const threadId = await apiGetOrCreateThread(userId, p.id);
-
-    // Navigate to messages page
-    window.location.href = `/messages?threadId=${encodeURIComponent(
-      threadId
-    )}&with=${encodeURIComponent(p.displayName)}`;
-  } catch (e: any) {
-    const msg = e?.message || "Could not start a chat right now.";
-    setApiError(String(msg));
-    showToast(String(msg));
-  }
-}
-
-    
     const prev = likedIds;
     setLikedIds((curr) => (curr.includes(p.id) ? curr : [p.id, ...curr]));
 
@@ -491,24 +423,31 @@ async function onMessage(p: ApiProfile) {
     }
   }
 
+  // ✅ Message button handler (correct: uses profile id for with_profile_id)
   async function onMessage(p: ApiProfile) {
     if (!userId) return;
-
-    if (!p.owner_user_id) {
-      showToast("That profile is missing an owner_user_id, so chat cannot start yet.");
-      return;
-    }
 
     try {
       setApiError(null);
       showToast("Opening chat…");
 
-      const threadId = await apiGetOrCreateThread(userId, p.owner_user_id);
+      // 1) Create thread based on PROFILE id (backend expects with_profile_id)
+      const threadId = await apiGetOrCreateThread(userId, p.id);
 
-      // ✅ Must include threadId in URL
+      // 2) Optional access check (if it throws, we still navigate)
+      let locked = false;
+      try {
+        const access = await apiMessagingAccess(userId, threadId);
+        locked = !access.canMessage;
+        if (locked && access.reason) showToast(access.reason);
+      } catch {
+        // ignore access check errors for now
+      }
+
+      // 3) Navigate to chat
       window.location.href = `/messages?threadId=${encodeURIComponent(threadId)}&with=${encodeURIComponent(
         p.displayName
-      )}`;
+      )}${locked ? "&locked=1" : ""}`;
     } catch (e: any) {
       const msg = toNiceString(e?.message || e) || "Could not start a chat right now.";
       setApiError(msg);
@@ -567,9 +506,12 @@ async function onMessage(p: ApiProfile) {
             <Link href="/notifications" style={navBtnStyle}>
               Notifications
             </Link>
+
+            {/* Note: /messages without a threadId will show the "Missing threadId" screen (expected for now). */}
             <Link href="/messages" style={navBtnStyle}>
               Messages
             </Link>
+
             <button onClick={logout} style={{ ...navBtnStyle, cursor: "pointer" }}>
               Log out
             </button>
@@ -660,9 +602,7 @@ async function onMessage(p: ApiProfile) {
                 const isLiked = likedIds.includes(p.id);
 
                 const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
-
                 const likeDisabled = isLiked || loadingLikesStatus || isLimitReached;
-
                 const likeLabel = isLiked ? "Liked" : isLimitReached ? "Limit reached" : "Like";
 
                 return (
