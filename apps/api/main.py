@@ -1710,18 +1710,23 @@ def send_message(payload: MessageCreatePayload):
 
         can_msg, is_premium, unlocked_until, reason = _can_message(session, user_id)
 
-# ✅ Path A: Preview mode bypass (allow messaging while AUTH_PREVIEW_MODE=true)
-if not can_msg and not AUTH_PREVIEW_MODE:
-    raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
+        # ✅ PREVIEW MODE BYPASS
+        if not can_msg and not AUTH_PREVIEW_MODE:
+            raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
 
-
-        m = Message(thread_id=thread_id, sender_user_id=user_id, body=body, created_at=datetime.utcnow())
+        # ---- CREATE MESSAGE ----
+        m = Message(
+            thread_id=thread_id,
+            sender_user_id=user_id,
+            body=body,
+            created_at=datetime.utcnow(),
+        )
         session.add(m)
 
         # bump thread activity
         thread.updated_at = datetime.utcnow()
 
-        # optional: notify recipient
+        # notify recipient
         session.add(
             Notification(
                 user_id=other_user_id,
@@ -1735,6 +1740,9 @@ if not can_msg and not AUTH_PREVIEW_MODE:
         )
 
         session.commit()
+        session.refresh(m)
+
+        return m
 
         return MessageItem(
             id=m.id,
