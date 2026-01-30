@@ -466,18 +466,10 @@ export default function DiscoverPage() {
               Notifications
             </Link>
 
-            <a
-  href="/messages"
-  style={{
-    padding: "0.65rem 1rem",
-    border: "1px solid #ccc",
-    borderRadius: 10,
-    textDecoration: "none",
-    color: "inherit",
-  }}
->
-  Messages
-</a>
+            {/* ✅ UPDATED: use Link instead of <a> */}
+            <Link href="/messages" style={navBtnStyle}>
+              Messages
+            </Link>
 
             <button
               onClick={logout}
@@ -737,6 +729,23 @@ export default function DiscoverPage() {
                       >
                         {likeLabel}
                       </button>
+
+                      {/* ✅ NEW: Message button (builds correct URL) */}
+                      <Link
+                        href={`/messages?threadId=${encodeURIComponent(
+                          p.id
+                        )}&with=${encodeURIComponent(p.displayName)}`}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          border: "1px solid #ccc",
+                          textDecoration: "none",
+                          color: "inherit",
+                          display: "inline-block",
+                        }}
+                      >
+                        Message
+                      </Link>
                     </div>
                   </div>
                 );
