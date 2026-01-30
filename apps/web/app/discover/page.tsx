@@ -693,43 +693,45 @@ export default function DiscoverPage() {
                           display: "inline-block",
                         }}
                       >
-                        View
-                      </Link>
+                        <button
+  onClick={async () => {
+    try {
+      const res = await fetch(
+        "https://black-within-api.onrender.com/threads/get-or-create",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user1: userId,
+            user2: p.owner_user_id,
+          }),
+        }
+      );
 
-                      <button
-                        onClick={() => onToggleSave(p)}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          background: "white",
-                          cursor: "pointer",
-                        }}
-                      >
-                        {isSaved ? "Unsave" : "Save"}
-                      </button>
+      const data = await res.json();
 
-                      <button
-                        onClick={() => onLike(p)}
-                        disabled={likeDisabled}
-                        title={
-                          isLimitReached
-                            ? "Daily like limit reached. Please wait for reset."
-                            : loadingLikesStatus
-                            ? "Loading like limits..."
-                            : undefined
-                        }
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          background: likeDisabled ? "#f5f5f5" : "white",
-                          cursor: likeDisabled ? "not-allowed" : "pointer",
-                          opacity: likeDisabled ? 0.85 : 1,
-                        }}
-                      >
-                        {likeLabel}
-                      </button>
+      if (data.threadId) {
+        window.location.href = `/messages?threadId=${data.threadId}&with=${encodeURIComponent(
+          p.displayName
+        )}`;
+      } else {
+        showToast("Could not start conversation.");
+      }
+    } catch {
+      showToast("Connection error starting chat.");
+    }
+  }}
+  style={{
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #ccc",
+    background: "white",
+    cursor: "pointer",
+  }}
+>
+  Message
+</button>
+
 
                       {/* ✅ NEW: Message button (builds correct URL) */}
                       <Link
