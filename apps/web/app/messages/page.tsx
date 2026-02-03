@@ -505,3 +505,17 @@ function MessagesInner() {
     </div>
   );
 }
+const unlockThread = async () => {
+  const res = await fetch(`${API_BASE}/stripe/create-unlock-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: userId,
+      target_profile_id: otherProfileId,
+      thread_id: threadId,
+    }),
+  });
+
+  const data = await res.json();
+  window.location.href = data.checkout_url;
+};
