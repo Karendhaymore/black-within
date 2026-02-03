@@ -71,6 +71,9 @@ SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "").strip()
 SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
 
+# Messaging admin unlock safety
+ADMIN_UNLOCK_KEY = os.getenv("ADMIN_UNLOCK_KEY", "").strip()  # set this in Render for safety
+
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
 
@@ -197,6 +200,7 @@ class LoginCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
 # -----------------------------
 # Threads + Messages
 # -----------------------------
@@ -232,8 +236,7 @@ class Message(Base):
 class MessagingEntitlement(Base):
     """
     Simple access control for messaging.
-    - Premium users: is_premium = True (or premium_until in future)
-    - Pay-per-message unlock: unlocked_until can be set for a period (ex: 24h)
+    - Premium users: is_premium = True
     """
     __tablename__ = "messaging_entitlements"
 
@@ -241,13 +244,93 @@ class MessagingEntitlement(Base):
     user_id: Mapped[str] = mapped_column(String(40), index=True, unique=True)
 
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
-    unlocked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
+
 # -----------------------------
-# MVP auto-migration
+# NEW: Per-thread unlocks (Path A)
 # -----------------------------
+class ThreadUnlock(Base):
+    __tablename__ = "thread_unlocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)       # the payer
+    thread_id: Mapped[str] = mapped_column(String(60), index=True)     # the specific chat/thread
+    unlocked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # None = forever
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "thread_id", name="uq_thread_unlock_user_thread"),
+    )
+
+
+# -----------------------------
+# MVP auto-migration helpers
+# -----------------------------
+def _auto_migrate_threads_messages_tables():
+    """
+    Create threads/messages/messaging_entitlements tables (if missing).
+    """
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS threads (
+              id VARCHAR(60) PRIMARY KEY,
+              user_low VARCHAR(40),
+              user_high VARCHAR(40),
+              created_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW(),
+              CONSTRAINT uq_threads_userpair UNIQUE (user_low, user_high)
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_low ON threads(user_low);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_high ON threads(user_high);"""))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS messages (
+              id SERIAL PRIMARY KEY,
+              thread_id VARCHAR(60),
+              sender_user_id VARCHAR(40),
+              body TEXT,
+              created_at TIMESTAMP DEFAULT NOW()
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_thread_id ON messages(thread_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_sender_user_id ON messages(sender_user_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages(created_at);"""))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS messaging_entitlements (
+              id SERIAL PRIMARY KEY,
+              user_id VARCHAR(40) UNIQUE,
+              is_premium BOOLEAN DEFAULT FALSE,
+              updated_at TIMESTAMP DEFAULT NOW()
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"""))
+
+
+def _auto_migrate_thread_unlocks_table():
+    """
+    Create thread_unlocks table if missing (Path A pay-per-thread unlock).
+    """
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS thread_unlocks (
+              id SERIAL PRIMARY KEY,
+              user_id VARCHAR(40),
+              thread_id VARCHAR(60),
+              unlocked_until TIMESTAMP NULL,
+              created_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW(),
+              CONSTRAINT uq_thread_unlock_user_thread UNIQUE (user_id, thread_id)
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_user_id ON thread_unlocks(user_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_thread_id ON thread_unlocks(thread_id);"""))
+
+
 def _auto_migrate_profiles_table():
     """
     create_all() does NOT modify existing tables.
@@ -341,15 +424,22 @@ def _auto_migrate_daily_like_counts_table():
         # If the table already existed before window_started_at, add it safely:
         conn.execute(text("""ALTER TABLE daily_like_counts ADD COLUMN IF NOT EXISTS window_started_at TIMESTAMP NULL;"""))
 
+
+# -----------------------------
+# Create tables + run migrations
+# -----------------------------
+Base.metadata.create_all(bind=engine)
+
 try:
     _auto_migrate_threads_messages_tables()
 except Exception as e:
     print("AUTO_MIGRATE_THREADS_MESSAGES failed:", str(e))
 
-# Create tables if missing
-Base.metadata.create_all(bind=engine)
+try:
+    _auto_migrate_thread_unlocks_table()
+except Exception as e:
+    print("AUTO_MIGRATE_THREAD_UNLOCKS failed:", str(e))
 
-# Then run MVP migrations
 try:
     _auto_migrate_profiles_table()
 except Exception as e:
@@ -369,49 +459,6 @@ try:
     _auto_migrate_daily_like_counts_table()
 except Exception as e:
     print("AUTO_MIGRATE_DAILY_LIKES failed:", str(e))
-
-
-def _auto_migrate_threads_messages_tables():
-    """
-    Create threads/messages/messaging_entitlements tables (if missing).
-    """
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS threads (
-              id VARCHAR(60) PRIMARY KEY,
-              user_low VARCHAR(40),
-              user_high VARCHAR(40),
-              created_at TIMESTAMP DEFAULT NOW(),
-              updated_at TIMESTAMP DEFAULT NOW(),
-              CONSTRAINT uq_threads_userpair UNIQUE (user_low, user_high)
-            );
-        """))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_low ON threads(user_low);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_high ON threads(user_high);"""))
-
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS messages (
-              id SERIAL PRIMARY KEY,
-              thread_id VARCHAR(60),
-              sender_user_id VARCHAR(40),
-              body TEXT,
-              created_at TIMESTAMP DEFAULT NOW()
-            );
-        """))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_thread_id ON messages(thread_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_sender_user_id ON messages(sender_user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages(created_at);"""))
-
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS messaging_entitlements (
-              id SERIAL PRIMARY KEY,
-              user_id VARCHAR(40) UNIQUE,
-              is_premium BOOLEAN DEFAULT FALSE,
-              unlocked_until TIMESTAMP NULL,
-              updated_at TIMESTAMP DEFAULT NOW()
-            );
-        """))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"""))
 
 
 # -----------------------------
@@ -503,6 +550,8 @@ class LikesStatusResponse(BaseModel):
     limit: int
     windowType: str  # "daily_utc" or "test_seconds"
     resetsAtUTC: str
+
+
 class ThreadGetOrCreatePayload(BaseModel):
     user_id: str
     with_profile_id: str  # the profile you want to message
@@ -548,11 +597,11 @@ class MessagingAccessResponse(BaseModel):
 
 
 class MessagingUnlockPayload(BaseModel):
-    # admin/testing helper (until Stripe is wired)
+    # ADMIN/TESTING helper (until Stripe is wired)
     user_id: str
-    minutes: int = 1440  # default unlock = 24 hours
-    make_premium: bool = False
-
+    thread_id: Optional[str] = None  # unlock a specific thread for this user
+    minutes: int = 1440              # default = 24 hours
+    make_premium: bool = False       # premium unlock everywhere
 
 
 # Accept BOTH camelCase and snake_case (frontend may send either)
@@ -591,7 +640,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.1.1")
+app = FastAPI(title="Black Within API", version="1.1.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -715,10 +764,6 @@ def _verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def _today_utc() -> date:
-    return datetime.utcnow().date()
-
-
 def _utc_midnight_of_day(d: date) -> datetime:
     return datetime.combine(d, time.min)
 
@@ -760,7 +805,6 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
 
     # TEST MODE (for you while building)
     if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
-        # We still store it in today's row (simple + safe), but we reset using window_started_at.
         today = now.date()
         counter = _get_or_create_daily_like_counter(session, user_id, today)
 
@@ -771,7 +815,6 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
 
         reset_at = counter.window_started_at + timedelta(seconds=LIKES_RESET_TEST_SECONDS)
 
-        # If the window expired, reset the count
         if now >= reset_at:
             counter.count = 0
             counter.window_started_at = now
@@ -782,7 +825,7 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
         likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
         return counter, likes_left, reset_at, "test_seconds"
 
-    # NORMAL MODE (real product behavior)
+    # NORMAL MODE
     today = now.date()
     counter = _get_or_create_daily_like_counter(session, user_id, today)
     reset_at = _next_utc_midnight(now)
@@ -805,7 +848,7 @@ def health():
         "freeLikesPerDay": FREE_LIKES_PER_DAY,
         "likesResetTestSeconds": LIKES_RESET_TEST_SECONDS,
         "corsOrigins": origins,
-        "version": "1.1.1",
+        "version": "1.1.2",
     }
 
 
@@ -940,7 +983,7 @@ def verify_code(payload: VerifyCodePayload):
 
 
 # -----------------------------
-# Likes status (lets frontend show "likes left" + when it resets)
+# Likes status
 # -----------------------------
 @app.get("/likes/status", response_model=LikesStatusResponse)
 def likes_status(user_id: str = Query(...)):
@@ -1214,12 +1257,6 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
 # -----------------------------
 @app.get("/notifications", response_model=NotificationsResponse)
 def get_notifications(user_id: str = Query(...)):
-    """
-    Returns notifications with enriched actor info:
-      - actor_display_name
-      - actor_profile_id (so frontend can link to /profiles/{actor_profile_id})
-      - actor_photo (so frontend can show photo instead of initials)
-    """
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
@@ -1287,9 +1324,6 @@ def clear_notifications(user_id: str = Query(...)):
 # -----------------------------
 @app.get("/likes", response_model=IdListResponse)
 def get_likes(user_id: str = Query(...)):
-    """
-    Backward compatible: returns profile_ids that THIS user has liked.
-    """
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
         rows = session.execute(select(Like.profile_id).where(Like.user_id == user_id)).all()
@@ -1303,9 +1337,6 @@ def get_likes_sent(user_id: str = Query(...)):
 
 @app.get("/likes/received", response_model=ProfilesListResponse)
 def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
-    """
-    Returns PROFILES of people who liked *your* profile.
-    """
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
@@ -1374,19 +1405,15 @@ def like(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        # Read the current window (daily or test seconds)
         counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
 
-        # If already liked, don't count it again
         existing = session.execute(
             select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
         ).scalar_one_or_none()
         if existing:
             return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
 
-        # Enforce limit
         if int(counter.count) >= FREE_LIKES_PER_DAY:
-            # Friendly + specific message
             if window_type == "test_seconds":
                 raise HTTPException(
                     status_code=429,
@@ -1401,21 +1428,17 @@ def like(payload: ProfileAction):
         if not prof:
             raise HTTPException(status_code=404, detail="Profile not found")
 
-        # Write the like
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
 
-        # Increment the counter
         counter.count = int(counter.count) + 1
         counter.updated_at = datetime.utcnow()
 
-        # In test mode, ensure window_started_at exists
         if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
             if not counter.window_started_at:
                 counter.window_started_at = datetime.utcnow()
 
         recipient_user_id = prof.owner_user_id
 
-        # Find actor profile (if they have one)
         actor_profile = session.execute(
             select(Profile).where(Profile.owner_user_id == liker_user_id)
         ).scalar_one_or_none()
@@ -1437,19 +1460,16 @@ def like(payload: ProfileAction):
             session.commit()
         except IntegrityError:
             session.rollback()
-            # If something raced, still return a safe value
             likes_left_safe = max(0, FREE_LIKES_PER_DAY - int(counter.count))
             return {"ok": True, "likesLeft": likes_left_safe, "resetsAtUTC": reset_at.isoformat()}
 
-        # Recompute likes left and reset time after commit (test mode might have reset logic)
         counter2, likes_left_final, reset_at2, window_type2 = _get_likes_window(session, liker_user_id)
         return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
+
+
 # -----------------------------
 # Messaging helpers
 # -----------------------------
-ADMIN_UNLOCK_KEY = os.getenv("ADMIN_UNLOCK_KEY", "").strip()  # set this in Render for safety
-
-
 def _sorted_pair(a: str, b: str) -> Tuple[str, str]:
     a = (a or "").strip()
     b = (b or "").strip()
@@ -1464,7 +1484,7 @@ def _get_entitlement(session: Session, user_id: str) -> MessagingEntitlement:
     ).scalar_one_or_none()
     if row:
         return row
-    row = MessagingEntitlement(user_id=user_id, is_premium=False, unlocked_until=None, updated_at=datetime.utcnow())
+    row = MessagingEntitlement(user_id=user_id, is_premium=False, updated_at=datetime.utcnow())
     session.add(row)
     try:
         session.commit()
@@ -1476,20 +1496,46 @@ def _get_entitlement(session: Session, user_id: str) -> MessagingEntitlement:
     return row
 
 
-def _can_message(session: Session, user_id: str) -> Tuple[bool, bool, Optional[datetime], Optional[str]]:
+# ✅ NEW thread-aware paywall logic
+def _can_message(session: Session, user_id: str, thread_id: str) -> Tuple[bool, bool, Optional[datetime], Optional[str]]:
     """
-    Returns: (can_message, is_premium, unlocked_until, reason)
+    Returns: (can_msg, is_premium, unlocked_until, reason)
+    - Premium => can message anywhere
+    - Otherwise => must have an unlock for THIS thread_id
     """
+    user_id = (user_id or "").strip()
+    thread_id = (thread_id or "").strip()
+    if not user_id:
+        return False, False, None, "user_id is required"
+    if not thread_id:
+        return False, False, None, "thread_id is required"
+
     ent = _get_entitlement(session, user_id)
     now = datetime.utcnow()
 
-    if ent.is_premium:
-        return True, True, ent.unlocked_until, None
+    # Premium overrides everything
+    if ent and getattr(ent, "is_premium", False):
+        return True, True, None, None
 
-    if ent.unlocked_until and now < ent.unlocked_until:
-        return True, False, ent.unlocked_until, None
+    # Thread-specific unlock check
+    unlock = session.execute(
+        select(ThreadUnlock).where(
+            ThreadUnlock.user_id == user_id,
+            ThreadUnlock.thread_id == thread_id,
+        )
+    ).scalar_one_or_none()
 
-    return False, False, ent.unlocked_until, "Messaging is locked. Upgrade to Premium or pay the message fee."
+    if not unlock:
+        return False, False, None, "Messaging is locked. Upgrade to Premium or pay the $1.99 thread unlock."
+
+    # unlocked_until None = forever
+    if unlock.unlocked_until is None:
+        return True, False, None, None
+
+    if unlock.unlocked_until >= now:
+        return True, False, unlock.unlocked_until, None
+
+    return False, False, unlock.unlocked_until, "Thread unlock expired. Upgrade to Premium or unlock again."
 
 
 def _ensure_thread_participant(thread: Thread, user_id: str) -> str:
@@ -1507,7 +1553,6 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
     user_id = _ensure_user(payload.user_id)
 
     with Session(engine) as session:
-        # Convert profile -> owner_user_id (the person you're trying to message)
         prof = session.get(Profile, (payload.with_profile_id or "").strip())
         if not prof:
             raise HTTPException(status_code=404, detail="Profile not found")
@@ -1534,7 +1579,6 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
             session.add(thread)
             session.commit()
 
-        # "with" profile info for UI
         return ThreadItem(
             threadId=thread.id,
             with_user_id=other_user_id,
@@ -1597,157 +1641,4 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     thread_id = (thread_id or "").strip()
     if not thread_id:
-        raise HTTPException(status_code=400, detail="thread_id is required")
-
-    with Session(engine) as session:
-        thread = session.get(Thread, thread_id)
-        if not thread:
-            raise HTTPException(status_code=404, detail="Thread not found")
-
-        _ensure_thread_participant(thread, user_id)
-
-        can_msg, is_premium, unlocked_until, reason = _can_message(session, user_id)
-        return MessagingAccessResponse(
-            canMessage=can_msg,
-            isPremium=is_premium,
-            unlockedUntilUTC=(unlocked_until.isoformat() if unlocked_until else None),
-            reason=reason,
-        )
-
-
-@app.post("/messaging/unlock", response_model=MessagingAccessResponse)
-def messaging_unlock(payload: MessagingUnlockPayload, key: str = Query(default="")):
-    """
-    ADMIN/TESTING ONLY.
-    Use this until Stripe is wired, so you can unlock messaging for a user.
-    Protect it by setting ADMIN_UNLOCK_KEY in Render, then calling with ?key=YOURKEY
-    """
-    if not ADMIN_UNLOCK_KEY or key != ADMIN_UNLOCK_KEY:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-    user_id = _ensure_user(payload.user_id)
-    minutes = int(payload.minutes or 0)
-    if minutes <= 0:
-        raise HTTPException(status_code=400, detail="minutes must be > 0")
-
-    with Session(engine) as session:
-        ent = _get_entitlement(session, user_id)
-        now = datetime.utcnow()
-
-        if payload.make_premium:
-            ent.is_premium = True
-
-        ent.unlocked_until = now + timedelta(minutes=minutes)
-        ent.updated_at = now
-        session.commit()
-
-        can_msg, is_premium, unlocked_until, reason = _can_message(session, user_id)
-        return MessagingAccessResponse(
-            canMessage=can_msg,
-            isPremium=is_premium,
-            unlockedUntilUTC=(unlocked_until.isoformat() if unlocked_until else None),
-            reason=reason,
-        )
-
-
-# -----------------------------
-# Messages
-# -----------------------------
-@app.get("/messages", response_model=MessagesResponse)
-def list_messages(user_id: str = Query(...), thread_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)):
-    user_id = _ensure_user(user_id)
-    thread_id = (thread_id or "").strip()
-    if not thread_id:
-        raise HTTPException(status_code=400, detail="thread_id is required")
-
-    with Session(engine) as session:
-        thread = session.get(Thread, thread_id)
-        if not thread:
-            raise HTTPException(status_code=404, detail="Thread not found")
-
-        _ensure_thread_participant(thread, user_id)
-
-        msgs = session.execute(
-            select(Message)
-            .where(Message.thread_id == thread_id)
-            .order_by(Message.created_at.asc())
-            .limit(limit)
-        ).scalars().all()
-
-        return MessagesResponse(
-            items=[
-                MessageItem(
-                    id=m.id,
-                    thread_id=m.thread_id,
-                    sender_user_id=m.sender_user_id,
-                    body=m.body,
-                    created_at=m.created_at.isoformat(),
-                )
-                for m in msgs
-            ]
-        )
-
-
-@app.post("/messages", response_model=MessageItem)
-def send_message(payload: MessageCreatePayload):
-    user_id = _ensure_user(payload.user_id)
-    thread_id = (payload.thread_id or "").strip()
-    body = (payload.body or "").strip()
-
-    if not thread_id:
-        raise HTTPException(status_code=400, detail="thread_id is required")
-    if not body:
-        raise HTTPException(status_code=400, detail="body is required")
-    if len(body) > 2000:
-        raise HTTPException(status_code=400, detail="Message too long (max 2000 chars).")
-
-    with Session(engine) as session:
-        thread = session.get(Thread, thread_id)
-        if not thread:
-            raise HTTPException(status_code=404, detail="Thread not found")
-
-        other_user_id = _ensure_thread_participant(thread, user_id)
-
-        can_msg, is_premium, unlocked_until, reason = _can_message(session, user_id)
-
-        # ✅ PREVIEW MODE BYPASS
-        if not can_msg and not AUTH_PREVIEW_MODE:
-            raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
-
-        # ---- CREATE MESSAGE ----
-        m = Message(
-            thread_id=thread_id,
-            sender_user_id=user_id,
-            body=body,
-            created_at=datetime.utcnow(),
-        )
-        session.add(m)
-
-        # bump thread activity
-        thread.updated_at = datetime.utcnow()
-
-        # notify recipient
-        session.add(
-            Notification(
-                user_id=other_user_id,
-                type="message",
-                message="You have a new message.",
-                created_at=datetime.utcnow(),
-                actor_user_id=user_id,
-                profile_id=None,
-                actor_profile_id=None,
-            )
-        )
-
-        session.commit()
-        session.refresh(m)
-
-        return m
-
-        return MessageItem(
-            id=m.id,
-            thread_id=m.thread_id,
-            sender_user_id=m.sender_user_id,
-            body=m.body,
-            created_at=m.created_at.isoformat(),
-        )
+        raise HTTPException(status
