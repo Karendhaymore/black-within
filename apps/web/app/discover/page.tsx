@@ -445,9 +445,12 @@ export default function DiscoverPage() {
       }
 
       // 3) Navigate to chat
-      window.location.href = `/messages?threadId=${encodeURIComponent(threadId)}&with=${encodeURIComponent(
-        p.displayName
-      )}${locked ? "&locked=1" : ""}`;
+     window.location.href =
+  `/messages?threadId=${encodeURIComponent(threadId)}` +
+  `&with=${encodeURIComponent(p.displayName)}` +
+  `&withProfileId=${encodeURIComponent(p.id)}` +
+  (locked ? "&locked=1" : "");
+
     } catch (e: any) {
       const msg = toNiceString(e?.message || e) || "Could not start a chat right now.";
       setApiError(msg);
