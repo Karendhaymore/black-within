@@ -8,7 +8,8 @@ import base64
 from datetime import datetime, timedelta, date, time
 from typing import List, Optional, Dict, Any, Tuple
 
-from fastapi import FastAPI, HTTPException, Query
+import stripe
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -73,6 +74,18 @@ SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
 
 # Messaging admin unlock safety
 ADMIN_UNLOCK_KEY = os.getenv("ADMIN_UNLOCK_KEY", "").strip()  # set this in Render for safety
+
+# Stripe
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
+
+STRIPE_MESSAGE_UNLOCK_PRICE_ID = os.getenv("STRIPE_MESSAGE_UNLOCK_PRICE_ID", "").strip()
+STRIPE_PREMIUM_PRICE_ID = os.getenv("STRIPE_PREMIUM_PRICE_ID", "").strip()
+
+APP_WEB_BASE_URL = os.getenv("APP_WEB_BASE_URL", "https://meetblackwithin.com").strip()
+
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
@@ -249,17 +262,15 @@ class MessagingEntitlement(Base):
 
 
 # -----------------------------
-# NEW: Per-thread unlocks (Path A)
+# Per-thread unlocks (PERMANENT)
 # -----------------------------
 class ThreadUnlock(Base):
     __tablename__ = "thread_unlocks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)       # the payer
-    thread_id: Mapped[str] = mapped_column(String(60), index=True)     # the specific chat/thread
-    unlocked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # None = forever
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    thread_id: Mapped[str] = mapped_column(String(64), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
         UniqueConstraint("user_id", "thread_id", name="uq_thread_unlock_user_thread"),
@@ -313,22 +324,24 @@ def _auto_migrate_threads_messages_tables():
 
 def _auto_migrate_thread_unlocks_table():
     """
-    Create thread_unlocks table if missing (Path A pay-per-thread unlock).
+    Create thread_unlocks table if missing (PERMANENT per-thread unlock).
+    If an older version of the table exists with extra columns, this will NOT drop them.
     """
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS thread_unlocks (
               id SERIAL PRIMARY KEY,
-              user_id VARCHAR(40),
-              thread_id VARCHAR(60),
-              unlocked_until TIMESTAMP NULL,
+              user_id VARCHAR(64),
+              thread_id VARCHAR(64),
               created_at TIMESTAMP DEFAULT NOW(),
-              updated_at TIMESTAMP DEFAULT NOW(),
               CONSTRAINT uq_thread_unlock_user_thread UNIQUE (user_id, thread_id)
             );
         """))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_user_id ON thread_unlocks(user_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_thread_id ON thread_unlocks(thread_id);"""))
+
+        # If the table existed before and is missing created_at, add it safely.
+        conn.execute(text("""ALTER TABLE thread_unlocks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"""))
 
 
 def _auto_migrate_profiles_table():
@@ -600,8 +613,21 @@ class MessagingUnlockPayload(BaseModel):
     # ADMIN/TESTING helper (until Stripe is wired)
     user_id: str
     thread_id: Optional[str] = None  # unlock a specific thread for this user
-    minutes: int = 1440              # default = 24 hours
+    minutes: int = 1440              # kept for backward-compat; thread unlock is permanent now
     make_premium: bool = False       # premium unlock everywhere
+
+
+class ThreadUnlockCheckoutPayload(BaseModel):
+    user_id: str
+    thread_id: str
+
+
+class PremiumCheckoutPayload(BaseModel):
+    user_id: str
+
+
+class CheckoutSessionResponse(BaseModel):
+    url: str
 
 
 # Accept BOTH camelCase and snake_case (frontend may send either)
@@ -640,7 +666,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.1.2")
+app = FastAPI(title="Black Within API", version="1.1.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -845,10 +871,15 @@ def health():
         "previewMode": AUTH_PREVIEW_MODE,
         "sendgridConfigured": bool(SENDGRID_API_KEY and SENDGRID_FROM_EMAIL),
         "passwordAuthConfigured": bool(AUTH_SECRET),
+        "stripeConfigured": bool(STRIPE_SECRET_KEY),
+        "stripeWebhookConfigured": bool(STRIPE_WEBHOOK_SECRET),
+        "threadUnlockPriceConfigured": bool(STRIPE_MESSAGE_UNLOCK_PRICE_ID),
+        "premiumPriceConfigured": bool(STRIPE_PREMIUM_PRICE_ID),
+        "appWebBaseUrl": APP_WEB_BASE_URL,
         "freeLikesPerDay": FREE_LIKES_PER_DAY,
         "likesResetTestSeconds": LIKES_RESET_TEST_SECONDS,
         "corsOrigins": origins,
-        "version": "1.1.2",
+        "version": "1.1.3",
     }
 
 
@@ -1496,46 +1527,37 @@ def _get_entitlement(session: Session, user_id: str) -> MessagingEntitlement:
     return row
 
 
-# ✅ NEW thread-aware paywall logic
-def _can_message(session: Session, user_id: str, thread_id: str) -> Tuple[bool, bool, Optional[datetime], Optional[str]]:
+def _can_message_thread(session: Session, user_id: str, thread_id: str) -> Tuple[bool, bool, str]:
     """
-    Returns: (can_msg, is_premium, unlocked_until, reason)
-    - Premium => can message anywhere
-    - Otherwise => must have an unlock for THIS thread_id
+    Returns: (can_message, is_premium, reason)
+
+    Rules:
+      - Premium => can message anywhere
+      - ThreadUnlock exists for (user_id, thread_id) => can message in that thread
+      - Otherwise locked
     """
     user_id = (user_id or "").strip()
     thread_id = (thread_id or "").strip()
     if not user_id:
-        return False, False, None, "user_id is required"
+        return False, False, "user_id is required"
     if not thread_id:
-        return False, False, None, "thread_id is required"
+        return False, False, "thread_id is required"
 
     ent = _get_entitlement(session, user_id)
-    now = datetime.utcnow()
+    if ent and ent.is_premium:
+        return True, True, ""
 
-    # Premium overrides everything
-    if ent and getattr(ent, "is_premium", False):
-        return True, True, None, None
-
-    # Thread-specific unlock check
-    unlock = session.execute(
+    tu = session.execute(
         select(ThreadUnlock).where(
             ThreadUnlock.user_id == user_id,
             ThreadUnlock.thread_id == thread_id,
         )
     ).scalar_one_or_none()
 
-    if not unlock:
-        return False, False, None, "Messaging is locked. Upgrade to Premium or pay the $1.99 thread unlock."
+    if tu:
+        return True, False, ""
 
-    # unlocked_until None = forever
-    if unlock.unlocked_until is None:
-        return True, False, None, None
-
-    if unlock.unlocked_until >= now:
-        return True, False, unlock.unlocked_until, None
-
-    return False, False, unlock.unlocked_until, "Thread unlock expired. Upgrade to Premium or unlock again."
+    return False, False, "Messaging is locked. Upgrade to Premium or pay $1.99 to unlock this chat."
 
 
 def _ensure_thread_participant(thread: Thread, user_id: str) -> str:
@@ -1565,7 +1587,6 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
             raise HTTPException(status_code=400, detail="You cannot message yourself.")
 
         low, high = _sorted_pair(user_id, other_user_id)
-
         existing = session.execute(
             select(Thread).where(Thread.user_low == low, Thread.user_high == high)
         ).scalar_one_or_none()
@@ -1641,4 +1662,257 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     thread_id = (thread_id or "").strip()
     if not thread_id:
-        raise HTTPException(status)
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    with Session(engine) as session:
+        thread = session.get(Thread, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        _ensure_thread_participant(thread, user_id)
+
+        can_msg, is_premium, reason = _can_message_thread(session, user_id, thread_id)
+        return MessagingAccessResponse(
+            canMessage=can_msg,
+            isPremium=is_premium,
+            unlockedUntilUTC=None,
+            reason=reason,
+        )
+
+
+# -----------------------------
+# Messages
+# -----------------------------
+@app.get("/messages", response_model=MessagesResponse)
+def list_messages(thread_id: str = Query(...), user_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)):
+    user_id = _ensure_user(user_id)
+    thread_id = (thread_id or "").strip()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    with Session(engine) as session:
+        thread = session.get(Thread, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        _ensure_thread_participant(thread, user_id)
+
+        rows = session.execute(
+            select(Message)
+            .where(Message.thread_id == thread_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        ).scalars().all()
+
+        rows = list(reversed(rows))
+        items = [
+            MessageItem(
+                id=m.id,
+                thread_id=m.thread_id,
+                sender_user_id=m.sender_user_id,
+                body=m.body,
+                created_at=m.created_at.isoformat(),
+            )
+            for m in rows
+        ]
+        return MessagesResponse(items=items)
+
+
+@app.post("/messages", response_model=MessageItem)
+def send_message(payload: MessageCreatePayload):
+    user_id = _ensure_user(payload.user_id)
+    thread_id = (payload.thread_id or "").strip()
+    body = (payload.body or "").strip()
+
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+    if not body:
+        raise HTTPException(status_code=400, detail="Message body is required")
+
+    with Session(engine) as session:
+        thread = session.get(Thread, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        _ensure_thread_participant(thread, user_id)
+
+        can_msg, is_premium, reason = _can_message_thread(session, user_id, thread_id)
+
+        # ✅ PREVIEW MODE BYPASS
+        if not can_msg and not AUTH_PREVIEW_MODE:
+            raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
+
+        now = datetime.utcnow()
+        m = Message(thread_id=thread_id, sender_user_id=user_id, body=body, created_at=now)
+        session.add(m)
+
+        thread.updated_at = now
+
+        session.commit()
+        session.refresh(m)
+
+        return MessageItem(
+            id=m.id,
+            thread_id=m.thread_id,
+            sender_user_id=m.sender_user_id,
+            body=m.body,
+            created_at=m.created_at.isoformat(),
+        )
+
+
+# -----------------------------
+# ADMIN / TEST Unlock (optional)
+# -----------------------------
+@app.post("/messaging/unlock")
+def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default="")):
+    """
+    ADMIN helper:
+      - If make_premium=True => set entitlement premium
+      - Else if thread_id provided => create ThreadUnlock (permanent)
+    Safety: requires ADMIN_UNLOCK_KEY match (set in Render env vars).
+    """
+    if not ADMIN_UNLOCK_KEY:
+        raise HTTPException(status_code=500, detail="Admin unlock is not configured (ADMIN_UNLOCK_KEY missing).")
+    if (admin_key or "").strip() != ADMIN_UNLOCK_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized (bad admin key).")
+
+    user_id = _ensure_user(payload.user_id)
+    thread_id = (payload.thread_id or "").strip()
+
+    with Session(engine) as session:
+        ent = _get_entitlement(session, user_id)
+
+        if payload.make_premium:
+            ent.is_premium = True
+            ent.updated_at = datetime.utcnow()
+            session.commit()
+            return {"ok": True, "userId": user_id, "premium": True}
+
+        if not thread_id:
+            raise HTTPException(status_code=400, detail="thread_id is required unless make_premium=true")
+
+        existing = session.execute(
+            select(ThreadUnlock).where(ThreadUnlock.user_id == user_id, ThreadUnlock.thread_id == thread_id)
+        ).scalar_one_or_none()
+        if not existing:
+            session.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=datetime.utcnow()))
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+
+        return {"ok": True, "userId": user_id, "threadId": thread_id, "unlocked": True}
+
+
+# -----------------------------
+# Stripe Checkout
+# -----------------------------
+@app.post("/stripe/checkout/thread-unlock", response_model=CheckoutSessionResponse)
+def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
+    if not STRIPE_SECRET_KEY or not STRIPE_MESSAGE_UNLOCK_PRICE_ID:
+        raise HTTPException(status_code=500, detail="Stripe is not configured for thread unlocks.")
+
+    user_id = _ensure_user(payload.user_id)
+    thread_id = (payload.thread_id or "").strip()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    success_url = f"{APP_WEB_BASE_URL}/messages?threadId={thread_id}&checkout=success"
+    cancel_url = f"{APP_WEB_BASE_URL}/messages?threadId={thread_id}&checkout=cancel"
+
+    session_obj = stripe.checkout.Session.create(
+        mode="payment",
+        line_items=[{"price": STRIPE_MESSAGE_UNLOCK_PRICE_ID, "quantity": 1}],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        client_reference_id=user_id,
+        metadata={
+            "kind": "thread_unlock",
+            "user_id": user_id,
+            "thread_id": thread_id,
+        },
+    )
+
+    return CheckoutSessionResponse(url=session_obj.url)
+
+
+@app.post("/stripe/checkout/premium", response_model=CheckoutSessionResponse)
+def stripe_checkout_premium(payload: PremiumCheckoutPayload):
+    if not STRIPE_SECRET_KEY or not STRIPE_PREMIUM_PRICE_ID:
+        raise HTTPException(status_code=500, detail="Stripe is not configured for premium.")
+
+    user_id = _ensure_user(payload.user_id)
+
+    success_url = f"{APP_WEB_BASE_URL}/discover?premium=success"
+    cancel_url = f"{APP_WEB_BASE_URL}/discover?premium=cancel"
+
+    session_obj = stripe.checkout.Session.create(
+        mode="subscription",
+        line_items=[{"price": STRIPE_PREMIUM_PRICE_ID, "quantity": 1}],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        client_reference_id=user_id,
+        metadata={
+            "kind": "premium",
+            "user_id": user_id,
+        },
+    )
+
+    return CheckoutSessionResponse(url=session_obj.url)
+
+
+# -----------------------------
+# Stripe Webhook
+# -----------------------------
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=500, detail="Stripe webhook not configured (missing STRIPE_WEBHOOK_SECRET).")
+
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature.")
+
+    event_type = event["type"]
+    data_object = event["data"]["object"]
+
+    with Session(engine) as session:
+        # 1) Checkout completed: handle unlock or premium
+        if event_type == "checkout.session.completed":
+            meta = (data_object.get("metadata") or {})
+            kind = meta.get("kind", "")
+            user_id = meta.get("user_id", "") or data_object.get("client_reference_id", "")
+
+            if kind == "thread_unlock":
+                thread_id = meta.get("thread_id", "")
+                if user_id and thread_id:
+                    existing = session.execute(
+                        select(ThreadUnlock).where(
+                            ThreadUnlock.user_id == user_id,
+                            ThreadUnlock.thread_id == thread_id,
+                        )
+                    ).scalar_one_or_none()
+
+                    if not existing:
+                        session.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=datetime.utcnow()))
+                        session.commit()
+
+            elif kind == "premium":
+                if user_id:
+                    ent = _get_entitlement(session, user_id)
+                    ent.is_premium = True
+                    ent.updated_at = datetime.utcnow()
+                    session.commit()
+
+        # 2) Subscription cancelled: turn off premium (not implemented yet)
+        elif event_type == "customer.subscription.deleted":
+            # We set client_reference_id = user_id during checkout,
+            # but subscription events don't always include it.
+            # Best approach: store customer_id/subscription_id mapping later.
+            pass
+
+    return {"ok": True}
