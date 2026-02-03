@@ -1,3 +1,5 @@
+import { getOrCreateUserId } from "../lib/user";
+
 export const dynamic = "force-dynamic";
 
 async function getApiHealth(apiUrl: string) {
