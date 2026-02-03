@@ -452,7 +452,7 @@ def _auto_migrate_daily_like_counts_table():
 # -----------------------------
 # Create tables + run migrations
 # -----------------------------
-Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(engine)
 
 try:
     _auto_migrate_threads_messages_tables()
