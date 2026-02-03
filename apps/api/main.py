@@ -1641,4 +1641,4 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     thread_id = (thread_id or "").strip()
     if not thread_id:
-        raise HTTPException(status
+        raise HTTPException(status)
