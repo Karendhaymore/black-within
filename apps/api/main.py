@@ -630,6 +630,13 @@ class CheckoutSessionResponse(BaseModel):
     url: str
 
 
+# NEW: Create Stripe Checkout Session (Unlock Conversation – $1.99)
+class CreateUnlockSessionPayload(BaseModel):
+    user_id: str
+    target_profile_id: str
+    thread_id: str
+
+
 # Accept BOTH camelCase and snake_case (frontend may send either)
 class UpsertMyProfilePayload(BaseModel):
     owner_user_id: str  # keep this key name for your frontend
@@ -1862,6 +1869,41 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
 
 
 # -----------------------------
+# NEW ROUTE 1: Create Stripe Checkout Session (Unlock Conversation – $1.99)
+# -----------------------------
+@app.post("/stripe/create-unlock-session")
+def create_unlock_session(payload: CreateUnlockSessionPayload):
+    try:
+        session_obj = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            mode="payment",
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {
+                        "name": "Black Within — Conversation Unlock",
+                        "description": "Unlock messaging with this person forever",
+                    },
+                    "unit_amount": 199,
+                },
+                "quantity": 1,
+            }],
+            metadata={
+                "user_id": payload.user_id,
+                "target_profile_id": payload.target_profile_id,
+                "thread_id": payload.thread_id,
+            },
+            success_url="https://meetblackwithin.com/messages?success=true",
+            cancel_url="https://meetblackwithin.com/messages?canceled=true",
+        )
+
+        return {"checkout_url": session_obj.url}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# -----------------------------
 # Stripe Webhook
 # -----------------------------
 @app.post("/stripe/webhook")
@@ -1884,6 +1926,8 @@ async def stripe_webhook(request: Request):
         # 1) Checkout completed: handle unlock or premium
         if event_type == "checkout.session.completed":
             meta = (data_object.get("metadata") or {})
+
+            # Existing logic
             kind = meta.get("kind", "")
             user_id = meta.get("user_id", "") or data_object.get("client_reference_id", "")
 
@@ -1906,6 +1950,18 @@ async def stripe_webhook(request: Request):
                     ent = _get_entitlement(session, user_id)
                     ent.is_premium = True
                     ent.updated_at = datetime.utcnow()
+                    session.commit()
+
+            # NEW unlock flow (from /stripe/create-unlock-session)
+            else:
+                thread_id = meta.get("thread_id", "")
+                # target_profile_id is present but not required for DB insert
+                if user_id and thread_id:
+                    session.execute(text("""
+                        INSERT INTO thread_unlocks (thread_id, user_id)
+                        VALUES (:thread_id, :user_id)
+                        ON CONFLICT DO NOTHING
+                    """), {"thread_id": thread_id, "user_id": user_id})
                     session.commit()
 
         # 2) Subscription cancelled: turn off premium (not implemented yet)
