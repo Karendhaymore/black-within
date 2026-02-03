@@ -85,10 +85,7 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
   return `Request failed (${res.status}).`;
 }
 
-async function apiMessagingAccess(
-  userId: string,
-  threadId: string
-): Promise<MessagingAccessResponse> {
+async function apiMessagingAccess(userId: string, threadId: string): Promise<MessagingAccessResponse> {
   const url =
     `${API_BASE}/messaging/access` +
     `?user_id=${encodeURIComponent(userId)}` +
@@ -134,6 +131,26 @@ async function apiSendMessage(userId: string, threadId: string, body: string) {
   return (await res.json()) as MessageItem;
 }
 
+async function apiCreateUnlockSession(userId: string, threadId: string, targetProfileId: string) {
+  const res = await fetch(`${API_BASE}/stripe/create-unlock-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: userId,
+      target_profile_id: targetProfileId,
+      thread_id: threadId,
+    }),
+  });
+
+  if (!res.ok) {
+    const msg = await safeReadErrorDetail(res);
+    throw new Error(msg);
+  }
+
+  const data = await res.json();
+  return data as { checkout_url?: string };
+}
+
 /**
  * ✅ IMPORTANT:
  * Next.js requires useSearchParams() to be wrapped in <Suspense>.
@@ -148,13 +165,23 @@ export default function MessagesPage() {
 
 function MessagesInner() {
   const sp = useSearchParams();
+
+  // Existing params
   const threadId = sp.get("threadId") || "";
   const withName = sp.get("with") || "";
+
+  // ✅ We ALSO need the other profile id to charge/unlock for the right person.
+  // Your URL might provide one of these keys depending on how you built links:
+  const otherProfileId =
+    sp.get("withProfileId") ||
+    sp.get("with_profile_id") ||
+    sp.get("profileId") ||
+    sp.get("profile_id") ||
+    "";
 
   const userId = useMemo(() => getLoggedInUserId(), []);
 
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-
   const [access, setAccess] = useState<MessagingAccessResponse | null>(null);
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [text, setText] = useState("");
@@ -194,8 +221,7 @@ function MessagesInner() {
         ...a,
         canMessage: true,
         isPremium: a.isPremium ?? false,
-        reason:
-          "Preview mode enabled (NEXT_PUBLIC_AUTH_PREVIEW_MODE=true). UI unlocked for testing.",
+        reason: "Preview mode enabled (NEXT_PUBLIC_AUTH_PREVIEW_MODE=true). UI unlocked for testing.",
       };
     }
 
@@ -323,6 +349,35 @@ function MessagesInner() {
     }
   }
 
+  async function handleUnlock() {
+    if (!userId) {
+      window.location.href = "/auth";
+      return;
+    }
+    if (!threadId) {
+      setErr("Missing threadId. Go back and open a chat from a profile.");
+      return;
+    }
+    if (!otherProfileId) {
+      setErr(
+        "Missing other profile id in the URL. Your chat link needs to include withProfileId (or profileId)."
+      );
+      return;
+    }
+
+    setErr("");
+
+    try {
+      const data = await apiCreateUnlockSession(userId, threadId, otherProfileId);
+      if (!data?.checkout_url) {
+        throw new Error("Checkout URL missing from API response.");
+      }
+      window.location.href = data.checkout_url;
+    } catch (e: any) {
+      setErr(stringifyError(e) || "Failed to start checkout.");
+    }
+  }
+
   const navBtnStyle: React.CSSProperties = {
     padding: "0.65rem 1rem",
     border: "1px solid #ccc",
@@ -405,6 +460,35 @@ function MessagesInner() {
                   <div style={{ marginTop: 6 }}>
                     {access.reason || "Messaging is for paid members or pay-per-message users."}
                   </div>
+
+                  {/* ✅ Show Unlock button only when locked AND not in preview mode */}
+                  {!PREVIEW_MODE ? (
+                    <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <button
+                        onClick={handleUnlock}
+                        style={{
+                          padding: "0.75rem 1rem",
+                          borderRadius: 12,
+                          border: "1px solid #111",
+                          background: "#111",
+                          color: "#fff",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Unlock Conversation — $1.99
+                      </button>
+
+                      {!otherProfileId ? (
+                        <div style={{ fontSize: 12, opacity: 0.9 }}>
+                          Note: chat link needs <code>withProfileId=...</code> (or <code>profileId=...</code>)
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9 }}>
+                      (Preview mode is ON, so unlock button is hidden.)
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -498,27 +582,12 @@ function MessagesInner() {
               </button>
             </div>
 
-            {err ? <div style={{ marginTop: 10, color: "#b00020", whiteSpace: "pre-wrap" }}>{err}</div> : null}
+            {err ? (
+              <div style={{ marginTop: 10, color: "#b00020", whiteSpace: "pre-wrap" }}>{err}</div>
+            ) : null}
           </div>
         </>
       ) : null}
     </div>
   );
 }
-const unlockThread = async () => {
-  const res = await fetch(`${API_BASE}/stripe/create-unlock-session`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user_id: userId,
-      target_profile_id: otherProfileId,
-      thread_id: threadId,
-    }),
-  });
-
-  const data = await res.json();
-  window.location.href = data.checkout_url;
-};
-<button onClick={unlockThread} className="bg-gold text-black px-4 py-2 rounded">
-  Unlock Conversation — $1.99
-</button>
