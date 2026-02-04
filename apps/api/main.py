@@ -95,7 +95,7 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
 # imports (all imports at top only)
 
-engine = create_engine(...)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
 # -----------------------------
 # Database models
