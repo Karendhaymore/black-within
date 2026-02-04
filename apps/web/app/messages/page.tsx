@@ -68,8 +68,6 @@ function stringifyError(e: any): string {
 }
 
 async function safeReadErrorDetail(res: Response): Promise<string> {
-  // Handles FastAPI:
-  // { detail: "..." } OR { detail: [ ... ] }
   try {
     const data = await res.json();
     if (data?.detail != null) {
@@ -85,17 +83,17 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
   return `Request failed (${res.status}).`;
 }
 
-async function apiMessagingAccess(userId: string, threadId: string): Promise<MessagingAccessResponse> {
+async function apiMessagingAccess(
+  userId: string,
+  threadId: string
+): Promise<MessagingAccessResponse> {
   const url =
     `${API_BASE}/messaging/access` +
     `?user_id=${encodeURIComponent(userId)}` +
     `&thread_id=${encodeURIComponent(threadId)}`;
 
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    const msg = await safeReadErrorDetail(res);
-    throw new Error(msg);
-  }
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   return (await res.json()) as MessagingAccessResponse;
 }
 
@@ -107,10 +105,7 @@ async function apiGetMessages(userId: string, threadId: string): Promise<Message
     `&limit=200`;
 
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    const msg = await safeReadErrorDetail(res);
-    throw new Error(msg);
-  }
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
   const json = (await res.json()) as MessagesResponse;
   return Array.isArray(json?.items) ? json.items : [];
@@ -123,11 +118,7 @@ async function apiSendMessage(userId: string, threadId: string, body: string) {
     body: JSON.stringify({ user_id: userId, thread_id: threadId, body }),
   });
 
-  if (!res.ok) {
-    const msg = await safeReadErrorDetail(res);
-    throw new Error(msg);
-  }
-
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   return (await res.json()) as MessageItem;
 }
 
@@ -142,10 +133,7 @@ async function apiCreateUnlockSession(userId: string, threadId: string, targetPr
     }),
   });
 
-  if (!res.ok) {
-    const msg = await safeReadErrorDetail(res);
-    throw new Error(msg);
-  }
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
   const data = await res.json();
   return data as { checkout_url?: string };
@@ -166,12 +154,11 @@ export default function MessagesPage() {
 function MessagesInner() {
   const sp = useSearchParams();
 
-  // Existing params
   const threadId = sp.get("threadId") || "";
   const withName = sp.get("with") || "";
+  const lockedParam = (sp.get("locked") || "").trim();
 
-  // ✅ We ALSO need the other profile id to charge/unlock for the right person.
-  // Your URL might provide one of these keys depending on how you built links:
+  // ✅ Other profile id (needed for Stripe unlock)
   const otherProfileId =
     sp.get("withProfileId") ||
     sp.get("with_profile_id") ||
@@ -187,10 +174,10 @@ function MessagesInner() {
   const [text, setText] = useState("");
   const [err, setErr] = useState<string>("");
 
-  // Polling for new messages (optional)
-  const pollRef = useRef<number | null>(null);
+  // ✅ Separate hint state so we don't show a scary red error message
+  const [missingOtherHint, setMissingOtherHint] = useState<boolean>(false);
 
-  // Auto-scroll refs
+  const pollRef = useRef<number | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   function stopPolling() {
@@ -201,13 +188,13 @@ function MessagesInner() {
   }
 
   async function refreshAll(uid: string) {
-    // In preview mode, we still try to read access (so you can see it),
-    // but we "force unlock" the UI even if it comes back locked.
+    // clear non-fatal UI hints on refresh
+    setMissingOtherHint(false);
+
     let a: MessagingAccessResponse | null = null;
     try {
       a = await apiMessagingAccess(uid, threadId);
     } catch (e: any) {
-      // If access endpoint errors, we still allow you to view messages in preview mode
       if (!PREVIEW_MODE) throw e;
       a = {
         canMessage: true,
@@ -233,7 +220,6 @@ function MessagesInner() {
     return a;
   }
 
-  // Load chat
   useEffect(() => {
     let cancelled = false;
 
@@ -259,7 +245,6 @@ function MessagesInner() {
 
         setStatus("ready");
 
-        // Poll every 4s (only if messaging is allowed)
         stopPolling();
         if (a?.canMessage) {
           pollRef.current = window.setInterval(async () => {
@@ -286,7 +271,6 @@ function MessagesInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, userId]);
 
-  // ✅ Auto-scroll to newest message whenever messages change
   useEffect(() => {
     if (!bottomRef.current) return;
     bottomRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -302,6 +286,7 @@ function MessagesInner() {
     if (!body) return;
 
     setErr("");
+    setMissingOtherHint(false);
 
     try {
       if (locked) {
@@ -332,6 +317,8 @@ function MessagesInner() {
     if (!threadId) return;
 
     setErr("");
+    setMissingOtherHint(false);
+
     try {
       const a = await refreshAll(userId);
 
@@ -358,20 +345,19 @@ function MessagesInner() {
       setErr("Missing threadId. Go back and open a chat from a profile.");
       return;
     }
+
+    // ✅ No scary red error; show a gentle hint inside the locked panel
     if (!otherProfileId) {
-      setErr(
-        "Missing other profile id in the URL. Your chat link needs to include withProfileId (or profileId)."
-      );
+      setMissingOtherHint(true);
       return;
     }
 
     setErr("");
+    setMissingOtherHint(false);
 
     try {
       const data = await apiCreateUnlockSession(userId, threadId, otherProfileId);
-      if (!data?.checkout_url) {
-        throw new Error("Checkout URL missing from API response.");
-      }
+      if (!data?.checkout_url) throw new Error("Checkout URL missing from API response.");
       window.location.href = data.checkout_url;
     } catch (e: any) {
       setErr(stringifyError(e) || "Failed to start checkout.");
@@ -408,6 +394,11 @@ function MessagesInner() {
           {PREVIEW_MODE ? (
             <div style={{ marginTop: 6, fontSize: 12, color: "#0a5" }}>
               Preview mode enabled (NEXT_PUBLIC_AUTH_PREVIEW_MODE=true)
+            </div>
+          ) : null}
+          {lockedParam ? (
+            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+              (Locked flag in URL: <code>{lockedParam}</code>)
             </div>
           ) : null}
         </div>
@@ -458,12 +449,11 @@ function MessagesInner() {
                 <>
                   <div style={{ fontWeight: 800 }}>Messaging locked</div>
                   <div style={{ marginTop: 6 }}>
-                    {access.reason || "Messaging is for paid members or pay-per-message users."}
+                    {access.reason || "Messaging is locked. Upgrade to Premium or pay $1.99 to unlock this chat."}
                   </div>
 
-                  {/* ✅ Show Unlock button only when locked AND not in preview mode */}
                   {!PREVIEW_MODE ? (
-                    <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                       <button
                         onClick={handleUnlock}
                         style={{
@@ -480,7 +470,14 @@ function MessagesInner() {
 
                       {!otherProfileId ? (
                         <div style={{ fontSize: 12, opacity: 0.9 }}>
-                          Note: chat link needs <code>withProfileId=...</code> (or <code>profileId=...</code>)
+                          Note: chat link should include <code>withProfileId=...</code>
+                        </div>
+                      ) : null}
+
+                      {missingOtherHint ? (
+                        <div style={{ fontSize: 12, color: "#7a1b1b" }}>
+                          This chat was opened from an old link that didn’t include <code>withProfileId</code>.  
+                          Go back to Discover and click <b>Message</b> again.
                         </div>
                       ) : null}
                     </div>
@@ -582,9 +579,8 @@ function MessagesInner() {
               </button>
             </div>
 
-            {err ? (
-              <div style={{ marginTop: 10, color: "#b00020", whiteSpace: "pre-wrap" }}>{err}</div>
-            ) : null}
+            {/* ✅ Only show real errors here (not missing-withProfileId nags) */}
+            {err ? <div style={{ marginTop: 10, color: "#b00020", whiteSpace: "pre-wrap" }}>{err}</div> : null}
           </div>
         </>
       ) : null}
