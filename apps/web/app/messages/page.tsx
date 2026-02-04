@@ -83,10 +83,7 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
   return `Request failed (${res.status}).`;
 }
 
-async function apiMessagingAccess(
-  userId: string,
-  threadId: string
-): Promise<MessagingAccessResponse> {
+async function apiMessagingAccess(userId: string, threadId: string): Promise<MessagingAccessResponse> {
   const url =
     `${API_BASE}/messaging/access` +
     `?user_id=${encodeURIComponent(userId)}` +
@@ -122,21 +119,37 @@ async function apiSendMessage(userId: string, threadId: string, body: string) {
   return (await res.json()) as MessageItem;
 }
 
-async function apiCreateUnlockSession(userId: string, threadId: string, targetProfileId: string) {
-  const res = await fetch(`${API_BASE}/stripe/create-unlock-session`, {
+/**
+ * ✅ Use the ONE correct unlock route:
+ * POST /stripe/checkout/thread-unlock -> { url }
+ */
+async function apiStartThreadUnlockCheckout(userId: string, threadId: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/stripe/checkout/thread-unlock`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user_id: userId,
-      target_profile_id: targetProfileId,
-      thread_id: threadId,
-    }),
+    body: JSON.stringify({ user_id: userId, thread_id: threadId }),
   });
 
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  const data = (await res.json()) as { url?: string };
+  if (!data?.url) throw new Error("Checkout URL missing from API response.");
+  return data.url;
+}
 
-  const data = await res.json();
-  return data as { checkout_url?: string };
+/**
+ * ✅ Premium: $11.22/month subscription -> { url }
+ */
+async function apiStartPremiumCheckout(userId: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/stripe/checkout/premium`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+  });
+
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  const data = (await res.json()) as { url?: string };
+  if (!data?.url) throw new Error("Premium checkout failed (missing URL).");
+  return data.url;
 }
 
 /**
@@ -157,14 +170,7 @@ function MessagesInner() {
   const threadId = sp.get("threadId") || "";
   const withName = sp.get("with") || "";
   const lockedParam = (sp.get("locked") || "").trim();
-
-  // ✅ Other profile id (needed for Stripe unlock)
-  const otherProfileId =
-    sp.get("withProfileId") ||
-    sp.get("with_profile_id") ||
-    sp.get("profileId") ||
-    sp.get("profile_id") ||
-    "";
+  const checkout = (sp.get("checkout") || "").trim(); // success/cancel
 
   const userId = useMemo(() => getLoggedInUserId(), []);
 
@@ -173,9 +179,6 @@ function MessagesInner() {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [text, setText] = useState("");
   const [err, setErr] = useState<string>("");
-
-  // ✅ Separate hint state so we don't show a scary red error message
-  const [missingOtherHint, setMissingOtherHint] = useState<boolean>(false);
 
   const pollRef = useRef<number | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -188,13 +191,11 @@ function MessagesInner() {
   }
 
   async function refreshAll(uid: string) {
-    // clear non-fatal UI hints on refresh
-    setMissingOtherHint(false);
-
     let a: MessagingAccessResponse | null = null;
     try {
       a = await apiMessagingAccess(uid, threadId);
     } catch (e: any) {
+      // Preview-mode fallback (helps while testing environments)
       if (!PREVIEW_MODE) throw e;
       a = {
         canMessage: true,
@@ -243,6 +244,20 @@ function MessagesInner() {
         const a = await refreshAll(userId);
         if (cancelled) return;
 
+        // ✅ If Stripe returned us here with checkout=success, refresh access immediately and clean URL
+        if (checkout === "success") {
+          await refreshAll(userId);
+          if (cancelled) return;
+
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("checkout");
+            window.history.replaceState({}, "", url.toString());
+          } catch {
+            // ignore
+          }
+        }
+
         setStatus("ready");
 
         stopPolling();
@@ -269,7 +284,7 @@ function MessagesInner() {
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, userId]);
+  }, [threadId, userId, checkout]);
 
   useEffect(() => {
     if (!bottomRef.current) return;
@@ -286,7 +301,6 @@ function MessagesInner() {
     if (!body) return;
 
     setErr("");
-    setMissingOtherHint(false);
 
     try {
       if (locked) {
@@ -317,7 +331,6 @@ function MessagesInner() {
     if (!threadId) return;
 
     setErr("");
-    setMissingOtherHint(false);
 
     try {
       const a = await refreshAll(userId);
@@ -346,21 +359,29 @@ function MessagesInner() {
       return;
     }
 
-    // ✅ No scary red error; show a gentle hint inside the locked panel
-    if (!otherProfileId) {
-      setMissingOtherHint(true);
+    setErr("");
+
+    try {
+      const url = await apiStartThreadUnlockCheckout(userId, threadId);
+      window.location.href = url;
+    } catch (e: any) {
+      setErr(stringifyError(e) || "Failed to start checkout.");
+    }
+  }
+
+  async function handleGoPremium() {
+    if (!userId) {
+      window.location.href = "/auth";
       return;
     }
 
     setErr("");
-    setMissingOtherHint(false);
 
     try {
-      const data = await apiCreateUnlockSession(userId, threadId, otherProfileId);
-      if (!data?.checkout_url) throw new Error("Checkout URL missing from API response.");
-      window.location.href = data.checkout_url;
+      const url = await apiStartPremiumCheckout(userId);
+      window.location.href = url;
     } catch (e: any) {
-      setErr(stringifyError(e) || "Failed to start checkout.");
+      setErr(stringifyError(e) || "Failed to start premium checkout.");
     }
   }
 
@@ -399,6 +420,11 @@ function MessagesInner() {
           {lockedParam ? (
             <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
               (Locked flag in URL: <code>{lockedParam}</code>)
+            </div>
+          ) : null}
+          {checkout ? (
+            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+              (Checkout: <code>{checkout}</code>)
             </div>
           ) : null}
         </div>
@@ -449,11 +475,27 @@ function MessagesInner() {
                 <>
                   <div style={{ fontWeight: 800 }}>Messaging locked</div>
                   <div style={{ marginTop: 6 }}>
-                    {access.reason || "Messaging is locked. Upgrade to Premium or pay $1.99 to unlock this chat."}
+                    {access.reason ||
+                      "Messaging is locked. Go Premium ($11.22/month) for unlimited likes + messages, or unlock this chat for $1.99."}
                   </div>
 
                   {!PREVIEW_MODE ? (
                     <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                      <button
+                        onClick={handleGoPremium}
+                        style={{
+                          padding: "0.75rem 1rem",
+                          borderRadius: 12,
+                          border: "1px solid #0b5",
+                          background: "#0b5",
+                          color: "#fff",
+                          cursor: "pointer",
+                          fontWeight: 800,
+                        }}
+                      >
+                        Go Premium — $11.22/month (Unlimited Likes + Messages)
+                      </button>
+
                       <button
                         onClick={handleUnlock}
                         style={{
@@ -467,23 +509,10 @@ function MessagesInner() {
                       >
                         Unlock Conversation — $1.99
                       </button>
-
-                      {!otherProfileId ? (
-                        <div style={{ fontSize: 12, opacity: 0.9 }}>
-                          Note: chat link should include <code>withProfileId=...</code>
-                        </div>
-                      ) : null}
-
-                      {missingOtherHint ? (
-                        <div style={{ fontSize: 12, color: "#7a1b1b" }}>
-                          This chat was opened from an old link that didn’t include <code>withProfileId</code>.  
-                          Go back to Discover and click <b>Message</b> again.
-                        </div>
-                      ) : null}
                     </div>
                   ) : (
                     <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9 }}>
-                      (Preview mode is ON, so unlock button is hidden.)
+                      (Preview mode is ON, so lock wall is bypassed for testing.)
                     </div>
                   )}
                 </>
@@ -579,7 +608,7 @@ function MessagesInner() {
               </button>
             </div>
 
-            {/* ✅ Only show real errors here (not missing-withProfileId nags) */}
+            {/* ✅ Only show real errors here */}
             {err ? <div style={{ marginTop: 10, color: "#b00020", whiteSpace: "pre-wrap" }}>{err}</div> : null}
           </div>
         </>
