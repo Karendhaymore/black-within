@@ -445,7 +445,7 @@ export default function DiscoverPage() {
       }
 
       // 3) Navigate to chat
-     window.location.href =
+    window.location.href =
   `/messages?threadId=${encodeURIComponent(threadId)}` +
   `&with=${encodeURIComponent(p.displayName)}` +
   `&withProfileId=${encodeURIComponent(p.id)}` +
