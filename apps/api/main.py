@@ -93,22 +93,27 @@ if STRIPE_SECRET_KEY:
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
+# imports (all imports at top only)
+
+engine = create_engine(...)
 
 # -----------------------------
 # Database models
 # -----------------------------
-# -----------------------------
-# Database models
-# -----------------------------
-from sqlalchemy.orm import DeclarativeBase
-
 class Base(DeclarativeBase):
     pass
 
+class User(Base): ...
+class AuthAccount(Base): ...
+class Profile(Base): ...
+class SavedProfile(Base): ...
+class Like(Base): ...
+class DailyLikeCount(Base): ...
+class Notification(Base): ...
+class LoginCode(Base): ...
 
 class ThreadUnlock(Base):
     __tablename__ = "thread_unlocks"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     thread_id: Mapped[str] = mapped_column(String, index=True)
     user_id: Mapped[str] = mapped_column(String, index=True)
@@ -117,123 +122,6 @@ class ThreadUnlock(Base):
     __table_args__ = (
         UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),
     )
-
-
-class User(Base):
-    __tablename__ = "users"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class AuthAccount(Base):
-    """
-    Email + password login (password is stored hashed, never plaintext).
-    user_id is stable and derived from email (via _make_user_id_from_email()).
-    """
-    __tablename__ = "auth_accounts"
-    user_id: Mapped[str] = mapped_column(String(40), primary_key=True)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(500))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-
-
-class Profile(Base):
-    __tablename__ = "profiles"
-    id: Mapped[str] = mapped_column(String(60), primary_key=True)
-    owner_user_id: Mapped[str] = mapped_column(String(40), index=True)
-
-    display_name: Mapped[str] = mapped_column(String(80))
-    age: Mapped[int] = mapped_column(Integer)
-    city: Mapped[str] = mapped_column(String(80))
-    state_us: Mapped[str] = mapped_column(String(80))
-    photo: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-
-    identity_preview: Mapped[str] = mapped_column(String(500))
-    intention: Mapped[str] = mapped_column(String(120))
-
-    # IMPORTANT: DB currently has tags_csv; keep that name to avoid 500s
-    tags_csv: Mapped[str] = mapped_column(Text, default="[]")
-
-    # alignment fields (stored as JSON strings in TEXT columns)
-    cultural_identity_csv: Mapped[str] = mapped_column(Text, default="[]")
-    spiritual_framework_csv: Mapped[str] = mapped_column(Text, default="[]")
-
-    # relationship intent (single-select)
-    relationship_intent: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
-
-    # conscious prompts
-    dating_challenge_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    personal_truth_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    is_available: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-
-
-class SavedProfile(Base):
-    __tablename__ = "saved_profiles"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)
-    profile_id: Mapped[str] = mapped_column(String(60), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_saved_user_profile"),)
-
-
-class Like(Base):
-    __tablename__ = "likes"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)       # liker
-    profile_id: Mapped[str] = mapped_column(String(60), index=True)    # liked profile
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
-
-
-class DailyLikeCount(Base):
-    """
-    Tracks likes used in the current window.
-    - Normal mode: one row per user per UTC day (day column).
-    - Test mode: we still keep a row, but we also use window_started_at to know when to reset.
-    """
-    __tablename__ = "daily_like_counts"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)
-    day: Mapped[date] = mapped_column(Date, index=True)
-    count: Mapped[int] = mapped_column(Integer, default=0)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    # NEW: used for test-mode rolling reset
-    window_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-    __table_args__ = (UniqueConstraint("user_id", "day", name="uq_daily_like_user_day"),)
-
-
-class Notification(Base):
-    __tablename__ = "notifications"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)       # recipient
-    type: Mapped[str] = mapped_column(String(20), default="like")
-    message: Mapped[str] = mapped_column(String(500))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-
-    # Actor (who caused the notification)
-    actor_user_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-
-    # Target profile (the profile that was liked)
-    profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
-
-    # Actor profile id (so frontend can link to liker's profile page)
-    actor_profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
-
-
-class LoginCode(Base):
-    __tablename__ = "login_codes"
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)
-    email: Mapped[str] = mapped_column(String(320), index=True, unique=True)
-    code: Mapped[str] = mapped_column(String(10))
-    expires_at: Mapped[datetime] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # -----------------------------
@@ -286,18 +174,6 @@ class MessagingEntitlement(Base):
 # -----------------------------
 # Per-thread unlocks (PERMANENT)
 # -----------------------------
-class ThreadUnlock(Base):
-    __tablename__ = "thread_unlocks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(64), index=True)
-    thread_id: Mapped[str] = mapped_column(String(64), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        UniqueConstraint("user_id", "thread_id", name="uq_thread_unlock_user_thread"),
-    )
-
 
 # -----------------------------
 # MVP auto-migration helpers
