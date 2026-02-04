@@ -44,17 +44,6 @@ class Base(DeclarativeBase):
 # -----------------------------
 # Database models
 # -----------------------------
-class ThreadUnlock(Base):
-    __tablename__ = "thread_unlocks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    thread_id: Mapped[str] = mapped_column(String, index=True)
-    user_id: Mapped[str] = mapped_column(String, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),
-    )
 
 
 # -----------------------------
