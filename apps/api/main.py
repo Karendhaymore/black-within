@@ -107,6 +107,10 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 class Base(DeclarativeBase):
     pass
 
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
 
 class User(Base):
     __tablename__ = "users"
