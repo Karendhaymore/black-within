@@ -35,18 +35,6 @@ from sendgrid.helpers.mail import Mail
 
 
 # -----------------------------
-# Base (MUST be defined before models)
-# -----------------------------
-class Base(DeclarativeBase):
-    pass
-
-
-# -----------------------------
-# Database models
-# -----------------------------
-
-
-# -----------------------------
 # Config
 # -----------------------------
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -91,35 +79,123 @@ APP_WEB_BASE_URL = os.getenv("APP_WEB_BASE_URL", "https://meetblackwithin.com").
 if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
+# ✅ MUST be real DATABASE_URL (NOT create_engine(...))
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
-# imports (all imports at top only)
-
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
 # -----------------------------
-# Database models
+# Database models (Base must be defined ONCE, before any models)
 # -----------------------------
 class Base(DeclarativeBase):
     pass
 
-class Profile(Base): ...
-class SavedProfile(Base): ...
-class Like(Base): ...
-class DailyLikeCount(Base): ...
-class Notification(Base): ...
-class LoginCode(Base): ...
 
-class ThreadUnlock(Base):
-    __tablename__ = "thread_unlocks"
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AuthAccount(Base):
+    """
+    Email + password login (password is stored hashed, never plaintext).
+    user_id is stable and derived from email (via _make_user_id_from_email()).
+    """
+    __tablename__ = "auth_accounts"
+    user_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class Profile(Base):
+    __tablename__ = "profiles"
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(String(40), index=True)
+
+    display_name: Mapped[str] = mapped_column(String(80))
+    age: Mapped[int] = mapped_column(Integer)
+    city: Mapped[str] = mapped_column(String(80))
+    state_us: Mapped[str] = mapped_column(String(80))
+    photo: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    identity_preview: Mapped[str] = mapped_column(String(500))
+    intention: Mapped[str] = mapped_column(String(120))
+
+    tags_csv: Mapped[str] = mapped_column(Text, default="[]")
+
+    cultural_identity_csv: Mapped[str] = mapped_column(Text, default="[]")
+    spiritual_framework_csv: Mapped[str] = mapped_column(Text, default="[]")
+
+    relationship_intent: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    dating_challenge_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    personal_truth_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class SavedProfile(Base):
+    __tablename__ = "saved_profiles"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    thread_id: Mapped[str] = mapped_column(String, index=True)
-    user_id: Mapped[str] = mapped_column(String, index=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    profile_id: Mapped[str] = mapped_column(String(60), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),
+        UniqueConstraint("user_id", "profile_id", name="uq_saved_user_profile"),
     )
+
+
+class Like(Base):
+    __tablename__ = "likes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)       # liker
+    profile_id: Mapped[str] = mapped_column(String(60), index=True)    # liked profile
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),
+    )
+
+
+class DailyLikeCount(Base):
+    __tablename__ = "daily_like_counts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    window_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "day", name="uq_daily_like_user_day"),
+    )
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)  # recipient
+    type: Mapped[str] = mapped_column(String(20), default="like")
+    message: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    actor_user_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    actor_profile_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+
+
+class LoginCode(Base):
+    __tablename__ = "login_codes"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), index=True, unique=True)
+    code: Mapped[str] = mapped_column(String(10))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # -----------------------------
@@ -127,10 +203,8 @@ class ThreadUnlock(Base):
 # -----------------------------
 class Thread(Base):
     __tablename__ = "threads"
-
     id: Mapped[str] = mapped_column(String(60), primary_key=True)
 
-    # Store user pair in a stable order (low/high) so there is only ONE thread per pair
     user_low: Mapped[str] = mapped_column(String(40), index=True)
     user_high: Mapped[str] = mapped_column(String(40), index=True)
 
@@ -144,7 +218,6 @@ class Thread(Base):
 
 class Message(Base):
     __tablename__ = "messages"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     thread_id: Mapped[str] = mapped_column(String(60), index=True)
 
@@ -155,30 +228,35 @@ class Message(Base):
 
 
 class MessagingEntitlement(Base):
-    """
-    Simple access control for messaging.
-    - Premium users: is_premium = True
-    """
     __tablename__ = "messaging_entitlements"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True, unique=True)
-
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
-
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
 # -----------------------------
 # Per-thread unlocks (PERMANENT)
 # -----------------------------
+class ThreadUnlock(Base):
+    __tablename__ = "thread_unlocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[str] = mapped_column(String(60), index=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),
+    )
+
 
 # -----------------------------
 # MVP auto-migration helpers
 # -----------------------------
 def _auto_migrate_threads_messages_tables():
     """
-    Create threads/messages/messaging_entitlements tables (if missing).
+    Create threads/messages/messaging_entitlements/thread_unlocks tables (if missing).
     """
     with engine.begin() as conn:
         conn.execute(text("""
@@ -217,27 +295,17 @@ def _auto_migrate_threads_messages_tables():
         """))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"""))
 
-
-def _auto_migrate_thread_unlocks_table():
-    """
-    Create thread_unlocks table if missing (PERMANENT per-thread unlock).
-    If an older version of the table exists with extra columns, this will NOT drop them.
-    """
-    with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS thread_unlocks (
               id SERIAL PRIMARY KEY,
-              user_id VARCHAR(64),
-              thread_id VARCHAR(64),
+              thread_id VARCHAR(60),
+              user_id VARCHAR(40),
               created_at TIMESTAMP DEFAULT NOW(),
-              CONSTRAINT uq_thread_unlock_user_thread UNIQUE (user_id, thread_id)
+              CONSTRAINT uq_thread_user_unlock UNIQUE (thread_id, user_id)
             );
         """))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_user_id ON thread_unlocks(user_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_thread_id ON thread_unlocks(thread_id);"""))
-
-        # If the table existed before and is missing created_at, add it safely.
-        conn.execute(text("""ALTER TABLE thread_unlocks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_user_id ON thread_unlocks(user_id);"""))
 
 
 def _auto_migrate_profiles_table():
@@ -272,7 +340,6 @@ def _auto_migrate_profiles_table():
             END $$;
         """))
 
-        # alignment columns
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS cultural_identity_csv TEXT DEFAULT '[]';"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spiritual_framework_csv TEXT DEFAULT '[]';"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS relationship_intent VARCHAR(120);"""))
@@ -330,7 +397,6 @@ def _auto_migrate_daily_like_counts_table():
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_user_id ON daily_like_counts(user_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_day ON daily_like_counts(day);"""))
 
-        # If the table already existed before window_started_at, add it safely:
         conn.execute(text("""ALTER TABLE daily_like_counts ADD COLUMN IF NOT EXISTS window_started_at TIMESTAMP NULL;"""))
 
 
@@ -343,11 +409,6 @@ try:
     _auto_migrate_threads_messages_tables()
 except Exception as e:
     print("AUTO_MIGRATE_THREADS_MESSAGES failed:", str(e))
-
-try:
-    _auto_migrate_thread_unlocks_table()
-except Exception as e:
-    print("AUTO_MIGRATE_THREAD_UNLOCKS failed:", str(e))
 
 try:
     _auto_migrate_profiles_table()
@@ -1819,11 +1880,8 @@ async def stripe_webhook(request: Request):
     data_object = event["data"]["object"]
 
     with Session(engine) as session:
-        # 1) Checkout completed: handle unlock or premium
         if event_type == "checkout.session.completed":
             meta = (data_object.get("metadata") or {})
-
-            # Existing logic
             kind = meta.get("kind", "")
             user_id = meta.get("user_id", "") or data_object.get("client_reference_id", "")
 
@@ -1836,7 +1894,6 @@ async def stripe_webhook(request: Request):
                             ThreadUnlock.thread_id == thread_id,
                         )
                     ).scalar_one_or_none()
-
                     if not existing:
                         session.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=datetime.utcnow()))
                         session.commit()
@@ -1848,23 +1905,19 @@ async def stripe_webhook(request: Request):
                     ent.updated_at = datetime.utcnow()
                     session.commit()
 
-            # NEW unlock flow (from /stripe/create-unlock-session)
             else:
+                # NEW unlock flow (from /stripe/create-unlock-session)
                 thread_id = meta.get("thread_id", "")
-                # target_profile_id is present but not required for DB insert
                 if user_id and thread_id:
                     session.execute(text("""
-                        INSERT INTO thread_unlocks (thread_id, user_id)
-                        VALUES (:thread_id, :user_id)
+                        INSERT INTO thread_unlocks (thread_id, user_id, created_at)
+                        VALUES (:thread_id, :user_id, NOW())
                         ON CONFLICT DO NOTHING
                     """), {"thread_id": thread_id, "user_id": user_id})
                     session.commit()
 
-        # 2) Subscription cancelled: turn off premium (not implemented yet)
         elif event_type == "customer.subscription.deleted":
-            # We set client_reference_id = user_id during checkout,
-            # but subscription events don't always include it.
-            # Best approach: store customer_id/subscription_id mapping later.
+            # Not implemented yet (store customer/subscription mapping later)
             pass
 
     return {"ok": True}
