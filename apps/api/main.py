@@ -33,6 +33,17 @@ from sqlalchemy.exc import IntegrityError
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
+
+# -----------------------------
+# Base (MUST be defined before models)
+# -----------------------------
+class Base(DeclarativeBase):
+    pass
+
+
+# -----------------------------
+# Database models
+# -----------------------------
 class ThreadUnlock(Base):
     __tablename__ = "thread_unlocks"
 
@@ -44,6 +55,7 @@ class ThreadUnlock(Base):
     __table_args__ = (
         UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),
     )
+
 
 # -----------------------------
 # Config
@@ -67,29 +79,21 @@ AUTH_CODE_TTL_MINUTES = int(os.getenv("AUTH_CODE_TTL_MINUTES", "15"))
 AUTH_PREVIEW_MODE = os.getenv("AUTH_PREVIEW_MODE", "true").lower() in ("1", "true", "yes")
 AUTH_USERID_PEPPER = os.getenv("AUTH_USERID_PEPPER", "")
 
-# Password auth config (required for /auth/signup + /auth/login)
-AUTH_SECRET = os.getenv("AUTH_SECRET", "").strip()  # set this in Render env vars
+AUTH_SECRET = os.getenv("AUTH_SECRET", "").strip()
 PBKDF2_ITERS = int(os.getenv("PBKDF2_ITERS", "200000"))
 
 NOTIFICATIONS_LIMIT = int(os.getenv("NOTIFICATIONS_LIMIT", "200"))
-
-# Free likes/day limit
 FREE_LIKES_PER_DAY = int(os.getenv("FREE_LIKES_PER_DAY", "5"))
-
-# NEW: test-mode reset (seconds). If > 0, likes reset every N seconds (for testing).
 LIKES_RESET_TEST_SECONDS = int(os.getenv("LIKES_RESET_TEST_SECONDS", "0") or "0")
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "").strip()
 SENDGRID_FROM_NAME = os.getenv("SENDGRID_FROM_NAME", "Black Within").strip()
 
-# Messaging admin unlock safety
-ADMIN_UNLOCK_KEY = os.getenv("ADMIN_UNLOCK_KEY", "").strip()  # set this in Render for safety
+ADMIN_UNLOCK_KEY = os.getenv("ADMIN_UNLOCK_KEY", "").strip()
 
-# Stripe
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
-
 STRIPE_MESSAGE_UNLOCK_PRICE_ID = os.getenv("STRIPE_MESSAGE_UNLOCK_PRICE_ID", "").strip()
 STRIPE_PREMIUM_PRICE_ID = os.getenv("STRIPE_PREMIUM_PRICE_ID", "").strip()
 
@@ -104,9 +108,6 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 # -----------------------------
 # Database models
 # -----------------------------
-class Base(DeclarativeBase):
-    pass
-
 from sqlalchemy.orm import DeclarativeBase
 
 class Base(DeclarativeBase):
