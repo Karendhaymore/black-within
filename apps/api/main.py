@@ -234,10 +234,6 @@ class MessagingEntitlement(Base):
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
-    # ✅ store Stripe IDs so we can revoke premium on subscription deletion
-    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
-    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
-
 
 # -----------------------------
 # Per-thread unlocks (PERMANENT)
@@ -294,17 +290,10 @@ def _auto_migrate_threads_messages_tables():
               id SERIAL PRIMARY KEY,
               user_id VARCHAR(40) UNIQUE,
               is_premium BOOLEAN DEFAULT FALSE,
-              updated_at TIMESTAMP DEFAULT NOW(),
-              stripe_customer_id VARCHAR(80) NULL,
-              stripe_subscription_id VARCHAR(80) NULL
+              updated_at TIMESTAMP DEFAULT NOW()
             );
         """))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_stripe_sub ON messaging_entitlements(stripe_subscription_id);"""))
-
-        # ensure new columns exist for older DBs
-        conn.execute(text("""ALTER TABLE messaging_entitlements ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(80) NULL;"""))
-        conn.execute(text("""ALTER TABLE messaging_entitlements ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(80) NULL;"""))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS thread_unlocks (
@@ -529,7 +518,7 @@ class ProfilesListResponse(BaseModel):
 class LikesStatusResponse(BaseModel):
     likesLeft: int
     limit: int
-    windowType: str  # "daily_utc" or "test_seconds" (or "premium")
+    windowType: str  # "daily_utc" or "test_seconds"
     resetsAtUTC: str
 
 
@@ -598,12 +587,11 @@ class CheckoutSessionResponse(BaseModel):
     url: str
 
 
-class EntitlementsResponse(BaseModel):
-    isPremium: bool
-
-
-class ThreadUnlockedResponse(BaseModel):
-    unlocked: bool
+# NEW: Create Stripe Checkout Session (Unlock Conversation – $1.99)
+class CreateUnlockSessionPayload(BaseModel):
+    user_id: str
+    target_profile_id: str
+    thread_id: str
 
 
 # Accept BOTH camelCase and snake_case (frontend may send either)
@@ -642,7 +630,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.1.4")
+app = FastAPI(title="Black Within API", version="1.1.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -835,32 +823,6 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
     return counter, likes_left, reset_at, "daily_utc"
 
 
-# -----------------------------
-# Entitlements helpers (used by likes + messaging)
-# -----------------------------
-def _get_entitlement(session: Session, user_id: str) -> MessagingEntitlement:
-    row = session.execute(
-        select(MessagingEntitlement).where(MessagingEntitlement.user_id == user_id)
-    ).scalar_one_or_none()
-    if row:
-        return row
-    row = MessagingEntitlement(user_id=user_id, is_premium=False, updated_at=datetime.utcnow())
-    session.add(row)
-    try:
-        session.commit()
-    except IntegrityError:
-        session.rollback()
-        row = session.execute(
-            select(MessagingEntitlement).where(MessagingEntitlement.user_id == user_id)
-        ).scalar_one()
-    return row
-
-
-def _is_premium(session: Session, user_id: str) -> bool:
-    ent = _get_entitlement(session, user_id)
-    return bool(ent.is_premium)
-
-
 @app.get("/")
 def root():
     return {"status": "ok", "service": "black-within-api"}
@@ -881,7 +843,7 @@ def health():
         "freeLikesPerDay": FREE_LIKES_PER_DAY,
         "likesResetTestSeconds": LIKES_RESET_TEST_SECONDS,
         "corsOrigins": origins,
-        "version": "1.1.4",
+        "version": "1.1.3",
     }
 
 
@@ -892,36 +854,6 @@ def health():
 def me(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     return MeResponse(user_id=user_id)
-
-
-# -----------------------------
-# Tiny status endpoints (for frontend UX)
-# -----------------------------
-@app.get("/entitlements", response_model=EntitlementsResponse)
-def entitlements(user_id: str = Query(...)):
-    user_id = _ensure_user(user_id)
-    with Session(engine) as session:
-        ent = _get_entitlement(session, user_id)
-        return EntitlementsResponse(isPremium=bool(ent.is_premium))
-
-
-@app.get("/threads/unlocked", response_model=ThreadUnlockedResponse)
-def threads_unlocked(user_id: str = Query(...), thread_id: str = Query(...)):
-    user_id = _ensure_user(user_id)
-    thread_id = (thread_id or "").strip()
-    if not thread_id:
-        raise HTTPException(status_code=400, detail="thread_id is required")
-
-    with Session(engine) as session:
-        ent = _get_entitlement(session, user_id)
-        if ent.is_premium:
-            return ThreadUnlockedResponse(unlocked=True)
-
-        tu = session.execute(
-            select(ThreadUnlock).where(ThreadUnlock.user_id == user_id, ThreadUnlock.thread_id == thread_id)
-        ).scalar_one_or_none()
-
-        return ThreadUnlockedResponse(unlocked=bool(tu))
 
 
 # -----------------------------
@@ -1046,21 +978,12 @@ def verify_code(payload: VerifyCodePayload):
 
 
 # -----------------------------
-# Likes status (Premium = unlimited)
+# Likes status
 # -----------------------------
 @app.get("/likes/status", response_model=LikesStatusResponse)
 def likes_status(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
-        if _is_premium(session, user_id):
-            far_future = (datetime.utcnow() + timedelta(days=3650)).isoformat()
-            return LikesStatusResponse(
-                likesLeft=1_000_000_000,
-                limit=1_000_000_000,
-                windowType="premium",
-                resetsAtUTC=far_future,
-            )
-
         counter, likes_left, reset_at, window_type = _get_likes_window(session, user_id)
         return LikesStatusResponse(
             likesLeft=likes_left,
@@ -1392,7 +1315,7 @@ def clear_notifications(user_id: str = Query(...)):
 
 
 # -----------------------------
-# Likes (Premium = unlimited server-side)
+# Likes (with daily reset + test reset)
 # -----------------------------
 @app.get("/likes", response_model=IdListResponse)
 def get_likes(user_id: str = Query(...)):
@@ -1477,33 +1400,24 @@ def like(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        premium = _is_premium(session, liker_user_id)
+        counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
 
-        # If already liked, return without charging a like
         existing = session.execute(
             select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
         ).scalar_one_or_none()
         if existing:
-            if premium:
-                far_future = (datetime.utcnow() + timedelta(days=3650)).isoformat()
-                return {"ok": True, "likesLeft": 1_000_000_000, "resetsAtUTC": far_future}
-            counter, likes_left_now, reset_at, _ = _get_likes_window(session, liker_user_id)
             return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
 
-        # Non-premium: enforce limits
-        if not premium:
-            counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
-
-            if int(counter.count) >= FREE_LIKES_PER_DAY:
-                if window_type == "test_seconds":
-                    raise HTTPException(
-                        status_code=429,
-                        detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.",
-                    )
+        if int(counter.count) >= FREE_LIKES_PER_DAY:
+            if window_type == "test_seconds":
                 raise HTTPException(
                     status_code=429,
-                    detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.",
+                    detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.",
                 )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.",
+            )
 
         prof = session.get(Profile, profile_id)
         if not prof:
@@ -1511,14 +1425,12 @@ def like(payload: ProfileAction):
 
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
 
-        # Non-premium: increment counter after successful like insert attempt
-        if not premium:
-            counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
-            counter.count = int(counter.count) + 1
-            counter.updated_at = datetime.utcnow()
-            if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
-                if not counter.window_started_at:
-                    counter.window_started_at = datetime.utcnow()
+        counter.count = int(counter.count) + 1
+        counter.updated_at = datetime.utcnow()
+
+        if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
+            if not counter.window_started_at:
+                counter.window_started_at = datetime.utcnow()
 
         recipient_user_id = prof.owner_user_id
 
@@ -1543,19 +1455,11 @@ def like(payload: ProfileAction):
             session.commit()
         except IntegrityError:
             session.rollback()
-            # On conflict (duplicate), treat as OK
-            if premium:
-                far_future = (datetime.utcnow() + timedelta(days=3650)).isoformat()
-                return {"ok": True, "likesLeft": 1_000_000_000, "resetsAtUTC": far_future}
-            counter2, likes_left_final, reset_at2, _ = _get_likes_window(session, liker_user_id)
-            return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
+            likes_left_safe = max(0, FREE_LIKES_PER_DAY - int(counter.count))
+            return {"ok": True, "likesLeft": likes_left_safe, "resetsAtUTC": reset_at.isoformat()}
 
-        if premium:
-            far_future = (datetime.utcnow() + timedelta(days=3650)).isoformat()
-            return {"ok": True, "likesLeft": 1_000_000_000, "resetsAtUTC": far_future}
-
-        counter3, likes_left_final, reset_at3, _ = _get_likes_window(session, liker_user_id)
-        return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at3.isoformat()}
+        counter2, likes_left_final, reset_at2, window_type2 = _get_likes_window(session, liker_user_id)
+        return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
 
 
 # -----------------------------
@@ -1567,6 +1471,24 @@ def _sorted_pair(a: str, b: str) -> Tuple[str, str]:
     if not a or not b:
         raise HTTPException(status_code=400, detail="Both user ids are required.")
     return (a, b) if a < b else (b, a)
+
+
+def _get_entitlement(session: Session, user_id: str) -> MessagingEntitlement:
+    row = session.execute(
+        select(MessagingEntitlement).where(MessagingEntitlement.user_id == user_id)
+    ).scalar_one_or_none()
+    if row:
+        return row
+    row = MessagingEntitlement(user_id=user_id, is_premium=False, updated_at=datetime.utcnow())
+    session.add(row)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        row = session.execute(
+            select(MessagingEntitlement).where(MessagingEntitlement.user_id == user_id)
+        ).scalar_one()
+    return row
 
 
 def _can_message_thread(session: Session, user_id: str, thread_id: str) -> Tuple[bool, bool, str]:
@@ -1726,11 +1648,7 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
 # Messages
 # -----------------------------
 @app.get("/messages", response_model=MessagesResponse)
-def list_messages(
-    thread_id: str = Query(...),
-    user_id: str = Query(...),
-    limit: int = Query(default=200, ge=1, le=500),
-):
+def list_messages(thread_id: str = Query(...), user_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)):
     user_id = _ensure_user(user_id)
     thread_id = (thread_id or "").strip()
     if not thread_id:
@@ -1851,7 +1769,7 @@ def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default
 
 
 # -----------------------------
-# Stripe Checkout (SINGLE unlock flow)
+# Stripe Checkout
 # -----------------------------
 @app.post("/stripe/checkout/thread-unlock", response_model=CheckoutSessionResponse)
 def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
@@ -1908,7 +1826,42 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
 
 
 # -----------------------------
-# Stripe Webhook (strict + future-proof)
+# NEW ROUTE 1: Create Stripe Checkout Session (Unlock Conversation – $1.99)
+# -----------------------------
+@app.post("/stripe/create-unlock-session")
+def create_unlock_session(payload: CreateUnlockSessionPayload):
+    try:
+        session_obj = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            mode="payment",
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {
+                        "name": "Black Within — Conversation Unlock",
+                        "description": "Unlock messaging with this person forever",
+                    },
+                    "unit_amount": 199,
+                },
+                "quantity": 1,
+            }],
+            metadata={
+                "user_id": payload.user_id,
+                "target_profile_id": payload.target_profile_id,
+                "thread_id": payload.thread_id,
+            },
+            success_url="https://meetblackwithin.com/messages?success=true",
+            cancel_url="https://meetblackwithin.com/messages?canceled=true",
+        )
+
+        return {"checkout_url": session_obj.url}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# -----------------------------
+# Stripe Webhook
 # -----------------------------
 @app.post("/stripe/webhook")
 async def stripe_webhook(request: Request):
@@ -1935,7 +1888,6 @@ async def stripe_webhook(request: Request):
             if kind == "thread_unlock":
                 thread_id = meta.get("thread_id", "")
                 if user_id and thread_id:
-                    # idempotent via UNIQUE constraint
                     existing = session.execute(
                         select(ThreadUnlock).where(
                             ThreadUnlock.user_id == user_id,
@@ -1951,31 +1903,21 @@ async def stripe_webhook(request: Request):
                     ent = _get_entitlement(session, user_id)
                     ent.is_premium = True
                     ent.updated_at = datetime.utcnow()
-
-                    # Save Stripe IDs if present (helps revoke premium on subscription deletion)
-                    customer_id = data_object.get("customer")
-                    subscription_id = data_object.get("subscription")
-                    if customer_id:
-                        ent.stripe_customer_id = str(customer_id)
-                    if subscription_id:
-                        ent.stripe_subscription_id = str(subscription_id)
-
                     session.commit()
 
             else:
-                # Unknown checkout type — ignore safely
-                pass
+                # NEW unlock flow (from /stripe/create-unlock-session)
+                thread_id = meta.get("thread_id", "")
+                if user_id and thread_id:
+                    session.execute(text("""
+                        INSERT INTO thread_unlocks (thread_id, user_id, created_at)
+                        VALUES (:thread_id, :user_id, NOW())
+                        ON CONFLICT DO NOTHING
+                    """), {"thread_id": thread_id, "user_id": user_id})
+                    session.commit()
 
         elif event_type == "customer.subscription.deleted":
-            # If we can match the subscription_id, revoke premium safely
-            sub_id = str(data_object.get("id") or "")
-            if sub_id:
-                ent = session.execute(
-                    select(MessagingEntitlement).where(MessagingEntitlement.stripe_subscription_id == sub_id)
-                ).scalar_one_or_none()
-                if ent:
-                    ent.is_premium = False
-                    ent.updated_at = datetime.utcnow()
-                    session.commit()
+            # Not implemented yet (store customer/subscription mapping later)
+            pass
 
     return {"ok": True}
