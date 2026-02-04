@@ -16,8 +16,8 @@ const API_BASE =
  * Do NOT import Profile from sampleProfiles here.
  */
 type ApiProfile = {
-  id: string;
-  owner_user_id: string;
+  id: string; // profile id
+  owner_user_id: string; // user id of the owner
   displayName: string;
   age: number;
   city: string;
@@ -70,20 +70,18 @@ async function apiListProfiles(): Promise<ApiProfile[]> {
 }
 
 async function apiGetSavedIds(userId: string): Promise<string[]> {
-  const res = await fetch(
-    `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`,
-    { cache: "no-store" }
-  );
+  const res = await fetch(`${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`, {
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error(`Failed to load saved profiles (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
 }
 
 async function apiGetLikes(userId: string): Promise<string[]> {
-  const res = await fetch(
-    `${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`,
-    { cache: "no-store" }
-  );
+  const res = await fetch(`${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`, {
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error(`Failed to load likes (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
@@ -108,11 +106,7 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
 }
 
 // NOTE: backend currently ignores recipient_user_id, but passing it is future-proof.
-async function apiLikeProfile(
-  userId: string,
-  profileId: string,
-  recipientUserId?: string
-) {
+async function apiLikeProfile(userId: string, profileId: string, recipientUserId?: string) {
   const res = await fetch(`${API_BASE}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -123,6 +117,38 @@ async function apiLikeProfile(
     }),
   });
   if (!res.ok) throw new Error(`Like failed (${res.status}).`);
+}
+
+/**
+ * ✅ Threads API: POST /threads/get-or-create
+ * Backend expects: { user_id, with_profile_id }
+ * Returns one of: { threadId } | { thread_id } | { id }
+ */
+type ThreadGetOrCreateResponse = {
+  threadId?: string;
+  thread_id?: string;
+  id?: string;
+};
+
+async function apiGetOrCreateThread(userId: string, withProfileId: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/threads/get-or-create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: userId,
+      with_profile_id: withProfileId,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to create thread (${res.status}). ${text}`);
+  }
+
+  const data = (await res.json()) as ThreadGetOrCreateResponse;
+  const threadId = data.threadId || data.thread_id || data.id || "";
+  if (!threadId) throw new Error("Thread created, but no thread id returned.");
+  return threadId;
 }
 
 // -----------------------------
@@ -214,10 +240,7 @@ export default function ProfileDetailPage() {
       setApiError(null);
       setLoadingSets(true);
 
-      const [saved, likes] = await Promise.all([
-        apiGetSavedIds(uid),
-        apiGetLikes(uid),
-      ]);
+      const [saved, likes] = await Promise.all([apiGetSavedIds(uid), apiGetLikes(uid)]);
 
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
       setLikedIds(likes.filter((id) => availableProfileIds.has(id)));
@@ -268,9 +291,7 @@ export default function ProfileDetailPage() {
     const prev = savedIds;
 
     setSavedIds((curr) =>
-      curr.includes(profile.id)
-        ? curr.filter((x) => x !== profile.id)
-        : [profile.id, ...curr]
+      curr.includes(profile.id) ? curr.filter((x) => x !== profile.id) : [profile.id, ...curr]
     );
 
     try {
@@ -297,9 +318,7 @@ export default function ProfileDetailPage() {
 
     const prev = likedIds;
 
-    setLikedIds((curr) =>
-      curr.includes(profile.id) ? curr : [profile.id, ...curr]
-    );
+    setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
 
     try {
       await apiLikeProfile(userId, profile.id, profile.owner_user_id);
@@ -315,34 +334,45 @@ export default function ProfileDetailPage() {
     }
   }
 
+  // ✅ NEW: Message button now creates a real thread, then navigates with withProfileId included.
+  async function onMessage() {
+    if (!profile) return;
+    if (!userId) return;
+
+    try {
+      setApiError(null);
+      showToast("Opening chat…");
+
+      // Create/get a real thread id
+      const threadId = await apiGetOrCreateThread(userId, profile.id);
+
+      // Navigate with required params for unlock flow
+      window.location.href =
+        `/messages?threadId=${encodeURIComponent(threadId)}` +
+        `&with=${encodeURIComponent(profile.displayName)}` +
+        `&withProfileId=${encodeURIComponent(profile.id)}`;
+    } catch (e: any) {
+      const msg = e?.message || "Could not start a chat right now.";
+      setApiError(msg);
+      showToast(msg);
+    }
+  }
+
   if (loading) {
     return (
       <main style={{ minHeight: "100vh", padding: "2rem" }}>
         <p>Loading profile…</p>
-        <p style={{ color: "#666", fontSize: 13, marginTop: 8 }}>
-          API: {API_BASE}
-        </p>
+        <p style={{ color: "#666", fontSize: 13, marginTop: 8 }}>API: {API_BASE}</p>
       </main>
     );
   }
 
   if (!profile) {
     return (
-      <main
-        style={{
-          minHeight: "100vh",
-          padding: "2rem",
-          display: "grid",
-          placeItems: "start center",
-        }}
-      >
+      <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
         <div style={{ width: "100%", maxWidth: 900 }}>
-          <h1 style={{ fontSize: "2rem", marginBottom: "0.35rem" }}>
-            Profile not found
-          </h1>
-          <p style={{ color: "#666" }}>
-            This profile ID was not found in the API list.
-          </p>
+          <h1 style={{ fontSize: "2rem", marginBottom: "0.35rem" }}>Profile not found</h1>
+          <p style={{ color: "#666" }}>This profile ID was not found in the API list.</p>
 
           <div style={{ marginTop: 10, fontSize: 13, color: "#666" }}>
             <div>
@@ -386,33 +416,12 @@ export default function ProfileDetailPage() {
   const isLiked = likedIds.includes(profile.id);
   const tags = Array.isArray(profile.tags) ? profile.tags : [];
 
-  const messageHref = `/messages?threadId=${encodeURIComponent(
-    profile.id
-  )}&with=${encodeURIComponent(profile.displayName)}`;
-
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "2rem",
-        display: "grid",
-        placeItems: "start center",
-      }}
-    >
+    <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
       <div style={{ width: "100%", maxWidth: 900 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: "1rem",
-            flexWrap: "wrap",
-            alignItems: "flex-start",
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap", alignItems: "flex-start" }}>
           <div>
-            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
-              {profile.displayName}
-            </h1>
+            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>{profile.displayName}</h1>
             <p style={{ color: "#555" }}>
               {profile.age} • {profile.city}, {profile.stateUS}
             </p>
@@ -482,21 +491,12 @@ export default function ProfileDetailPage() {
             border: isSaved ? "1px solid #cfe7cf" : "1px solid #e5e5e5",
             borderRadius: 16,
             overflow: "hidden",
-            boxShadow: isSaved
-              ? "0 0 0 2px rgba(207,231,207,0.35) inset"
-              : "none",
+            boxShadow: isSaved ? "0 0 0 2px rgba(207,231,207,0.35) inset" : "none",
             background: "white",
           }}
         >
           {/* Photo */}
-          <div
-            style={{
-              width: "100%",
-              aspectRatio: "16 / 9",
-              background: "#f3f3f3",
-              position: "relative",
-            }}
-          >
+          <div style={{ width: "100%", aspectRatio: "16 / 9", background: "#f3f3f3", position: "relative" }}>
             {isSaved && (
               <div
                 style={{
@@ -558,25 +558,13 @@ export default function ProfileDetailPage() {
                       background: "white",
                     }}
                   >
-                    <div style={{ fontWeight: 800, marginBottom: 6 }}>
-                      {sec.title}
-                    </div>
-                    <div
-                      style={{
-                        color: "#555",
-                        fontSize: "1.02rem",
-                        whiteSpace: "pre-wrap",
-                      }}
-                    >
-                      {sec.body}
-                    </div>
+                    <div style={{ fontWeight: 800, marginBottom: 6 }}>{sec.title}</div>
+                    <div style={{ color: "#555", fontSize: "1.02rem", whiteSpace: "pre-wrap" }}>{sec.body}</div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{ color: "#555", fontSize: "1.05rem" }}>
-                {profile.identityPreview}
-              </div>
+              <div style={{ color: "#555", fontSize: "1.05rem" }}>{profile.identityPreview}</div>
             )}
 
             <div style={{ marginTop: "0.95rem", color: "#666" }}>
@@ -584,14 +572,7 @@ export default function ProfileDetailPage() {
             </div>
 
             {tags.length > 0 && (
-              <div
-                style={{
-                  marginTop: "0.85rem",
-                  display: "flex",
-                  gap: "0.4rem",
-                  flexWrap: "wrap",
-                }}
-              >
+              <div style={{ marginTop: "0.85rem", display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
                 {tags.slice(0, 12).map((t, idx) => (
                   <span
                     key={`${profile.id}-tag-${idx}`}
@@ -610,14 +591,7 @@ export default function ProfileDetailPage() {
             )}
 
             {/* Actions */}
-            <div
-              style={{
-                marginTop: "1.1rem",
-                display: "flex",
-                gap: "0.6rem",
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ marginTop: "1.1rem", display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
               <button
                 onClick={onToggleSave}
                 disabled={loadingSets}
@@ -648,20 +622,21 @@ export default function ProfileDetailPage() {
                 {isLiked ? "Liked" : "Like"}
               </button>
 
-              {/* ✅ NEW: Message button (builds correct URL automatically) */}
-              <Link
-                href={messageHref}
+              {/* ✅ UPDATED: Message button now uses correct thread + includes withProfileId */}
+              <button
+                onClick={onMessage}
+                disabled={loadingSets}
                 style={{
                   padding: "0.7rem 1rem",
                   borderRadius: 10,
                   border: "1px solid #ccc",
-                  textDecoration: "none",
-                  color: "inherit",
-                  display: "inline-block",
+                  background: "white",
+                  cursor: loadingSets ? "not-allowed" : "pointer",
+                  opacity: loadingSets ? 0.75 : 1,
                 }}
               >
                 Message
-              </Link>
+              </button>
 
               <Link
                 href="/discover"
