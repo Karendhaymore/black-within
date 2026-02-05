@@ -74,7 +74,7 @@ export default function HomePage() {
           </p>
 
           <div style={{ marginTop: 18, display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <Link href="/auth/login" style={btn}>
+            <Link href="/discover" style={btn}>
               Log in / Create account
             </Link>
           </div>
