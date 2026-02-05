@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 
 function getApiBaseUrl() {
@@ -11,43 +11,42 @@ function getApiBaseUrl() {
   );
 }
 
-async function apiJson<T>(base: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${base}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-    cache: "no-store",
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as any)?.detail || "Request failed.");
-  return data as T;
-}
-
 export default function ForgotPasswordPage() {
   const API_BASE = useMemo(() => getApiBaseUrl(), []);
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading" | "sent">("idle");
-  const [error, setError] = useState("");
+  const [status, setStatus] = useState<string>("");
+  const [loading, setLoading] = useState(false);
 
-  async function submit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError("");
+    setStatus("");
 
-    const clean = (email || "").trim().toLowerCase();
-    if (!clean || !clean.includes("@") || !clean.includes(".")) {
-      setError("Please enter a valid email address.");
+    const cleanEmail = (email || "").trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      setStatus("Please enter a valid email.");
       return;
     }
 
-    setStatus("loading");
+    setLoading(true);
     try {
-      await apiJson<{ ok: boolean }>(API_BASE, "/auth/forgot-password", {
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
         method: "POST",
-        body: JSON.stringify({ email: clean }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail }),
+        cache: "no-store",
       });
-      setStatus("sent");
-    } catch (err: any) {
-      setError(err?.message || "Something went wrong. Please try again.");
-      setStatus("idle");
+
+      // Backend returns ok even when email doesn't exist (by design)
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Request failed (${res.status})`);
+      }
+
+      setStatus("If that email exists, we sent a reset link. Check your inbox (and spam).");
+    } catch (e: any) {
+      setStatus(e?.message || "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -62,24 +61,6 @@ export default function ForgotPasswordPage() {
     backdropFilter: "blur(6px)",
   };
 
-  const inputStyle: React.CSSProperties = {
-    padding: "0.8rem 0.9rem",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.18)",
-    background: "white",
-    outline: "none",
-  };
-
-  const primaryBtn: React.CSSProperties = {
-    padding: "0.85rem 1.1rem",
-    borderRadius: 12,
-    border: "1px solid #0a5",
-    background: "#0a5",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: 700,
-  };
-
   return (
     <main
       style={{
@@ -91,71 +72,88 @@ export default function ForgotPasswordPage() {
           "radial-gradient(1200px 600px at 20% 10%, rgba(197,137,45,0.18), transparent 60%), radial-gradient(900px 500px at 80% 20%, rgba(10,85,0,0.14), transparent 55%), radial-gradient(900px 700px at 50% 90%, rgba(0,0,0,0.12), transparent 55%), #0b0b0b",
       }}
     >
-      <div style={cardStyle}>
-        <h1 style={{ fontSize: "2rem", margin: 0, color: "#111" }}>Reset your password</h1>
-        <p style={{ margin: "0.45rem 0 0", color: "rgba(0,0,0,0.72)", lineHeight: 1.4 }}>
-          Enter the email you used for Black Within. We’ll send a reset link.
-        </p>
+      <div style={{ width: "100%", maxWidth: 900 }}>
+        <div
+          style={{
+            margin: "0 auto 14px",
+            maxWidth: 520,
+            height: 10,
+            borderRadius: 999,
+            background:
+              "linear-gradient(90deg, rgba(197,137,45,0.0), rgba(197,137,45,0.55), rgba(10,85,0,0.55), rgba(197,137,45,0.55), rgba(197,137,45,0.0))",
+            opacity: 0.9,
+          }}
+        />
 
-        <form onSubmit={submit} style={{ marginTop: 16, display: "grid", gap: 10 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontWeight: 600, color: "#111" }}>Email</span>
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              style={inputStyle}
-              disabled={status === "loading" || status === "sent"}
-            />
-          </label>
+        <div style={cardStyle}>
+          <h1 style={{ fontSize: "2rem", margin: 0, color: "#111" }}>Reset password</h1>
+          <p style={{ margin: "0.45rem 0 0", color: "rgba(0,0,0,0.72)", lineHeight: 1.4 }}>
+            Enter your email and we’ll send a secure reset link.
+          </p>
 
-          {error ? (
-            <div
+          <form onSubmit={onSubmit} style={{ display: "grid", gap: "0.9rem", marginTop: 14 }}>
+            <label style={{ display: "grid", gap: "0.35rem" }}>
+              <span style={{ fontWeight: 600, color: "#111" }}>Email</span>
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                style={{
+                  padding: "0.8rem 0.9rem",
+                  borderRadius: 12,
+                  border: "1px solid rgba(0,0,0,0.18)",
+                  background: "white",
+                  outline: "none",
+                }}
+              />
+            </label>
+
+            {status ? (
+              <div
+                style={{
+                  padding: "0.85rem",
+                  borderRadius: 12,
+                  border: "1px solid rgba(0,0,0,0.10)",
+                  background: "rgba(0,0,0,0.04)",
+                  color: "rgba(0,0,0,0.78)",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {status}
+              </div>
+            ) : null}
+
+            <button
+              type="submit"
+              disabled={loading}
               style={{
-                padding: "0.85rem",
+                padding: "0.85rem 1.1rem",
                 borderRadius: 12,
-                border: "1px solid rgba(176,0,32,0.25)",
-                background: "rgba(176,0,32,0.06)",
-                color: "#7a1b1b",
-                whiteSpace: "pre-wrap",
+                border: "1px solid #0a5",
+                background: "#0a5",
+                color: "#fff",
+                cursor: loading ? "not-allowed" : "pointer",
+                fontWeight: 700,
+                opacity: loading ? 0.75 : 1,
               }}
             >
-              {error}
-            </div>
-          ) : null}
+              {loading ? "Sending…" : "Send reset link"}
+            </button>
 
-          {status === "sent" ? (
-            <div
+            <Link
+              href="/auth"
               style={{
-                padding: "0.85rem",
-                borderRadius: 12,
-                border: "1px solid rgba(10,85,0,0.25)",
-                background: "rgba(10,85,0,0.06)",
-                color: "#1f5b1f",
+                color: "inherit",
+                textDecoration: "none",
+                borderBottom: "1px solid rgba(0,0,0,0.25)",
+                paddingBottom: 1,
+                width: "fit-content",
               }}
             >
-              If an account exists for that email, a reset link has been sent.
-            </div>
-          ) : null}
-
-          <button
-            type="submit"
-            style={{ ...primaryBtn, opacity: status === "loading" ? 0.75 : 1 }}
-            disabled={status === "loading" || status === "sent"}
-          >
-            {status === "loading" ? "Sending…" : "Send reset link"}
-          </button>
-
-          <div style={{ marginTop: 6, fontSize: 13, color: "rgba(0,0,0,0.65)" }}>
-            <Link href="/auth" style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: 3 }}>
               Back to login
             </Link>
-          </div>
-        </form>
-
-        <div style={{ marginTop: 16, fontSize: 12, color: "rgba(0,0,0,0.55)" }}>
-          Links expire quickly for safety. If you don’t see it, check spam/junk.
+          </form>
         </div>
       </div>
     </main>
