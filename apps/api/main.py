@@ -1828,7 +1828,7 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
 # -----------------------------
 # NEW ROUTE 1: Create Stripe Checkout Session (Unlock Conversation – $1.99)
 # -----------------------------
-@app.post("/stripe/create-unlock-session")
+
 def create_unlock_session(payload: CreateUnlockSessionPayload):
     try:
         session_obj = stripe.checkout.Session.create(
