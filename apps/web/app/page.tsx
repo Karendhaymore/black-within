@@ -3,16 +3,16 @@
 import Link from "next/link";
 
 export default function HomePage() {
-  const bg = {
+  const bg: React.CSSProperties = {
     minHeight: "100vh",
     display: "grid",
     placeItems: "center",
     padding: "2.5rem 1rem",
     background:
       "radial-gradient(1200px 700px at 15% 10%, rgba(197,137,45,0.18), transparent 60%), radial-gradient(900px 600px at 85% 20%, rgba(10,85,0,0.14), transparent 55%), radial-gradient(900px 700px at 50% 92%, rgba(0,0,0,0.14), transparent 55%), #0b0b0b",
-  } as const;
+  };
 
-  const card = {
+  const card: React.CSSProperties = {
     width: "100%",
     maxWidth: 900,
     borderRadius: 22,
@@ -21,9 +21,9 @@ export default function HomePage() {
     boxShadow: "0 18px 60px rgba(0,0,0,0.28)",
     padding: "2rem",
     backdropFilter: "blur(8px)",
-  } as const;
+  };
 
-  const pill = {
+  const pill: React.CSSProperties = {
     display: "inline-block",
     padding: "0.4rem 0.75rem",
     borderRadius: 999,
@@ -33,27 +33,16 @@ export default function HomePage() {
     fontWeight: 700,
     fontSize: 12,
     letterSpacing: "0.06em",
-    textTransform: "uppercase" as const,
+    textTransform: "uppercase",
   };
 
-  const btn = {
+  const btn: React.CSSProperties = {
     display: "inline-block",
     padding: "0.95rem 1.15rem",
     borderRadius: 14,
     border: "1px solid #111",
     background: "#111",
     color: "#fff",
-    textDecoration: "none",
-    fontWeight: 800,
-  };
-
-  const btn2 = {
-    display: "inline-block",
-    padding: "0.95rem 1.15rem",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.14)",
-    background: "white",
-    color: "#111",
     textDecoration: "none",
     fontWeight: 800,
   };
@@ -88,7 +77,7 @@ export default function HomePage() {
             <Link href="/auth" style={btn}>
               Log in / Create account
             </Link>
-    
+          </div>
 
           <div style={{ marginTop: 14, fontSize: 12, color: "rgba(0,0,0,0.55)" }}>
             Move slow. Move honest. Move protected.
