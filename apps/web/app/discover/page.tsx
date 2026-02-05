@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 /**
  * IMPORTANT:
@@ -204,6 +205,9 @@ function formatResetHint(status: LikesStatusResponse | null) {
 }
 
 export default function DiscoverPage() {
+  const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
+
   const [userId, setUserId] = useState<string>("");
 
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
@@ -330,11 +334,15 @@ export default function DiscoverPage() {
 
   useEffect(() => {
     const uid = getLoggedInUserId();
+
     if (!uid) {
-      window.location.href = "/auth";
+      // Redirect with "next" so you can bring them back after login if you want
+      router.replace("/auth?next=/discover");
       return;
     }
+
     setUserId(uid);
+    setAuthChecked(true);
 
     (async () => {
       try {
@@ -353,7 +361,7 @@ export default function DiscoverPage() {
       await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!userId) return;
@@ -445,12 +453,11 @@ export default function DiscoverPage() {
       }
 
       // 3) Navigate to chat
-    window.location.href =
-  `/messages?threadId=${encodeURIComponent(threadId)}` +
-  `&with=${encodeURIComponent(p.displayName)}` +
-  `&withProfileId=${encodeURIComponent(p.id)}` +
-  (locked ? "&locked=1" : "");
-
+      window.location.href =
+        `/messages?threadId=${encodeURIComponent(threadId)}` +
+        `&with=${encodeURIComponent(p.displayName)}` +
+        `&withProfileId=${encodeURIComponent(p.id)}` +
+        (locked ? "&locked=1" : "");
     } catch (e: any) {
       const msg = toNiceString(e?.message || e) || "Could not start a chat right now.";
       setApiError(msg);
@@ -469,6 +476,17 @@ export default function DiscoverPage() {
   };
 
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
+
+  // ✅ Block render until auth checked
+  if (!authChecked) {
+    return (
+      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
+          Checking access…
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
