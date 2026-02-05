@@ -1,43 +1,4 @@
-Please make these updates to my file:
-
-Do this exact replacement in apps/web/app/discover/page.tsx
-1) Find the first useEffect(() => { ... }, []); (the one that loads profiles on page load)
-Delete that whole block and paste this one in its place:
-useEffect(() => {
-  const uid = getLoggedInUserId();
-
-  // If not logged in, send them to login (avoid loops with /auth redirecting to /discover)
-  if (!uid) {
-    window.location.href = "/auth/login";
-    return;
-  }
-
-  setUserId(uid);
-
-  (async () => {
-    try {
-      setApiError(null);
-      setLoadingProfiles(true);
-
-      const items = await apiListProfiles(uid);
-      setProfiles(items);
-    } catch (e: any) {
-      setApiError(toNiceString(e?.message || e));
-      setProfiles([]);
-    } finally {
-      setLoadingProfiles(false);
-    }
-
-    await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
-  })();
-
-  // no deps: run once
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
-
-✅ This removes the common “missing bracket/paren” traps and guarantees valid syntax.
-
-Make this update and give me the full updated version I can copy and paste to replace the current file which is this: "use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
@@ -243,9 +204,6 @@ function formatResetHint(status: LikesStatusResponse | null) {
 }
 
 export default function DiscoverPage() {
-  const router = useRouter();
-  const [authChecked, setAuthChecked] = useState(false);
-
   const [userId, setUserId] = useState<string>("");
 
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
@@ -266,15 +224,9 @@ export default function DiscoverPage() {
 
   const resetTimerRef = useRef<number | null>(null);
 
-  const availableProfiles = useMemo(
-    () => profiles.filter((p) => p.isAvailable),
-    [profiles]
-  );
+  const availableProfiles = useMemo(() => profiles.filter((p) => p.isAvailable), [profiles]);
 
-  const availableProfileIds = useMemo(
-    () => new Set(availableProfiles.map((p) => p.id)),
-    [availableProfiles]
-  );
+  const availableProfileIds = useMemo(() => new Set(availableProfiles.map((p) => p.id)), [availableProfiles]);
 
   const intentionOptions = useMemo(() => {
     const set = new Set<string>();
@@ -370,30 +322,17 @@ export default function DiscoverPage() {
     }, 400);
   }
 
-useEffect(() => {
-  const uid = getLoggedInUserId() || "guest-user";
-  setUserId(uid);
+  // ✅ REPLACED: the first "load profiles on page load" useEffect
+  useEffect(() => {
+    const uid = getLoggedInUserId();
 
-  (async () => {
-    try {
-      setApiError(null);
-      setLoadingProfiles(true);
-
-      const items = await apiListProfiles(uid);
-      setProfiles(items);
-    } catch (e: any) {
-      setApiError(toNiceString(e?.message || e));
-      setProfiles([]);
-    } finally {
-      setLoadingProfiles(false);
+    // If not logged in, send them to login (avoid loops with /auth redirecting to /discover)
+    if (!uid) {
+      window.location.href = "/auth/login";
+      return;
     }
 
-    await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
-  })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
-
-    setAuthChecked(true);
+    setUserId(uid);
 
     (async () => {
       try {
@@ -411,8 +350,10 @@ useEffect(() => {
 
       await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
     })();
+
+    // no deps: run once
     // eslint-disable-next-line react-hooks/exhaustive-deps
- }, []);
+  }, []);
 
   useEffect(() => {
     if (!userId) return;
@@ -528,17 +469,6 @@ useEffect(() => {
 
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
 
-  // ✅ Block render until auth checked
-  if (!authChecked) {
-    return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
-        <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
-          Checking access…
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
       <div style={{ width: "100%", maxWidth: 1100 }}>
@@ -555,7 +485,8 @@ useEffect(() => {
                   {resetHint ? (
                     <span style={{ color: "#777" }}>
                       {" "}
-                      · resets {likesStatus.windowType === "test_seconds" ? "at" : "after"} <strong>{resetHint}</strong>
+                      · resets {likesStatus.windowType === "test_seconds" ? "at" : "after"}{" "}
+                      <strong>{resetHint}</strong>
                     </span>
                   ) : null}
                 </span>
