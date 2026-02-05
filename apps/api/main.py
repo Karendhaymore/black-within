@@ -635,7 +635,7 @@ app = FastAPI(title="Black Within API", version="1.1.3")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
