@@ -1,4 +1,43 @@
-"use client";
+Please make these updates to my file:
+
+Do this exact replacement in apps/web/app/discover/page.tsx
+1) Find the first useEffect(() => { ... }, []); (the one that loads profiles on page load)
+Delete that whole block and paste this one in its place:
+useEffect(() => {
+  const uid = getLoggedInUserId();
+
+  // If not logged in, send them to login (avoid loops with /auth redirecting to /discover)
+  if (!uid) {
+    window.location.href = "/auth/login";
+    return;
+  }
+
+  setUserId(uid);
+
+  (async () => {
+    try {
+      setApiError(null);
+      setLoadingProfiles(true);
+
+      const items = await apiListProfiles(uid);
+      setProfiles(items);
+    } catch (e: any) {
+      setApiError(toNiceString(e?.message || e));
+      setProfiles([]);
+    } finally {
+      setLoadingProfiles(false);
+    }
+
+    await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
+  })();
+
+  // no deps: run once
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
+✅ This removes the common “missing bracket/paren” traps and guarantees valid syntax.
+
+Make this update and give me the full updated version I can copy and paste to replace the current file which is this: "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
