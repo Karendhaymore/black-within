@@ -332,16 +332,29 @@ export default function DiscoverPage() {
     }, 400);
   }
 
-  useEffect(() => {
-    const uid = getLoggedInUserId();
+useEffect(() => {
+  const uid = getLoggedInUserId() || "guest-user";
+  setUserId(uid);
 
-    if (!uid) {
-      // Redirect with "next" so you can bring them back after login if you want
-      router.replace("/auth?next=/discover");
-      return;
+  (async () => {
+    try {
+      setApiError(null);
+      setLoadingProfiles(true);
+
+      const items = await apiListProfiles(uid);
+      setProfiles(items);
+    } catch (e: any) {
+      setApiError(toNiceString(e?.message || e));
+      setProfiles([]);
+    } finally {
+      setLoadingProfiles(false);
     }
 
-    setUserId(uid);
+    await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
+  })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
     setAuthChecked(true);
 
     (async () => {
