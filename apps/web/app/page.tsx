@@ -88,10 +88,7 @@ export default function HomePage() {
             <Link href="/auth" style={btn}>
               Log in / Create account
             </Link>
-            <Link href="/discover" style={btn2}>
-              Go to Discover
-            </Link>
-          </div>
+    
 
           <div style={{ marginTop: 14, fontSize: 12, color: "rgba(0,0,0,0.55)" }}>
             Move slow. Move honest. Move protected.
