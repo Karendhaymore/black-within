@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 /**
  * IMPORTANT:
@@ -204,6 +205,15 @@ function formatResetHint(status: LikesStatusResponse | null) {
 }
 
 export default function DiscoverPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    const loggedIn = localStorage.getItem("bw_logged_in");
+    if (!loggedIn) {
+      router.replace("/auth/login");
+    }
+  }, [router]);
+
   const [userId, setUserId] = useState<string>("");
 
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
@@ -226,7 +236,10 @@ export default function DiscoverPage() {
 
   const availableProfiles = useMemo(() => profiles.filter((p) => p.isAvailable), [profiles]);
 
-  const availableProfileIds = useMemo(() => new Set(availableProfiles.map((p) => p.id)), [availableProfiles]);
+  const availableProfileIds = useMemo(
+    () => new Set(availableProfiles.map((p) => p.id)),
+    [availableProfiles]
+  );
 
   const intentionOptions = useMemo(() => {
     const set = new Set<string>();
