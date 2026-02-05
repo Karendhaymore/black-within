@@ -66,7 +66,7 @@ export default function HomePage() {
           <div style={pill}>Black Within</div>
 
           <h1 style={{ margin: "12px 0 8px", fontSize: "2.3rem", color: "#111" }}>
-            Connection with intention.
+            Connection with intention. JUST JOKING
           </h1>
 
           <p style={{ margin: 0, color: "rgba(0,0,0,0.72)", lineHeight: 1.55, fontSize: 16 }}>
