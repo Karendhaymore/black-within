@@ -1,5 +1,14 @@
-import { redirect } from "next/navigation";
+"use client";
 
-export default function AuthPage() {
-  redirect("/auth/login");
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+export default function AuthIndexPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/discover");
+  }, [router]);
+
+  return null;
 }
