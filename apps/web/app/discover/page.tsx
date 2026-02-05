@@ -374,7 +374,7 @@ useEffect(() => {
       await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+ }, []);
 
   useEffect(() => {
     if (!userId) return;
