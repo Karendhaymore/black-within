@@ -220,6 +220,18 @@ export default function AuthPage() {
               />
             </label>
 
+            <Link
+              href="/auth/forgot"
+              style={{
+                color: "rgba(0,0,0,0.85)",
+                textDecoration: "underline",
+                textUnderlineOffset: 3,
+                fontSize: 13,
+              }}
+            >
+              Forgot password?
+            </Link>
+
             <button onClick={onSubmit} disabled={loading} style={primaryBtn}>
               {loading ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}
             </button>
