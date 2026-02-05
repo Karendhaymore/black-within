@@ -1784,20 +1784,25 @@ def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
     success_url = f"{APP_WEB_BASE_URL}/messages?threadId={thread_id}&checkout=success"
     cancel_url = f"{APP_WEB_BASE_URL}/messages?threadId={thread_id}&checkout=cancel"
 
-    session_obj = stripe.checkout.Session.create(
-        mode="payment",
-        line_items=[{"price": STRIPE_MESSAGE_UNLOCK_PRICE_ID, "quantity": 1}],
-        success_url=success_url,
-        cancel_url=cancel_url,
-        client_reference_id=user_id,
-        metadata={
-            "kind": "thread_unlock",
-            "user_id": user_id,
-            "thread_id": thread_id,
-        },
-    )
+    try:
+        session_obj = stripe.checkout.Session.create(
+            mode="payment",
+            line_items=[{"price": STRIPE_MESSAGE_UNLOCK_PRICE_ID, "quantity": 1}],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            client_reference_id=user_id,
+            metadata={
+                "kind": "thread_unlock",
+                "user_id": user_id,
+                "thread_id": thread_id,
+            },
+        )
+        return CheckoutSessionResponse(url=session_obj.url)
 
-    return CheckoutSessionResponse(url=session_obj.url)
+    except Exception as e:
+        # This will make the exact Stripe error show up in your browser Network tab
+        print("STRIPE thread-unlock error:", str(e))
+        raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
 
 
 @app.post("/stripe/checkout/premium", response_model=CheckoutSessionResponse)
@@ -1810,19 +1815,24 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
     success_url = f"{APP_WEB_BASE_URL}/discover?premium=success"
     cancel_url = f"{APP_WEB_BASE_URL}/discover?premium=cancel"
 
-    session_obj = stripe.checkout.Session.create(
-        mode="subscription",
-        line_items=[{"price": STRIPE_PREMIUM_PRICE_ID, "quantity": 1}],
-        success_url=success_url,
-        cancel_url=cancel_url,
-        client_reference_id=user_id,
-        metadata={
-            "kind": "premium",
-            "user_id": user_id,
-        },
-    )
+    try:
+        session_obj = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{"price": STRIPE_PREMIUM_PRICE_ID, "quantity": 1}],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            client_reference_id=user_id,
+            metadata={
+                "kind": "premium",
+                "user_id": user_id,
+            },
+        )
+        return CheckoutSessionResponse(url=session_obj.url)
 
-    return CheckoutSessionResponse(url=session_obj.url)
+    except Exception as e:
+        print("STRIPE premium error:", str(e))
+        raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
+
 
 
 # -----------------------------
