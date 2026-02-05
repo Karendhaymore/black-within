@@ -50,18 +50,6 @@ export default function HomePage() {
   return (
     <main style={bg}>
       <div style={{ width: "100%", maxWidth: 980 }}>
-        <div
-          style={{
-            margin: "0 auto 14px",
-            maxWidth: 900,
-            height: 10,
-            borderRadius: 999,
-            background:
-              "linear-gradient(90deg, rgba(197,137,45,0.0), rgba(197,137,45,0.55), rgba(10,85,0,0.55), rgba(197,137,45,0.55), rgba(197,137,45,0.0))",
-            opacity: 0.9,
-          }}
-        />
-
         <section style={card}>
           <div style={pill}>Black Within</div>
 
@@ -73,9 +61,9 @@ export default function HomePage() {
             A community built for safety, alignment, and real conversation — not noise.
           </p>
 
-          <div style={{ marginTop: 18, display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ marginTop: 18 }}>
             <Link href="/discover" style={btn}>
-              Log in / Create account
+              Enter Community
             </Link>
           </div>
 
