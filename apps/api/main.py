@@ -76,6 +76,9 @@ STRIPE_PREMIUM_PRICE_ID = os.getenv("STRIPE_PREMIUM_PRICE_ID", "").strip()
 
 APP_WEB_BASE_URL = os.getenv("APP_WEB_BASE_URL", "https://meetblackwithin.com").strip()
 
+# Password reset
+RESET_TOKEN_TTL_MINUTES = int(os.getenv("RESET_TOKEN_TTL_MINUTES", "30"))
+
 if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
@@ -196,6 +199,19 @@ class LoginCode(Base):
     code: Mapped[str] = mapped_column(String(10))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # sha256 hex
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 # -----------------------------
@@ -400,6 +416,25 @@ def _auto_migrate_daily_like_counts_table():
         conn.execute(text("""ALTER TABLE daily_like_counts ADD COLUMN IF NOT EXISTS window_started_at TIMESTAMP NULL;"""))
 
 
+def _auto_migrate_password_reset_tokens_table():
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+              id SERIAL PRIMARY KEY,
+              token_hash VARCHAR(64) UNIQUE,
+              user_id VARCHAR(40),
+              email VARCHAR(320),
+              created_at TIMESTAMP DEFAULT NOW(),
+              expires_at TIMESTAMP,
+              used_at TIMESTAMP NULL
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_token_hash ON password_reset_tokens(token_hash);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_user_id ON password_reset_tokens(user_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_email ON password_reset_tokens(email);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_expires_at ON password_reset_tokens(expires_at);"""))
+
+
 # -----------------------------
 # Create tables + run migrations
 # -----------------------------
@@ -429,6 +464,11 @@ try:
     _auto_migrate_daily_like_counts_table()
 except Exception as e:
     print("AUTO_MIGRATE_DAILY_LIKES failed:", str(e))
+
+try:
+    _auto_migrate_password_reset_tokens_table()
+except Exception as e:
+    print("AUTO_MIGRATE_PASSWORD_RESET failed:", str(e))
 
 
 # -----------------------------
@@ -463,6 +503,15 @@ class SignupPayload(BaseModel):
 
 class LoginPayload(BaseModel):
     email: str
+    password: str
+
+
+class ForgotPasswordPayload(BaseModel):
+    email: str
+
+
+class ResetPasswordPayload(BaseModel):
+    token: str
     password: str
 
 
@@ -754,6 +803,16 @@ def _verify_password(password: str, stored: str) -> bool:
         return False
 
 
+def _sha256_hex(s: str) -> str:
+    return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
+
+
+def _make_reset_token() -> str:
+    # URL-safe token; we store only its sha256 hash in DB
+    raw = secrets.token_urlsafe(32)
+    return raw
+
+
 def _utc_midnight_of_day(d: date) -> datetime:
     return datetime.combine(d, time.min)
 
@@ -898,6 +957,109 @@ def login(payload: LoginPayload):
 
     _ensure_user(acct.user_id)
     return {"ok": True, "userId": acct.user_id, "email": email}
+
+
+# ✅ 1) Request reset email (always returns ok to prevent “email existence” leaks)
+@app.post("/auth/forgot-password")
+def forgot_password(payload: ForgotPasswordPayload):
+    email = _normalize_email(payload.email)
+
+    # IMPORTANT: always return ok, even if email doesn't exist
+    with Session(engine) as session:
+        acct = session.execute(
+            select(AuthAccount).where(AuthAccount.email == email)
+        ).scalar_one_or_none()
+
+        if not acct:
+            return {"ok": True}
+
+        # Create token
+        token = _make_reset_token()
+        token_hash = _sha256_hex(token)
+        now = datetime.utcnow()
+        expires_at = now + timedelta(minutes=RESET_TOKEN_TTL_MINUTES)
+
+        # Optional cleanup: remove old tokens for this user (keeps table tidy)
+        session.execute(
+            delete(PasswordResetToken).where(PasswordResetToken.user_id == acct.user_id)
+        )
+
+        session.add(
+            PasswordResetToken(
+                token_hash=token_hash,
+                user_id=acct.user_id,
+                email=email,
+                created_at=now,
+                expires_at=expires_at,
+                used_at=None,
+            )
+        )
+        session.commit()
+
+    # Send email (use your configured SendGrid sender)
+    reset_link = f"{APP_WEB_BASE_URL}/auth/reset?token={token}"
+
+    # If you want, keep this minimal and premium
+    html = f"""
+    <div style="font-family:Arial,sans-serif;font-size:16px;color:#111;line-height:1.5">
+      <p>We received a request to reset your Black Within password.</p>
+      <p>
+        <a href="{reset_link}" style="display:inline-block;padding:12px 16px;border-radius:10px;background:#0a5;color:#fff;text-decoration:none;font-weight:700">
+          Reset Password
+        </a>
+      </p>
+      <p>This link expires in {RESET_TOKEN_TTL_MINUTES} minutes.</p>
+      <p style="color:#555;font-size:13px">If you didn’t request this, you can ignore this email.</p>
+    </div>
+    """
+
+    try:
+        _send_email_sendgrid(email, "Reset your Black Within password", html)
+    except Exception as e:
+        # Still return ok to user; log server side
+        print("Forgot password send error:", str(e))
+
+    return {"ok": True}
+
+
+# ✅ 2) Reset password using token
+@app.post("/auth/reset-password")
+def reset_password(payload: ResetPasswordPayload):
+    token = (payload.token or "").strip()
+    new_password = (payload.password or "").strip()
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Reset token is required.")
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    token_hash = _sha256_hex(token)
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        row = session.execute(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+        ).scalar_one_or_none()
+
+        if not row:
+            raise HTTPException(status_code=400, detail="This reset link is invalid or expired.")
+
+        if row.used_at is not None:
+            raise HTTPException(status_code=400, detail="This reset link has already been used.")
+
+        if now > row.expires_at:
+            raise HTTPException(status_code=400, detail="This reset link has expired. Please request a new one.")
+
+        acct = session.get(AuthAccount, row.user_id)
+        if not acct:
+            raise HTTPException(status_code=400, detail="Account not found.")
+
+        acct.password_hash = _hash_password(new_password)
+
+        row.used_at = now
+        session.commit()
+
+    return {"ok": True}
 
 
 # -----------------------------
