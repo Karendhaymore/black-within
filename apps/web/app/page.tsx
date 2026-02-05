@@ -62,9 +62,9 @@ export default function HomePage() {
           </p>
 
           <div style={{ marginTop: 18 }}>
-            <Link href="/discover" style={btn}>
-              Enter Community
-            </Link>
+            <Link href="/auth/login" style={btn}>
+  ENTER COMMUNITY
+</Link>
           </div>
 
           <div style={{ marginTop: 14, fontSize: 12, color: "rgba(0,0,0,0.55)" }}>
