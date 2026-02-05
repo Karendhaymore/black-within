@@ -252,28 +252,16 @@ export default function AuthPage() {
                 Back to home
               </Link>
 
-              {/* We’ll wire this once backend reset endpoints exist */}
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setStatus(
-                    "Forgot password is next. We’ll add the reset email flow through SendGrid."
-                  );
-                }}
+              <Link
+                href="/auth/forgot"
                 style={{
-                  background: "transparent",
-                  border: "none",
-                  padding: 0,
-                  cursor: "pointer",
                   color: "rgba(0,0,0,0.85)",
                   textDecoration: "underline",
                   textUnderlineOffset: 3,
-                  opacity: loading ? 0.7 : 1,
                 }}
               >
                 Forgot password?
-              </button>
+              </Link>
             </div>
 
             <div style={{ marginTop: 8, fontSize: 12, color: "rgba(0,0,0,0.55)" }}>
