@@ -10,7 +10,7 @@ const API_BASE =
   "https://black-within-api.onrender.com";
 
 /**
- * Path A (Testing Unlock)
+ * Optional testing bypass:
  * - If NEXT_PUBLIC_AUTH_PREVIEW_MODE=true on the WEB app, the UI will unlock messaging.
  * - You should ALSO set AUTH_PREVIEW_MODE=true on the API so POST /messages succeeds.
  */
@@ -22,7 +22,7 @@ type MessageItem = {
   thread_id: string;
   sender_user_id: string;
   body: string;
-  created_at: string; // ISO string
+  created_at: string;
 };
 
 type MessagesResponse = { items: MessageItem[] };
@@ -33,6 +33,8 @@ type MessagingAccessResponse = {
   unlockedUntilUTC?: string | null;
   reason?: string | null;
 };
+
+type CheckoutSessionResponse = { url: string };
 
 function getLoggedInUserId(): string | null {
   if (typeof window === "undefined") return null;
@@ -103,7 +105,6 @@ async function apiGetMessages(userId: string, threadId: string): Promise<Message
 
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-
   const json = (await res.json()) as MessagesResponse;
   return Array.isArray(json?.items) ? json.items : [];
 }
@@ -119,41 +120,27 @@ async function apiSendMessage(userId: string, threadId: string, body: string) {
   return (await res.json()) as MessageItem;
 }
 
-/**
- * ✅ Use the ONE correct unlock route:
- * POST /stripe/checkout/thread-unlock -> { url }
- */
-async function apiStartThreadUnlockCheckout(userId: string, threadId: string): Promise<string> {
+async function apiCheckoutThreadUnlock(userId: string, threadId: string): Promise<CheckoutSessionResponse> {
   const res = await fetch(`${API_BASE}/stripe/checkout/thread-unlock`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, thread_id: threadId }),
   });
-
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-  const data = (await res.json()) as { url?: string };
-  if (!data?.url) throw new Error("Checkout URL missing from API response.");
-  return data.url;
+  return (await res.json()) as CheckoutSessionResponse;
 }
 
-/**
- * ✅ Premium: $11.22/month subscription -> { url }
- */
-async function apiStartPremiumCheckout(userId: string): Promise<string> {
+async function apiCheckoutPremium(userId: string): Promise<CheckoutSessionResponse> {
   const res = await fetch(`${API_BASE}/stripe/checkout/premium`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId }),
   });
-
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-  const data = (await res.json()) as { url?: string };
-  if (!data?.url) throw new Error("Premium checkout failed (missing URL).");
-  return data.url;
+  return (await res.json()) as CheckoutSessionResponse;
 }
 
 /**
- * ✅ IMPORTANT:
  * Next.js requires useSearchParams() to be wrapped in <Suspense>.
  */
 export default function MessagesPage() {
@@ -169,8 +156,6 @@ function MessagesInner() {
 
   const threadId = sp.get("threadId") || "";
   const withName = sp.get("with") || "";
-  const lockedParam = (sp.get("locked") || "").trim();
-  const checkout = (sp.get("checkout") || "").trim(); // success/cancel
 
   const userId = useMemo(() => getLoggedInUserId(), []);
 
@@ -195,7 +180,6 @@ function MessagesInner() {
     try {
       a = await apiMessagingAccess(uid, threadId);
     } catch (e: any) {
-      // Preview-mode fallback (helps while testing environments)
       if (!PREVIEW_MODE) throw e;
       a = {
         canMessage: true,
@@ -244,20 +228,6 @@ function MessagesInner() {
         const a = await refreshAll(userId);
         if (cancelled) return;
 
-        // ✅ If Stripe returned us here with checkout=success, refresh access immediately and clean URL
-        if (checkout === "success") {
-          await refreshAll(userId);
-          if (cancelled) return;
-
-          try {
-            const url = new URL(window.location.href);
-            url.searchParams.delete("checkout");
-            window.history.replaceState({}, "", url.toString());
-          } catch {
-            // ignore
-          }
-        }
-
         setStatus("ready");
 
         stopPolling();
@@ -284,7 +254,7 @@ function MessagesInner() {
       stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, userId, checkout]);
+  }, [threadId, userId]);
 
   useEffect(() => {
     if (!bottomRef.current) return;
@@ -294,8 +264,7 @@ function MessagesInner() {
   const locked = !!access && !access.canMessage;
 
   async function handleSend() {
-    if (!userId) return;
-    if (!threadId) return;
+    if (!userId || !threadId) return;
 
     const body = text.trim();
     if (!body) return;
@@ -303,9 +272,7 @@ function MessagesInner() {
     setErr("");
 
     try {
-      if (locked) {
-        throw new Error(access?.reason || "Messaging locked.");
-      }
+      if (locked) throw new Error(access?.reason || "Messaging locked.");
 
       const tempId = `temp-${Date.now()}`;
       const temp: MessageItem = {
@@ -327,11 +294,9 @@ function MessagesInner() {
   }
 
   async function handleRefresh() {
-    if (!userId) return;
-    if (!threadId) return;
+    if (!userId || !threadId) return;
 
     setErr("");
-
     try {
       const a = await refreshAll(userId);
 
@@ -360,26 +325,26 @@ function MessagesInner() {
     }
 
     setErr("");
-
     try {
-      const url = await apiStartThreadUnlockCheckout(userId, threadId);
-      window.location.href = url;
+      const data = await apiCheckoutThreadUnlock(userId, threadId);
+      if (!data?.url) throw new Error("Checkout URL missing from API response.");
+      window.location.href = data.url;
     } catch (e: any) {
       setErr(stringifyError(e) || "Failed to start checkout.");
     }
   }
 
-  async function handleGoPremium() {
+  async function handlePremium() {
     if (!userId) {
       window.location.href = "/auth";
       return;
     }
 
     setErr("");
-
     try {
-      const url = await apiStartPremiumCheckout(userId);
-      window.location.href = url;
+      const data = await apiCheckoutPremium(userId);
+      if (!data?.url) throw new Error("Checkout URL missing from API response.");
+      window.location.href = data.url;
     } catch (e: any) {
       setErr(stringifyError(e) || "Failed to start premium checkout.");
     }
@@ -417,23 +382,12 @@ function MessagesInner() {
               Preview mode enabled (NEXT_PUBLIC_AUTH_PREVIEW_MODE=true)
             </div>
           ) : null}
-          {lockedParam ? (
-            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
-              (Locked flag in URL: <code>{lockedParam}</code>)
-            </div>
-          ) : null}
-          {checkout ? (
-            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
-              (Checkout: <code>{checkout}</code>)
-            </div>
-          ) : null}
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <Link href="/discover" style={navBtnStyle}>
             Back to Discover
           </Link>
-
           <button onClick={handleRefresh} style={{ ...navBtnStyle, cursor: "pointer" }}>
             Refresh
           </button>
@@ -475,22 +429,21 @@ function MessagesInner() {
                 <>
                   <div style={{ fontWeight: 800 }}>Messaging locked</div>
                   <div style={{ marginTop: 6 }}>
-                    {access.reason ||
-                      "Messaging is locked. Go Premium ($11.22/month) for unlimited likes + messages, or unlock this chat for $1.99."}
+                    {access.reason || "Messaging is locked. Upgrade to Premium or pay $1.99 to unlock this chat."}
                   </div>
 
                   {!PREVIEW_MODE ? (
                     <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                       <button
-                        onClick={handleGoPremium}
+                        onClick={handlePremium}
                         style={{
                           padding: "0.75rem 1rem",
                           borderRadius: 12,
-                          border: "1px solid #0b5",
-                          background: "#0b5",
+                          border: "1px solid #0a5",
+                          background: "#0a5",
                           color: "#fff",
                           cursor: "pointer",
-                          fontWeight: 800,
+                          fontWeight: 700,
                         }}
                       >
                         Go Premium — $11.22/month (Unlimited Likes + Messages)
@@ -512,7 +465,7 @@ function MessagesInner() {
                     </div>
                   ) : (
                     <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9 }}>
-                      (Preview mode is ON, so lock wall is bypassed for testing.)
+                      (Preview mode is ON, so checkout buttons are hidden.)
                     </div>
                   )}
                 </>
@@ -608,7 +561,6 @@ function MessagesInner() {
               </button>
             </div>
 
-            {/* ✅ Only show real errors here */}
             {err ? <div style={{ marginTop: 10, color: "#b00020", whiteSpace: "pre-wrap" }}>{err}</div> : null}
           </div>
         </>
