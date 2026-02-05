@@ -7,7 +7,7 @@ export default function AuthIndexPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/discover");
+    router.replace("/auth/login");
   }, [router]);
 
   return null;
