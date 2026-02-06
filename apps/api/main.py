@@ -1872,21 +1872,23 @@ def get_threads(
             op = profile_by_user.get(other_user_id)
             lm = last_by_thread.get(t.id)
 
-            items.append(
-                ThreadListItem(
-                    thread_id=str(t.id),
-                    other_user_id=str(other_user_id),
+       items.append(
+    ThreadListItem(
+        thread_id=str(t.id),
+        other_user_id=str(other_user_id),
 
-                    other_profile_id=str(op.id) if op else None,
-                    other_display_name=(op.display_name if op else None),
-                    other_photo=(getattr(op, "photo", None) if op else None),
+        other_profile_id=str(op.id) if op else None,
+        other_display_name=op.display_name if op else None,
+        other_photo=op.photo if op else None,
 
-                    last_message_text=(getattr(lm, "body", None) if lm else None),
-                    last_message_at=(lm.created_at.isoformat() if lm else None),
-                    updated_at=(t.updated_at.isoformat() if getattr(t, "updated_at", None) else None),
-                )
-            )
+        last_message_text=(lm.text if lm else None),
+        last_message_at=(lm.created_at.isoformat() if lm else None),
+        updated_at=(t.updated_at.isoformat() if getattr(t, "updated_at", None) else None),
+    )
+)
 
+
+=
         return ThreadsResponse(items=items)
 
 
