@@ -1916,6 +1916,7 @@ def get_threads(
 ),
 
             )
+              )
 
         return ThreadsResponse(items=items)
 
