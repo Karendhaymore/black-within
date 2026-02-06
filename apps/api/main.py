@@ -1869,7 +1869,7 @@ def get_threads(
             b = getattr(t, THREAD_USER_B.key)
             other_user_id = b if a == user_id else a
 
-            op = profile_by_user.get(other_user_id)
+            op = next((p for p in other_profiles if str(p.owner_user_id) == str(other_user_id)), None)
             lm = last_by_thread.get(t.id)
 
        items.append(
