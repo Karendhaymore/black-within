@@ -1863,33 +1863,37 @@ def get_threads(
         other_profiles = session.execute(q_profiles).scalars().all()
         profile_by_user: Dict[str, Profile] = {p.owner_user_id: p for p in other_profiles}
 
-        items: List[ThreadListItem] = []
+            items: List[ThreadListItem] = []
+
         for t in threads:
             a = getattr(t, THREAD_USER_A.key)
             b = getattr(t, THREAD_USER_B.key)
             other_user_id = b if a == user_id else a
 
-            op = next((p for p in other_profiles if str(p.owner_user_id) == str(other_user_id)), None)
+            # Find the other person's profile safely
+            op = next(
+                (p for p in other_profiles if str(p.owner_user_id) == str(other_user_id)),
+                None,
+            )
+
             lm = last_by_thread.get(t.id)
 
-       items.append(
-    ThreadListItem(
-        thread_id=str(t.id),
-        other_user_id=str(other_user_id),
+            items.append(
+                ThreadListItem(
+                    thread_id=str(t.id),
+                    other_user_id=str(other_user_id),
+                    other_profile_id=str(op.id) if op else None,
+                    other_display_name=op.display_name if op else None,
+                    other_photo=op.photo if op else None,
+                    last_message_text=(lm.text if lm else None),
+                    last_message_at=(lm.created_at.isoformat() if lm else None),
+                    updated_at=(
+                        t.updated_at.isoformat() if getattr(t, "updated_at", None) else None
+                    ),
+                )
+            )
 
-        other_profile_id=str(op.id) if op else None,
-        other_display_name=op.display_name if op else None,
-        other_photo=op.photo if op else None,
-
-        last_message_text=(lm.text if lm else None),
-        last_message_at=(lm.created_at.isoformat() if lm else None),
-        updated_at=(t.updated_at.isoformat() if getattr(t, "updated_at", None) else None),
-    )
-)
-
-
-=
-        return ThreadsResponse(items=items)
+        return ThreadsResponse(items=items) 
 
 
 # -----------------------------
