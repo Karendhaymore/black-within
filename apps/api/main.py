@@ -1909,8 +1909,12 @@ def get_threads(
                     other_photo=op.photo if op else None,
                     last_message_text=lm_text,
                     last_message_at=(lm_time.isoformat() if lm_time else None),
-                    updated_at=(t.updated_at.isoformat() if getattr(t, "updated_at", None) else None),
-                )
+                   updated_at=(
+    getattr(t, "updated_at", getattr(t, "created_at", None)).isoformat()
+    if getattr(t, "updated_at", getattr(t, "created_at", None))
+    else None
+),
+
             )
 
         return ThreadsResponse(items=items)
