@@ -25,6 +25,8 @@ from sqlalchemy import (
     Text,
     Boolean,
     text,
+    or_,
+    desc,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
@@ -586,21 +588,28 @@ class ThreadItem(BaseModel):
     last_message_at: Optional[str] = None
 
 
-class ThreadsResponse(BaseModel):
+# (renamed internally to avoid clashing with new ThreadsResponse below)
+class ThreadsInboxResponse(BaseModel):
     items: List[ThreadItem]
 
 
-# ✅ ADD: these schemas (near your other response models)
+# ✅ NEW: GET /threads response models (as requested)
 class ThreadListItem(BaseModel):
     thread_id: str
-    with_user_id: Optional[str] = None
-    with_display_name: Optional[str] = None
-    with_photo: Optional[str] = None
-    last_message: Optional[str] = None
-    last_at: Optional[str] = None
+    other_user_id: str
+
+    # Enrichment for inbox UI:
+    other_profile_id: Optional[str] = None
+    other_display_name: Optional[str] = None
+    other_photo: Optional[str] = None
+
+    last_message_text: Optional[str] = None
+    last_message_at: Optional[str] = None
+
+    updated_at: Optional[str] = None
 
 
-class ThreadsResponseV2(BaseModel):
+class ThreadsResponse(BaseModel):
     items: List[ThreadListItem]
 
 
@@ -1751,7 +1760,7 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
         )
 
 
-@app.get("/threads/inbox", response_model=ThreadsResponse)
+@app.get("/threads/inbox", response_model=ThreadsInboxResponse)
 def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
     user_id = _ensure_user(user_id)
 
@@ -1791,70 +1800,94 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
                 )
             )
 
-        return ThreadsResponse(items=items)
+        return ThreadsInboxResponse(items=items)
 
 
-# -----------------------------
-# Messages
-# -----------------------------
-# ✅ ADD: endpoint under your Messages section
-@app.get("/threads", response_model=ThreadsResponseV2)
-def list_threads(user_id: str = Query(...), limit: int = Query(default=100, ge=1, le=500)):
+# ✅ NEW ENDPOINT: GET /threads?user_id=...  (as requested)
+@app.get("/threads", response_model=ThreadsResponse)
+def get_threads(
+    user_id: str = Query(..., description="The current user's id"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """
+    Returns the user's conversation threads for inbox display:
+    - thread_id
+    - who it's with (enriched with profile name/photo if available)
+    - last message preview + timestamp
+    - updated_at ordering
+    """
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        # Find threads where user is a participant.
-        # NOTE: your Thread model uses user_low/user_high, so we adapt the query to that.
-        q = (
+        # ✅ IMPORTANT: map these to your actual Thread column names
+        # Your model uses user_low/user_high:
+        THREAD_USER_A = Thread.user_low
+        THREAD_USER_B = Thread.user_high
+
+        q_threads = (
             select(Thread)
-            .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
-            .order_by(Thread.updated_at.desc())
+            .where(or_(THREAD_USER_A == user_id, THREAD_USER_B == user_id))
+            .order_by(desc(Thread.updated_at))
             .limit(limit)
         )
+        threads = session.execute(q_threads).scalars().all()
 
-        threads = session.execute(q).scalars().all()
+        if not threads:
+            return ThreadsResponse(items=[])
+
+        # Collect thread ids
+        thread_ids = [t.id for t in threads]
+
+        # --- Pull last message per thread ---
+        q_msgs = (
+            select(Message)
+            .where(Message.thread_id.in_(thread_ids))
+            .order_by(desc(Message.created_at))
+        )
+        messages = session.execute(q_msgs).scalars().all()
+
+        last_by_thread: Dict[str, Message] = {}
+        for m in messages:
+            if m.thread_id not in last_by_thread:
+                last_by_thread[m.thread_id] = m
+
+        # Determine other_user_ids
+        other_user_ids: List[str] = []
+        for t in threads:
+            a = getattr(t, THREAD_USER_A.key)
+            b = getattr(t, THREAD_USER_B.key)
+            other_user_ids.append(b if a == user_id else a)
+
+        # Fetch profiles for "other" users (Profile.owner_user_id links to user id)
+        q_profiles = select(Profile).where(Profile.owner_user_id.in_(other_user_ids))
+        other_profiles = session.execute(q_profiles).scalars().all()
+        profile_by_user: Dict[str, Profile] = {p.owner_user_id: p for p in other_profiles}
 
         items: List[ThreadListItem] = []
-
         for t in threads:
-            # Identify the "other" user in the thread
-            other_user_id = t.user_high if t.user_low == user_id else t.user_low
+            a = getattr(t, THREAD_USER_A.key)
+            b = getattr(t, THREAD_USER_B.key)
+            other_user_id = b if a == user_id else a
 
-            # Best-effort: pull the other person's display name/photo from Profile table if you have it
-            other_name = None
-            other_photo = None
-            if other_user_id:
-                other_profile = session.execute(
-                    select(Profile).where(Profile.owner_user_id == other_user_id).limit(1)
-                ).scalars().first()
-                if other_profile:
-                    other_name = getattr(other_profile, "displayName", None) or getattr(other_profile, "display_name", None)
-                    other_photo = getattr(other_profile, "photo", None)
-
-            # Get last message
-            last_msg = session.execute(
-                select(Message)
-                .where(Message.thread_id == t.id)
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).scalars().first()
+            op = profile_by_user.get(other_user_id)
+            lm = last_by_thread.get(t.id)
 
             items.append(
                 ThreadListItem(
                     thread_id=str(t.id),
-                    with_user_id=other_user_id,
-                    with_display_name=other_name,
-                    with_photo=other_photo,
-                    last_message=(last_msg.body if last_msg else None),
-                    last_at=(
-                        last_msg.created_at.isoformat()
-                        if last_msg
-                        else (t.updated_at.isoformat() if getattr(t, "updated_at", None) else None)
-                    ),
+                    other_user_id=str(other_user_id),
+
+                    other_profile_id=str(op.id) if op else None,
+                    other_display_name=(op.display_name if op else None),
+                    other_photo=(getattr(op, "photo", None) if op else None),
+
+                    last_message_text=(getattr(lm, "body", None) if lm else None),
+                    last_message_at=(lm.created_at.isoformat() if lm else None),
+                    updated_at=(t.updated_at.isoformat() if getattr(t, "updated_at", None) else None),
                 )
             )
 
-        return ThreadsResponseV2(items=items)
+        return ThreadsResponse(items=items)
 
 
 # -----------------------------
@@ -1887,7 +1920,11 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
 # Messages
 # -----------------------------
 @app.get("/messages", response_model=MessagesResponse)
-def list_messages(thread_id: str = Query(...), user_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)):
+def list_messages(
+    thread_id: str = Query(...),
+    user_id: str = Query(...),
+    limit: int = Query(default=200, ge=1, le=500),
+):
     user_id = _ensure_user(user_id)
     thread_id = (thread_id or "").strip()
     if not thread_id:
@@ -2073,10 +2110,16 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
         raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
 
 
-
 # -----------------------------
 # NEW ROUTE 1: Create Stripe Checkout Session (Unlock Conversation – $1.99)
+# (keeps your intended behavior but in a valid endpoint function)
 # -----------------------------
+@app.post("/stripe/create-unlock-session")
+def create_unlock_session(payload: CreateUnlockSessionPayload):
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
+
+    user_id = _ensure_user(payload.user_id)
 
     try:
         session_obj = stripe.checkout.Session.create(
@@ -2094,7 +2137,7 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
                 "quantity": 1,
             }],
             metadata={
-                "user_id": payload.user_id,
+                "user_id": user_id,
                 "target_profile_id": payload.target_profile_id,
                 "thread_id": payload.thread_id,
             },
