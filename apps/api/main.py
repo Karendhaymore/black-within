@@ -1807,6 +1807,9 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
 from sqlalchemy import or_, desc, select
 from typing import Dict, List
 
+from sqlalchemy import or_, desc, select
+from typing import Dict, List
+
 @app.get("/threads", response_model=ThreadsResponse)
 def get_threads(
     user_id: str = Query(..., description="The current user's id"),
@@ -1814,13 +1817,39 @@ def get_threads(
 ):
     user_id = _ensure_user(user_id)
 
-    with Session(engine) as session:
-        # ✅ Set these TWO to match your Thread model column names
-        # If your Thread uses different names, change ONLY these two lines.
-        THREAD_USER_A = Thread.user_a_id
-        THREAD_USER_B = Thread.user_b_id
+    def _pick_thread_user_cols():
+        # Try common column name pairs and use the first pair that exists
+        candidates = [
+            ("user_a_id", "user_b_id"),
+            ("user1_id", "user2_id"),
+            ("from_user_id", "to_user_id"),
+            ("a_user_id", "b_user_id"),
+        ]
+        for a_name, b_name in candidates:
+            if hasattr(Thread, a_name) and hasattr(Thread, b_name):
+                return getattr(Thread, a_name), getattr(Thread, b_name)
+        raise RuntimeError(
+            "Thread model is missing participant columns. Expected something like "
+            "user_a_id/user_b_id or user1_id/user2_id."
+        )
 
-        # 1) Get the user's threads
+    def _message_text(m: "Message"):
+        # Try common message text field names
+        for name in ["text", "content", "message_text", "body"]:
+            if hasattr(m, name):
+                return getattr(m, name)
+        return None
+
+    def _message_created_at(m: "Message"):
+        for name in ["created_at", "createdAt", "sent_at", "sentAt", "timestamp"]:
+            if hasattr(m, name):
+                v = getattr(m, name)
+                return v
+        return None
+
+    with Session(engine) as session:
+        THREAD_USER_A, THREAD_USER_B = _pick_thread_user_cols()
+
         q_threads = (
             select(Thread)
             .where(or_(THREAD_USER_A == user_id, THREAD_USER_B == user_id))
@@ -1832,10 +1861,8 @@ def get_threads(
         if not threads:
             return ThreadsResponse(items=[])
 
-        # 2) Collect thread ids
         thread_ids = [t.id for t in threads]
 
-        # 3) Get latest message for each thread
         q_msgs = (
             select(Message)
             .where(Message.thread_id.in_(thread_ids))
@@ -1848,18 +1875,15 @@ def get_threads(
             if m.thread_id not in last_by_thread:
                 last_by_thread[m.thread_id] = m
 
-        # 4) Determine who the "other person" is for each thread
         other_user_ids: List[str] = []
         for t in threads:
             a = getattr(t, THREAD_USER_A.key)
             b = getattr(t, THREAD_USER_B.key)
             other_user_ids.append(b if str(a) == str(user_id) else a)
 
-        # 5) Fetch profiles for those users
         q_profiles = select(Profile).where(Profile.owner_user_id.in_(other_user_ids))
         other_profiles = session.execute(q_profiles).scalars().all()
 
-        # 6) Build inbox list
         items: List[ThreadListItem] = []
 
         for t in threads:
@@ -1867,13 +1891,14 @@ def get_threads(
             b = getattr(t, THREAD_USER_B.key)
             other_user_id = b if str(a) == str(user_id) else a
 
-            # Safe profile match
             op = next(
                 (p for p in other_profiles if str(p.owner_user_id) == str(other_user_id)),
                 None,
             )
 
             lm = last_by_thread.get(t.id)
+            lm_text = _message_text(lm) if lm else None
+            lm_time = _message_created_at(lm) if lm else None
 
             items.append(
                 ThreadListItem(
@@ -1882,11 +1907,9 @@ def get_threads(
                     other_profile_id=str(op.id) if op else None,
                     other_display_name=op.display_name if op else None,
                     other_photo=op.photo if op else None,
-                    last_message_text=(lm.text if lm else None),
-                    last_message_at=(lm.created_at.isoformat() if lm else None),
-                    updated_at=(
-                        t.updated_at.isoformat() if getattr(t, "updated_at", None) else None
-                    ),
+                    last_message_text=lm_text,
+                    last_message_at=(lm_time.isoformat() if lm_time else None),
+                    updated_at=(t.updated_at.isoformat() if getattr(t, "updated_at", None) else None),
                 )
             )
 
