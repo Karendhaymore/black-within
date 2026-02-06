@@ -217,7 +217,7 @@ function MessagesInner() {
       }
 
       if (!userId) {
-        window.location.href = "/auth";
+        window.location.href = "/auth/login"
         return;
       }
 
