@@ -145,7 +145,7 @@ async function apiCheckoutPremium(userId: string): Promise<CheckoutSessionRespon
  */
 export default function MessagesPage() {
   return (
-    <Suspense fallback={<div style={{ padding: 16 }}>Loading messages…</div>}>
+    <Suspense fallback={<div style={{ padding: 16, color: "white" }}>Loading messages…</div>}>
       <MessagesInner />
     </Suspense>
   );
@@ -217,7 +217,7 @@ function MessagesInner() {
       }
 
       if (!userId) {
-        window.location.href = "/auth/login"
+        window.location.href = "/auth";
         return;
       }
 
@@ -316,7 +316,7 @@ function MessagesInner() {
 
   async function handleUnlock() {
     if (!userId) {
-      window.location.href = "/auth/login"
+      window.location.href = "/auth";
       return;
     }
     if (!threadId) {
@@ -350,221 +350,314 @@ function MessagesInner() {
     }
   }
 
-  const navBtnStyle: React.CSSProperties = {
-    padding: "0.65rem 1rem",
-    border: "1px solid #ccc",
-    borderRadius: 10,
-    textDecoration: "none",
-    color: "inherit",
-    height: "fit-content",
-    background: "white",
-    display: "inline-block",
+  // --- Style tokens (Black + Gold + Green) ---
+  const bg: React.CSSProperties = {
+    minHeight: "100vh",
+    padding: "2.25rem 1rem",
+    background:
+      "radial-gradient(1200px 700px at 15% 10%, rgba(197,137,45,0.18), transparent 60%), radial-gradient(900px 600px at 85% 20%, rgba(10,85,0,0.14), transparent 55%), radial-gradient(900px 700px at 50% 92%, rgba(0,0,0,0.14), transparent 55%), #0b0b0b",
+    display: "grid",
+    placeItems: "start center",
   };
 
+  const topGlow: React.CSSProperties = {
+    margin: "0 auto 14px",
+    maxWidth: 900,
+    height: 10,
+    borderRadius: 999,
+    background:
+      "linear-gradient(90deg, rgba(197,137,45,0.0), rgba(197,137,45,0.55), rgba(10,85,0,0.55), rgba(197,137,45,0.55), rgba(197,137,45,0.0))",
+    opacity: 0.9,
+  };
+
+  const card: React.CSSProperties = {
+    width: "100%",
+    maxWidth: 900,
+    borderRadius: 22,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.92)",
+    boxShadow: "0 18px 60px rgba(0,0,0,0.28)",
+    padding: "1.75rem",
+    backdropFilter: "blur(8px)",
+  };
+
+  const pill: React.CSSProperties = {
+    display: "inline-block",
+    padding: "0.4rem 0.75rem",
+    borderRadius: 999,
+    border: "1px solid rgba(0,0,0,0.14)",
+    background: "rgba(197,137,45,0.10)",
+    color: "rgba(0,0,0,0.78)",
+    fontWeight: 800,
+    fontSize: 12,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+  };
+
+  const pillBtn: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: "0.85rem 1.05rem",
+    borderRadius: 999,
+    border: "1px solid #111",
+    background: "#111",
+    color: "#fff",
+    textDecoration: "none",
+    fontWeight: 900,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  };
+
+  const pillBtnGhost: React.CSSProperties = {
+    ...pillBtn,
+    background: "rgba(255,255,255,0.85)",
+    color: "#111",
+    border: "1px solid rgba(0,0,0,0.18)",
+  };
+
+  const inputStyle: React.CSSProperties = {
+    flex: 1,
+    padding: "0.9rem 1rem",
+    borderRadius: 999,
+    border: "1px solid rgba(0,0,0,0.22)",
+    background: "white",
+    outline: "none",
+  };
+
+  const chatShell: React.CSSProperties = {
+    marginTop: 16,
+    border: "1px solid rgba(0,0,0,0.14)",
+    borderRadius: 18,
+    padding: 12,
+    minHeight: 320,
+    maxHeight: 520,
+    overflowY: "auto",
+    background: "rgba(255,255,255,0.75)",
+  };
+
+  const subText: React.CSSProperties = { opacity: 0.72, marginTop: 6, fontSize: 13 };
+
+  const headerRight: React.CSSProperties = {
+    display: "flex",
+    gap: 10,
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  };
+
+  const lockBox: React.CSSProperties = {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 18,
+    border: locked ? "1px solid rgba(176,0,32,0.22)" : "1px solid rgba(10,85,0,0.22)",
+    background: locked ? "rgba(176,0,32,0.05)" : "rgba(10,85,0,0.06)",
+    color: locked ? "#7a1b1b" : "#0a5411",
+    whiteSpace: "pre-wrap",
+  };
+
+  function formatTs(iso: string) {
+    if (!iso) return "";
+    // Keep it simple & stable (no locale surprises on server/client)
+    return iso.slice(0, 19).replace("T", " ");
+  }
+
   return (
-    <div style={{ maxWidth: 720, margin: "0 auto", padding: "1rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ margin: 0 }}>Messages</h1>
-          <div style={{ opacity: 0.75, marginTop: 4 }}>
-            Thread: <code>{threadId || "(none)"}</code>{" "}
-            {withName ? (
-              <>
-                • With: <strong>{withName}</strong>
-              </>
-            ) : null}
-          </div>
-          <div style={{ opacity: 0.75, marginTop: 6, fontSize: 12 }}>
-            <strong>API:</strong> {API_BASE}
-          </div>
-          {PREVIEW_MODE ? (
-            <div style={{ marginTop: 6, fontSize: 12, color: "#0a5" }}>
-              Preview mode enabled (NEXT_PUBLIC_AUTH_PREVIEW_MODE=true)
+    <main style={bg}>
+      <div style={{ width: "100%", maxWidth: 980 }}>
+        <div style={topGlow} />
+
+        <section style={card}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+            <div>
+              <div style={pill}>Black Within • Messages</div>
+
+              <h1 style={{ margin: "12px 0 6px", fontSize: "2.25rem", color: "#111", letterSpacing: "-0.02em" }}>
+                Speak with intention.
+              </h1>
+
+              <div style={subText}>
+                Thread: <code>{threadId || "(none)"}</code>
+                {withName ? (
+                  <>
+                    {" "}
+                    • With: <strong>{withName}</strong>
+                  </>
+                ) : null}
+              </div>
+
+              <div style={{ ...subText, fontSize: 12 }}>
+                <strong>Move slow. Move honest. Move protected.</strong>
+              </div>
+
+              {PREVIEW_MODE ? (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#0a5411", fontWeight: 800 }}>
+                  Preview mode enabled (NEXT_PUBLIC_AUTH_PREVIEW_MODE=true)
+                </div>
+              ) : null}
+
+              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.6 }}>
+                <strong>API:</strong> {API_BASE}
+              </div>
             </div>
-          ) : null}
-        </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <Link href="/discover" style={navBtnStyle}>
-            Back to Discover
-          </Link>
-          <button onClick={handleRefresh} style={{ ...navBtnStyle, cursor: "pointer" }}>
-            Refresh
-          </button>
-        </div>
-      </div>
+            <div style={headerRight}>
+              <Link href="/discover" style={pillBtnGhost}>
+                ← Back to Discover
+              </Link>
+              <button onClick={handleRefresh} style={pillBtnGhost}>
+                Refresh
+              </button>
+            </div>
+          </div>
 
-      {status === "loading" ? <div style={{ marginTop: 20 }}>Loading…</div> : null}
+          {status === "loading" ? <div style={{ marginTop: 18, opacity: 0.8 }}>Loading…</div> : null}
 
-      {status === "error" ? (
-        <div
-          style={{
-            marginTop: 20,
-            padding: 12,
-            border: "1px solid #f2b8b5",
-            borderRadius: 12,
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Error</div>
-          <div>{err || "Something went wrong."}</div>
-        </div>
-      ) : null}
-
-      {status === "ready" ? (
-        <>
-          {access ? (
+          {status === "error" ? (
             <div
               style={{
-                marginTop: 16,
-                padding: 12,
-                borderRadius: 12,
-                border: locked ? "1px solid #f2c7c7" : "1px solid #d8e9d8",
-                background: locked ? "#fff7f7" : "#f5fff5",
-                color: locked ? "#7a1b1b" : "#1f5b1f",
+                marginTop: 18,
+                padding: 14,
+                borderRadius: 18,
+                border: "1px solid rgba(176,0,32,0.25)",
+                background: "rgba(176,0,32,0.05)",
                 whiteSpace: "pre-wrap",
               }}
             >
-              {locked ? (
-                <>
-                  <div style={{ fontWeight: 800 }}>Messaging locked</div>
-                  <div style={{ marginTop: 6 }}>
-                    {access.reason || "Messaging is locked. Upgrade to Premium or pay $1.99 to unlock this chat."}
-                  </div>
-
-                  {!PREVIEW_MODE ? (
-                    <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                      <button
-                        onClick={handlePremium}
-                        style={{
-                          padding: "0.75rem 1rem",
-                          borderRadius: 12,
-                          border: "1px solid #0a5",
-                          background: "#0a5",
-                          color: "#fff",
-                          cursor: "pointer",
-                          fontWeight: 700,
-                        }}
-                      >
-                        Go Premium — $11.22/month (Unlimited Likes + Messages)
-                      </button>
-
-                      <button
-                        onClick={handleUnlock}
-                        style={{
-                          padding: "0.75rem 1rem",
-                          borderRadius: 12,
-                          border: "1px solid #111",
-                          background: "#111",
-                          color: "#fff",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Unlock Conversation — $1.99
-                      </button>
-                    </div>
-                  ) : (
-                    <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9 }}>
-                      (Preview mode is ON, so checkout buttons are hidden.)
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div style={{ fontWeight: 800 }}>Messaging active</div>
-                  <div style={{ marginTop: 6, fontSize: 13 }}>
-                    {access.isPremium ? "Premium access" : "Unlocked access"}
-                    {access.unlockedUntilUTC ? (
-                      <>
-                        {" "}
-                        • until <code>{access.unlockedUntilUTC}</code>
-                      </>
-                    ) : null}
-                  </div>
-                </>
-              )}
+              <div style={{ fontWeight: 900, marginBottom: 6, color: "#7a1b1b" }}>Something blocked the path</div>
+              <div style={{ color: "#7a1b1b" }}>{err || "Something went wrong."}</div>
             </div>
           ) : null}
 
-          <div style={{ marginTop: 16 }}>
-            <div
-              style={{
-                border: "1px solid #ddd",
-                borderRadius: 12,
-                padding: 12,
-                minHeight: 320,
-                maxHeight: 520,
-                overflowY: "auto",
-              }}
-            >
-              {messages.length === 0 ? (
-                <div style={{ opacity: 0.7 }}>No messages yet.</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {messages.map((m) => {
-                    const mine = (m.sender_user_id || "") === (userId || "");
-                    const ts = (m.created_at || "").slice(0, 19).replace("T", " ");
-                    return (
-                      <div
-                        key={String(m.id)}
-                        style={{
-                          alignSelf: mine ? "flex-end" : "flex-start",
-                          maxWidth: "85%",
-                          padding: "10px 12px",
-                          borderRadius: 12,
-                          border: "1px solid #ddd",
-                          background: mine ? "#f5f5f5" : "#fff",
-                          whiteSpace: "pre-wrap",
-                        }}
-                      >
-                        <div style={{ fontSize: 12, opacity: 0.65, marginBottom: 4 }}>
-                          {mine ? "You" : "Them"} • {ts}
-                        </div>
-                        <div>{m.body}</div>
+          {status === "ready" ? (
+            <>
+              {access ? (
+                <div style={lockBox}>
+                  {locked ? (
+                    <>
+                      <div style={{ fontWeight: 1000, fontSize: 16 }}>Messaging locked</div>
+                      <div style={{ marginTop: 8 }}>
+                        {access.reason || "This thread is locked. Go Premium or unlock this conversation."}
                       </div>
-                    );
-                  })}
+
+                      {!PREVIEW_MODE ? (
+                        <div
+                          style={{
+                            marginTop: 12,
+                            display: "flex",
+                            gap: 10,
+                            flexWrap: "wrap",
+                            alignItems: "center",
+                          }}
+                        >
+                          <button
+                            onClick={handlePremium}
+                            style={{
+                              ...pillBtn,
+                              background: "#0a5411",
+                              border: "1px solid #0a5411",
+                            }}
+                          >
+                            Go Premium — $11.22/month
+                          </button>
+
+                          <button onClick={handleUnlock} style={pillBtn}>
+                            Unlock Conversation — $1.99
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9 }}>
+                          (Preview mode is ON, so checkout buttons are hidden.)
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontWeight: 1000, fontSize: 16, color: "#0a5411" }}>Messaging active</div>
+                      <div style={{ marginTop: 8, fontSize: 13 }}>
+                        {access.isPremium ? "Premium access" : "Unlocked access"}
+                        {access.unlockedUntilUTC ? (
+                          <>
+                            {" "}
+                            • until <code>{access.unlockedUntilUTC}</code>
+                          </>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
                 </div>
-              )}
+              ) : null}
 
-              <div ref={bottomRef} />
-            </div>
+              <div style={chatShell}>
+                {messages.length === 0 ? (
+                  <div style={{ opacity: 0.7 }}>No messages yet. Start clean. Start kind.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {messages.map((m) => {
+                      const mine = (m.sender_user_id || "") === (userId || "");
+                      const ts = formatTs(m.created_at || "");
+                      return (
+                        <div
+                          key={String(m.id)}
+                          style={{
+                            alignSelf: mine ? "flex-end" : "flex-start",
+                            maxWidth: "85%",
+                            padding: "10px 12px",
+                            borderRadius: 16,
+                            border: "1px solid rgba(0,0,0,0.14)",
+                            background: mine ? "rgba(10,85,0,0.06)" : "rgba(255,255,255,0.92)",
+                            whiteSpace: "pre-wrap",
+                            boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+                          }}
+                        >
+                          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6, fontWeight: 700 }}>
+                            {mine ? "You" : withName ? withName : "Them"} • {ts}
+                          </div>
+                          <div style={{ fontSize: 15, lineHeight: 1.45 }}>{m.body}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder={locked ? "Messaging locked…" : "Type a message…"}
-                disabled={locked}
-                style={{
-                  flex: 1,
-                  padding: "0.75rem 0.9rem",
-                  borderRadius: 12,
-                  border: "1px solid #ccc",
-                  background: locked ? "#f7f7f7" : "white",
-                }}
-              />
-              <button
-                onClick={handleSend}
-                disabled={locked}
-                style={{
-                  padding: "0.75rem 1rem",
-                  borderRadius: 12,
-                  border: "1px solid #111",
-                  background: locked ? "#999" : "#111",
-                  color: "#fff",
-                  cursor: locked ? "not-allowed" : "pointer",
-                  opacity: locked ? 0.85 : 1,
-                }}
-              >
-                Send
-              </button>
-            </div>
+                <div ref={bottomRef} />
+              </div>
 
-            {err ? <div style={{ marginTop: 10, color: "#b00020", whiteSpace: "pre-wrap" }}>{err}</div> : null}
-          </div>
-        </>
-      ) : null}
-    </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
+                <input
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder={locked ? "Messaging locked…" : "Type with intention…"}
+                  disabled={locked}
+                  style={{
+                    ...inputStyle,
+                    background: locked ? "rgba(0,0,0,0.04)" : "white",
+                    cursor: locked ? "not-allowed" : "text",
+                  }}
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={locked}
+                  style={{
+                    ...pillBtn,
+                    opacity: locked ? 0.6 : 1,
+                    cursor: locked ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Send
+                </button>
+              </div>
+
+              {err ? (
+                <div style={{ marginTop: 12, color: "#b00020", whiteSpace: "pre-wrap", fontWeight: 700 }}>
+                  {err}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </section>
+      </div>
+    </main>
   );
 }
