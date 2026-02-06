@@ -1853,7 +1853,7 @@ def get_threads(
         q_threads = (
             select(Thread)
             .where(or_(THREAD_USER_A == user_id, THREAD_USER_B == user_id))
-            .order_by(desc(Thread.updated_at))
+            .order_by(desc(getattr(Thread, "updated_at", getattr(Thread, "created_at", None))))
             .limit(limit)
         )
         threads = session.execute(q_threads).scalars().all()
