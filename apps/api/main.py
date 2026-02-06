@@ -1804,26 +1804,23 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
 
 
 # ✅ NEW ENDPOINT: GET /threads?user_id=...  (as requested)
+from sqlalchemy import or_, desc, select
+from typing import Dict, List
+
 @app.get("/threads", response_model=ThreadsResponse)
 def get_threads(
     user_id: str = Query(..., description="The current user's id"),
     limit: int = Query(50, ge=1, le=200),
 ):
-    """
-    Returns the user's conversation threads for inbox display:
-    - thread_id
-    - who it's with (enriched with profile name/photo if available)
-    - last message preview + timestamp
-    - updated_at ordering
-    """
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        # ✅ IMPORTANT: map these to your actual Thread column names
-        # Your model uses user_low/user_high:
-        THREAD_USER_A = Thread.user_low
-        THREAD_USER_B = Thread.user_high
+        # ✅ Set these TWO to match your Thread model column names
+        # If your Thread uses different names, change ONLY these two lines.
+        THREAD_USER_A = Thread.user_a_id
+        THREAD_USER_B = Thread.user_b_id
 
+        # 1) Get the user's threads
         q_threads = (
             select(Thread)
             .where(or_(THREAD_USER_A == user_id, THREAD_USER_B == user_id))
@@ -1835,10 +1832,10 @@ def get_threads(
         if not threads:
             return ThreadsResponse(items=[])
 
-        # Collect thread ids
+        # 2) Collect thread ids
         thread_ids = [t.id for t in threads]
 
-        # --- Pull last message per thread ---
+        # 3) Get latest message for each thread
         q_msgs = (
             select(Message)
             .where(Message.thread_id.in_(thread_ids))
@@ -1851,26 +1848,26 @@ def get_threads(
             if m.thread_id not in last_by_thread:
                 last_by_thread[m.thread_id] = m
 
-        # Determine other_user_ids
+        # 4) Determine who the "other person" is for each thread
         other_user_ids: List[str] = []
         for t in threads:
             a = getattr(t, THREAD_USER_A.key)
             b = getattr(t, THREAD_USER_B.key)
-            other_user_ids.append(b if a == user_id else a)
+            other_user_ids.append(b if str(a) == str(user_id) else a)
 
-        # Fetch profiles for "other" users (Profile.owner_user_id links to user id)
+        # 5) Fetch profiles for those users
         q_profiles = select(Profile).where(Profile.owner_user_id.in_(other_user_ids))
         other_profiles = session.execute(q_profiles).scalars().all()
-        profile_by_user: Dict[str, Profile] = {p.owner_user_id: p for p in other_profiles}
 
-            items: List[ThreadListItem] = []
+        # 6) Build inbox list
+        items: List[ThreadListItem] = []
 
         for t in threads:
             a = getattr(t, THREAD_USER_A.key)
             b = getattr(t, THREAD_USER_B.key)
-            other_user_id = b if a == user_id else a
+            other_user_id = b if str(a) == str(user_id) else a
 
-            # Find the other person's profile safely
+            # Safe profile match
             op = next(
                 (p for p in other_profiles if str(p.owner_user_id) == str(other_user_id)),
                 None,
@@ -1893,7 +1890,7 @@ def get_threads(
                 )
             )
 
-        return ThreadsResponse(items=items) 
+        return ThreadsResponse(items=items)
 
 
 # -----------------------------
