@@ -316,7 +316,7 @@ function MessagesInner() {
 
   async function handleUnlock() {
     if (!userId) {
-      window.location.href = "/auth";
+      window.location.href = "/auth/login"
       return;
     }
     if (!threadId) {
