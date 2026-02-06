@@ -590,6 +590,20 @@ class ThreadsResponse(BaseModel):
     items: List[ThreadItem]
 
 
+# ✅ ADD: these schemas (near your other response models)
+class ThreadListItem(BaseModel):
+    thread_id: str
+    with_user_id: Optional[str] = None
+    with_display_name: Optional[str] = None
+    with_photo: Optional[str] = None
+    last_message: Optional[str] = None
+    last_at: Optional[str] = None
+
+
+class ThreadsResponseV2(BaseModel):
+    items: List[ThreadListItem]
+
+
 class MessageCreatePayload(BaseModel):
     user_id: str
     thread_id: str
@@ -1778,6 +1792,69 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
             )
 
         return ThreadsResponse(items=items)
+
+
+# -----------------------------
+# Messages
+# -----------------------------
+# ✅ ADD: endpoint under your Messages section
+@app.get("/threads", response_model=ThreadsResponseV2)
+def list_threads(user_id: str = Query(...), limit: int = Query(default=100, ge=1, le=500)):
+    user_id = _ensure_user(user_id)
+
+    with Session(engine) as session:
+        # Find threads where user is a participant.
+        # NOTE: your Thread model uses user_low/user_high, so we adapt the query to that.
+        q = (
+            select(Thread)
+            .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
+            .order_by(Thread.updated_at.desc())
+            .limit(limit)
+        )
+
+        threads = session.execute(q).scalars().all()
+
+        items: List[ThreadListItem] = []
+
+        for t in threads:
+            # Identify the "other" user in the thread
+            other_user_id = t.user_high if t.user_low == user_id else t.user_low
+
+            # Best-effort: pull the other person's display name/photo from Profile table if you have it
+            other_name = None
+            other_photo = None
+            if other_user_id:
+                other_profile = session.execute(
+                    select(Profile).where(Profile.owner_user_id == other_user_id).limit(1)
+                ).scalars().first()
+                if other_profile:
+                    other_name = getattr(other_profile, "displayName", None) or getattr(other_profile, "display_name", None)
+                    other_photo = getattr(other_profile, "photo", None)
+
+            # Get last message
+            last_msg = session.execute(
+                select(Message)
+                .where(Message.thread_id == t.id)
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).scalars().first()
+
+            items.append(
+                ThreadListItem(
+                    thread_id=str(t.id),
+                    with_user_id=other_user_id,
+                    with_display_name=other_name,
+                    with_photo=other_photo,
+                    last_message=(last_msg.body if last_msg else None),
+                    last_at=(
+                        last_msg.created_at.isoformat()
+                        if last_msg
+                        else (t.updated_at.isoformat() if getattr(t, "updated_at", None) else None)
+                    ),
+                )
+            )
+
+        return ThreadsResponseV2(items=items)
 
 
 # -----------------------------
