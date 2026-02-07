@@ -380,7 +380,12 @@ export default function InboxPage() {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {items.map((t, idx) => {
-                    const name = (t.with_display_name || "Member").trim();
+                   const name = (
+                     t.with_display_name ||
+                     (t as any).other_display_name ||
+                    "Member"
+  ).trim();
+
                     const threadId = (t.thread_id || "").trim();
                     const last = (t.last_message || "").trim();
                     const when = fmtTime(t.last_at);
