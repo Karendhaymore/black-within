@@ -398,18 +398,22 @@ export default function InboxPage() {
                     return (
                       <Link key={`${threadId}-${idx}`} href={href} style={rowCard}>
                         <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-                          {t.with_photo ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={t.with_photo} alt={name} style={avatar} />
-                          ) : (
-                            <div
-                              style={{
-                                ...avatar,
-                                display: "grid",
-                                placeItems: "center",
-                                fontWeight: 900,
-                                color: "rgba(0,0,0,0.6)",
-                              }}
+                         {photo ? (
+  // eslint-disable-next-line @next/next/no-img-element
+  <img src={photo} alt={name} style={avatar} />
+) : (
+  <div
+    style={{
+      ...avatar,
+      display: "grid",
+      placeItems: "center",
+      fontWeight: 900,
+      color: "rgba(0,0,0,0.6)",
+    }}
+  >
+    {name.slice(0, 1).toUpperCase()}
+  </div>
+)}
                             >
                               {name.slice(0, 1).toUpperCase()}
                             </div>
