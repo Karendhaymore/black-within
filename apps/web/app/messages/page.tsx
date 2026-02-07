@@ -631,7 +631,7 @@ function MessagesInner() {
                           }}
                         >
                           <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6, fontWeight: 700 }}>
-                            {mine ? "You" : withName ? withName : "Them"} • {ts}
+                            {mine ? "You" : (withName || "Member")} • {ts}
                           </div>
                           <div style={{ fontSize: 15, lineHeight: 1.45 }}>{m.body}</div>
                         </div>
