@@ -2187,10 +2187,11 @@ unlock = ThreadUnlock(
                         existing.updated_at = datetime.utcnow()
                     else:
                         ent = Entitlement(
-                            user_id=user_id,
-                            is_premium=True,
-                            updated_at=datetime.utcnow(),
-                        )
+    user_id=user_id,
+    is_premium=True,
+    created_at=datetime.utcnow(),
+    updated_at=datetime.utcnow(),
+)
                         db.add(ent)
 
                     try:
