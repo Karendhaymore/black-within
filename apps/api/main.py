@@ -267,6 +267,9 @@ class ThreadUnlock(Base):
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    # ✅ FIX: ensure updated_at always has a default for inserts
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
     __table_args__ = (
         UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),
     )
@@ -316,17 +319,22 @@ def _auto_migrate_threads_messages_tables():
         """))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"""))
 
+        # ✅ include updated_at in table definition
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS thread_unlocks (
               id SERIAL PRIMARY KEY,
               thread_id VARCHAR(60),
               user_id VARCHAR(40),
               created_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW(),
               CONSTRAINT uq_thread_user_unlock UNIQUE (thread_id, user_id)
             );
         """))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_thread_id ON thread_unlocks(thread_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_user_id ON thread_unlocks(user_id);"""))
+
+        # ✅ backfill/migrate for existing databases
+        conn.execute(text("""ALTER TABLE thread_unlocks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
 
 
 def _auto_migrate_profiles_table():
@@ -1989,7 +1997,8 @@ def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default
             select(ThreadUnlock).where(ThreadUnlock.user_id == user_id, ThreadUnlock.thread_id == thread_id)
         ).scalar_one_or_none()
         if not existing:
-            session.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=datetime.utcnow()))
+            now = datetime.utcnow()
+            session.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=now, updated_at=now))
             try:
                 session.commit()
             except IntegrityError:
@@ -2146,11 +2155,14 @@ async def stripe_webhook(request: Request):
             if not user_id or not thread_id:
                 raise HTTPException(status_code=400, detail="Missing user_id or thread_id")
 
+            # ✅ FIX: set both created_at and updated_at
+            now = datetime.utcnow()
             db.add(
                 ThreadUnlock(
                     user_id=user_id,
                     thread_id=thread_id,
-                    created_at=datetime.utcnow(),
+                    created_at=now,
+                    updated_at=now,
                 )
             )
             try:
