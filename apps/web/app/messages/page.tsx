@@ -156,6 +156,7 @@ function MessagesInner() {
 
   const threadId = sp.get("threadId") || "";
   const withName = sp.get("with") || "";
+  // 3) Read withPhoto right under withName
   const withPhoto = sp.get("withPhoto") || "";
 
   const userId = useMemo(() => getLoggedInUserId(), []);
@@ -478,33 +479,43 @@ function MessagesInner() {
                 Speak with intention.
               </h1>
 
-             <div style={{ display: "flex", alignItems: "center", gap: 10, ...subText }}>
-  {withPhoto ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={withPhoto}
-      alt={withName || "Member"}
-      style={{
-        width: 32,
-        height: 32,
-        borderRadius: 999,
-        objectFit: "cover",
-        border: "1px solid rgba(0,0,0,0.14)",
-      }}
-    />
-  ) : null}
+              {/* 4) Header "With" line updated */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
+                {withPhoto ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={withPhoto}
+                    alt={withName || "Member"}
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 999,
+                      objectFit: "cover",
+                      border: "1px solid rgba(0,0,0,0.14)",
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 999,
+                      border: "1px solid rgba(0,0,0,0.14)",
+                      background: "rgba(0,0,0,0.06)",
+                      display: "grid",
+                      placeItems: "center",
+                      fontWeight: 900,
+                      color: "rgba(0,0,0,0.6)",
+                    }}
+                  >
+                    {(withName || "M").slice(0, 1).toUpperCase()}
+                  </div>
+                )}
 
-  <div>
-    {withName ? (
-      <>
-        With: <strong>{withName}</strong>
-      </>
-    ) : (
-      <>With: <strong>Member</strong></>
-    )}
-  </div>
-</div>
-
+                <div style={{ color: "rgba(0,0,0,0.65)", fontSize: 13 }}>
+                  With: <strong style={{ color: "#111" }}>{withName || "Member"}</strong>
+                </div>
+              </div>
 
               <div style={{ ...subText, fontSize: 12 }}>
                 <strong>Move slow. Move honest. Move protected.</strong>
@@ -631,7 +642,7 @@ function MessagesInner() {
                           }}
                         >
                           <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6, fontWeight: 700 }}>
-                            {mine ? "You" : (withName || "Member")} • {ts}
+                            {mine ? "You" : withName || "Member"} • {ts}
                           </div>
                           <div style={{ fontSize: 15, lineHeight: 1.45 }}>{m.body}</div>
                         </div>
