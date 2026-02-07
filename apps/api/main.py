@@ -990,7 +990,6 @@ def login(payload: LoginPayload):
     }
 
 
-# ✅ 1) Request reset email (always returns ok to prevent “email existence” leaks)
 @app.post("/auth/forgot-password")
 def forgot_password(payload: ForgotPasswordPayload):
     email = _normalize_email(payload.email)
@@ -1027,7 +1026,6 @@ def forgot_password(payload: ForgotPasswordPayload):
         )
         session.commit()
 
-    # Send email (use your configured SendGrid sender)
     reset_link = f"{APP_WEB_BASE_URL}/auth/reset?token={token}"
 
     html = f"""
@@ -1051,7 +1049,6 @@ def forgot_password(payload: ForgotPasswordPayload):
     return {"ok": True}
 
 
-# ✅ 2) Reset password using token
 @app.post("/auth/reset-password")
 def reset_password(payload: ResetPasswordPayload):
     token = (payload.token or "").strip()
@@ -1367,7 +1364,6 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
         )
 
 
-# IMPORTANT: your frontend currently POSTs to /profiles (keep this alias)
 @app.post("/profiles", response_model=ProfileItem)
 def upsert_profile_alias(payload: UpsertMyProfilePayload):
     return upsert_my_profile(payload)
@@ -1685,11 +1681,6 @@ def _get_entitlement(session: Session, user_id: str) -> Entitlement:
 def _can_message_thread(session: Session, user_id: str, thread_id: str) -> Tuple[bool, bool, str]:
     """
     Returns: (can_message, is_premium, reason)
-
-    Rules:
-      - Premium => can message anywhere
-      - ThreadUnlock exists for (user_id, thread_id) => can message in that thread
-      - Otherwise locked
     """
     user_id = (user_id or "").strip()
     thread_id = (thread_id or "").strip()
@@ -1809,7 +1800,6 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
         return ThreadsInboxResponse(items=items)
 
 
-# ✅ NEW ENDPOINT: GET /threads?user_id=...
 @app.get("/threads", response_model=ThreadsResponse)
 def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
     user_id = _ensure_user(user_id)
@@ -2083,9 +2073,6 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
         raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
 
 
-# -----------------------------
-# NEW ROUTE 1: Create Stripe Checkout Session (Unlock Conversation – $1.99)
-# -----------------------------
 @app.post("/stripe/create-unlock-session")
 def create_unlock_session(payload: CreateUnlockSessionPayload):
     if not STRIPE_SECRET_KEY:
@@ -2125,7 +2112,7 @@ def create_unlock_session(payload: CreateUnlockSessionPayload):
 
 
 # -----------------------------
-# Stripe Webhook ✅ REPLACED (per your instructions)
+# Stripe Webhook ✅ FIXED INDENTATION
 # -----------------------------
 @app.post("/stripe/webhook")
 async def stripe_webhook(request: Request):
@@ -2136,41 +2123,54 @@ async def stripe_webhook(request: Request):
         raise HTTPException(status_code=500, detail="Webhook secret not configured.")
 
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, STRIPE_WEBHOOK_SECRET
-        )
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except stripe.error.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Webhook error: {str(e)}")
 
-    # 👇 THIS is the important event
-    if event["type"] == "checkout.session.completed":
-        session_obj = event["data"]["object"]
-        metadata = session_obj.get("metadata", {})
-        kind = metadata.get("kind")
+    # Only handle what we need
+    if event.get("type") != "checkout.session.completed":
+        return {"status": "ignored"}
 
-        with Session(engine) as db:
+    session_obj = event["data"]["object"]
+    metadata = session_obj.get("metadata", {}) or {}
+    kind = metadata.get("kind")
 
-            # 🔓 THREAD UNLOCK PURCHASE
-   if kind == "thread_unlock":
-    user_id = metadata.get("user_id")
-    thread_id = metadata.get("thread_id")
+    with Session(engine) as db:
+        # 🔓 THREAD UNLOCK PURCHASE
+        if kind == "thread_unlock":
+            user_id = (metadata.get("user_id") or "").strip()
+            thread_id = (metadata.get("thread_id") or "").strip()
 
-    if not user_id or not thread_id:
-        raise HTTPException(status_code=400, detail="Missing user_id or thread_id")
+            if not user_id or not thread_id:
+                raise HTTPException(status_code=400, detail="Missing user_id or thread_id")
 
-    unlock = ThreadUnlock(
-        user_id=user_id,
-        thread_id=thread_id,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
+            db.add(
+                ThreadUnlock(
+                    user_id=user_id,
+                    thread_id=thread_id,
+                    created_at=datetime.utcnow(),
+                )
+            )
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
 
-    db.add(unlock)
-    db.commit()
- 
-                    except IntegrityError:
-                        db.rollback()
+            return {"status": "success"}
 
-                    print(f"Premium activated for {user_id}")
+        # ⭐ PREMIUM PURCHASE
+        if kind == "premium":
+            user_id = (metadata.get("user_id") or "").strip() or (session_obj.get("client_reference_id") or "").strip()
+            if not user_id:
+                raise HTTPException(status_code=400, detail="Missing user_id for premium")
 
-    return {"status": "success"}
+            ent = _get_entitlement(db, user_id)
+            ent.is_premium = True
+            ent.updated_at = datetime.utcnow()
+            db.commit()
+
+            return {"status": "success"}
+
+    return {"status": "ignored"}
