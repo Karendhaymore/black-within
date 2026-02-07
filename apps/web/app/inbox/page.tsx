@@ -379,117 +379,114 @@ export default function InboxPage() {
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {items.map((t, idx) => {
-                   const name = (
-                     t.with_display_name ||
-                     (t as any).other_display_name ||
-                    "Member"
+                 {items.map((t, idx) => {
+  const name = (
+    t.with_display_name ||
+    (t as any).other_display_name ||
+    "Member"
   ).trim();
 
-                    const threadId = (t.thread_id || "").trim();
-                    const last = (t.last_message || "").trim();
-                    const when = fmtTime(t.last_at);
-                    const unread = Math.max(0, Number(t.unread_count || 0));
+  const photo = (t.with_photo || (t as any).other_photo || null) as string | null;
 
-                    const href =
-                      `/messages?threadId=${encodeURIComponent(threadId)}` +
-                      `&with=${encodeURIComponent(name)}`;
+  const threadId = (t.thread_id || "").trim();
+  const last = (t.last_message || "").trim();
+  const when = fmtTime(t.last_at);
+  const unread = Math.max(0, Number(t.unread_count || 0));
 
-                    return (
-                      <Link key={`${threadId}-${idx}`} href={href} style={rowCard}>
-                        <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-                         {photo ? (
-  // eslint-disable-next-line @next/next/no-img-element
-  <img src={photo} alt={name} style={avatar} />
-) : (
-  <div
-    style={{
-      ...avatar,
-      display: "grid",
-      placeItems: "center",
-      fontWeight: 900,
-      color: "rgba(0,0,0,0.6)",
-    }}
-  >
-    {name.slice(0, 1).toUpperCase()}
-  </div>
-)}
-                            >
-                              {name.slice(0, 1).toUpperCase()}
-                            </div>
-                          )}
+  const href =
+    `/messages?threadId=${encodeURIComponent(threadId)}` +
+    `&with=${encodeURIComponent(name)}`;
 
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ display: "flex", gap: 10, alignItems: "baseline", minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontWeight: 900,
-                                  color: "#111",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                  maxWidth: 420,
-                                }}
-                              >
-                                {name}
-                              </div>
+  return (
+    <Link key={`${threadId}-${idx}`} href={href} style={rowCard}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
+        {photo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={photo} alt={name} style={avatar} />
+        ) : (
+          <div
+            style={{
+              ...avatar,
+              display: "grid",
+              placeItems: "center",
+              fontWeight: 900,
+              color: "rgba(0,0,0,0.6)",
+            }}
+          >
+            {name.slice(0, 1).toUpperCase()}
+          </div>
+        )}
 
-                              {when ? (
-                                <div style={{ fontSize: 12, color: "rgba(0,0,0,0.55)" }}>{when}</div>
-                              ) : null}
-                            </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "baseline", minWidth: 0 }}>
+            <div
+              style={{
+                fontWeight: 900,
+                color: "#111",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                maxWidth: 420,
+              }}
+            >
+              {name}
+            </div>
 
-                            <div
-                              style={{
-                                marginTop: 4,
-                                fontSize: 13,
-                                color: "rgba(0,0,0,0.68)",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                                maxWidth: 560,
-                              }}
-                            >
-                              {last || "Tap to open this conversation."}
-                            </div>
-                          </div>
-                        </div>
+            {when ? <div style={{ fontSize: 12, color: "rgba(0,0,0,0.55)" }}>{when}</div> : null}
+          </div>
 
-                        <div style={{ display: "flex", gap: 10, alignItems: "center", flex: "0 0 auto" }}>
-                          {unread > 0 ? (
-                            <div
-                              style={{
-                                padding: "0.25rem 0.6rem",
-                                borderRadius: 999,
-                                background: "rgba(10,85,0,0.12)",
-                                border: "1px solid rgba(10,85,0,0.25)",
-                                color: "rgba(10,85,0,0.95)",
-                                fontWeight: 900,
-                                fontSize: 12,
-                              }}
-                              title="Unread messages"
-                            >
-                              {unread}
-                            </div>
-                          ) : null}
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 13,
+              color: "rgba(0,0,0,0.68)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              maxWidth: 560,
+            }}
+          >
+            {last || "Tap to open this conversation."}
+          </div>
+        </div>
+      </div>
 
-                          <div
-                            style={{
-                              padding: "0.55rem 0.85rem",
-                              borderRadius: 999,
-                              border: "1px solid rgba(0,0,0,0.18)",
-                              background: "rgba(197,137,45,0.10)",
-                              fontWeight: 900,
-                              color: "#111",
-                              fontSize: 12,
-                            }}
-                          >
-                            Open
-                          </div>
-                        </div>
-                      </Link>
-                    );
-                  })}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flex: "0 0 auto" }}>
+        {unread > 0 ? (
+          <div
+            style={{
+              padding: "0.25rem 0.6rem",
+              borderRadius: 999,
+              background: "rgba(10,85,0,0.12)",
+              border: "1px solid rgba(10,85,0,0.25)",
+              color: "rgba(10,85,0,0.95)",
+              fontWeight: 900,
+              fontSize: 12,
+            }}
+            title="Unread messages"
+          >
+            {unread}
+          </div>
+        ) : null}
+
+        <div
+          style={{
+            padding: "0.55rem 0.85rem",
+            borderRadius: 999,
+            border: "1px solid rgba(0,0,0,0.18)",
+            background: "rgba(197,137,45,0.10)",
+            fontWeight: 900,
+            color: "#111",
+            fontSize: 12,
+          }}
+        >
+          Open
+        </div>
+      </div>
+    </Link>
+  );
+})}
+ 
                 </div>
               )}
 
