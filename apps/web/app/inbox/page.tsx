@@ -8,8 +8,11 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
+// ✅ UPDATED per your request
 type ThreadItem = {
   thread_id: string;
+
+  // UI expects these:
   with_user_id?: string | null;
   with_profile_id?: string | null;
   with_display_name?: string | null;
@@ -18,9 +21,21 @@ type ThreadItem = {
   last_message?: string | null;
   last_at?: string | null;
   unread_count?: number | null;
+
+  // API may also return these (we normalize them):
+  other_user_id?: string | null;
+  other_profile_id?: string | null;
+  other_display_name?: string | null;
+  other_photo?: string | null;
+
+  last_message_text?: string | null;
+  last_message_at?: string | null;
+
+  updated_at?: string | null;
 };
 
-type ThreadsResponse = { items: ThreadItem[] } | { threads: ThreadItem[] } | ThreadItem[];
+// ✅ UPDATED per your request
+type ThreadsResponse = { items: any[] } | { threads: any[] } | any[];
 
 function getLoggedInUserId(): string | null {
   if (typeof window === "undefined") return null;
@@ -37,7 +52,8 @@ function getLoggedInUserId(): string | null {
 async function safeReadErrorDetail(res: Response): Promise<string> {
   try {
     const data = await res.json();
-    if (data?.detail != null) return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    if (data?.detail != null)
+      return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
     return JSON.stringify(data);
   } catch {}
   try {
@@ -47,43 +63,100 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
   return `Request failed (${res.status}).`;
 }
 
-/**
- * We don't know your exact list-threads endpoint name, so this tries a few common ones.
- * Whatever succeeds first will be used.
- */
+// ✅ REPLACED ENTIRE FUNCTION per your request
 async function fetchThreads(userId: string): Promise<ThreadItem[]> {
+  // Keep /threads first because it is the correct one now.
   const candidates = [
     `${API_BASE}/threads?user_id=${encodeURIComponent(userId)}`,
+    `${API_BASE}/threads/inbox?user_id=${encodeURIComponent(userId)}`,
     `${API_BASE}/messages/threads?user_id=${encodeURIComponent(userId)}`,
     `${API_BASE}/threads/list?user_id=${encodeURIComponent(userId)}`,
     `${API_BASE}/inbox?user_id=${encodeURIComponent(userId)}`,
   ];
 
   let lastErr = "";
+
   for (const url of candidates) {
     try {
       const res = await fetch(url, { cache: "no-store" });
+
       if (!res.ok) {
         lastErr = await safeReadErrorDetail(res);
         continue;
       }
+
       const data = (await res.json()) as ThreadsResponse;
 
-      // Normalize a few possible shapes
-      if (Array.isArray(data)) return data as ThreadItem[];
+      // Normalize response shape -> array
+      let rows: any[] = [];
+      if (Array.isArray(data)) rows = data;
       // @ts-ignore
-      if (Array.isArray((data as any).items)) return (data as any).items as ThreadItem[];
+      else if (Array.isArray((data as any).items)) rows = (data as any).items;
       // @ts-ignore
-      if (Array.isArray((data as any).threads)) return (data as any).threads as ThreadItem[];
+      else if (Array.isArray((data as any).threads)) rows = (data as any).threads;
 
-      return [];
+      // Normalize field names from API -> UI expectations
+      const normalized: ThreadItem[] = rows
+        .map((r: any) => {
+          const thread_id = String(r.thread_id ?? r.threadId ?? r.id ?? "").trim();
+          if (!thread_id) return null;
+
+          const with_user_id =
+            r.with_user_id ?? r.withUserId ?? r.other_user_id ?? r.otherUserId ?? null;
+
+          // Filter broken rows (like other_user_id = "undefined")
+          if (!with_user_id || String(with_user_id) === "undefined") return null;
+
+          const with_profile_id =
+            r.with_profile_id ?? r.withProfileId ?? r.other_profile_id ?? r.otherProfileId ?? null;
+
+          const with_display_name =
+            r.with_display_name ??
+            r.withDisplayName ??
+            r.other_display_name ??
+            r.otherDisplayName ??
+            null;
+
+          const with_photo =
+            r.with_photo ?? r.withPhoto ?? r.other_photo ?? r.otherPhoto ?? null;
+
+          const last_message =
+            r.last_message ?? r.lastMessage ?? r.last_message_text ?? r.lastMessageText ?? null;
+
+          const last_at =
+            r.last_at ??
+            r.lastAt ??
+            r.last_message_at ??
+            r.lastMessageAt ??
+            r.updated_at ??
+            r.updatedAt ??
+            null;
+
+          const unread_count = r.unread_count ?? r.unreadCount ?? 0;
+
+          return {
+            thread_id,
+            with_user_id: with_user_id ? String(with_user_id) : null,
+            with_profile_id: with_profile_id ? String(with_profile_id) : null,
+            with_display_name: with_display_name ? String(with_display_name) : null,
+            with_photo: with_photo ? String(with_photo) : null,
+            last_message: last_message ? String(last_message) : null,
+            last_at: last_at ? String(last_at) : null,
+            unread_count: Number(unread_count || 0),
+          } as ThreadItem;
+        })
+        .filter(Boolean) as ThreadItem[];
+
+      return normalized;
     } catch (e: any) {
       lastErr = e?.message ? String(e.message) : String(e);
     }
   }
 
   throw new Error(
-    `Could not load inbox threads from the API.\n\nTried:\n- ${candidates.join("\n- ")}\n\nLast error:\n${lastErr || "(unknown)"}`
+    `Could not load inbox threads from the API.\n\nTried:\n- ${candidates.join(
+      "\n- "
+    )}\n\nLast error:\n${lastErr || "(unknown)"}`
   );
 }
 
@@ -256,11 +329,7 @@ export default function InboxPage() {
               <Link href="/discover" style={pillBtn}>
                 Enter Community
               </Link>
-              <button
-                onClick={() => window.location.reload()}
-                style={softBtn}
-                title="Refresh inbox"
-              >
+              <button onClick={() => window.location.reload()} style={softBtn} title="Refresh inbox">
                 Refresh
               </button>
             </div>
