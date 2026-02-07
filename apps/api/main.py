@@ -2017,9 +2017,13 @@ def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default
 # -----------------------------
 # Stripe Checkout
 # -----------------------------
+# -----------------------------
+# Stripe Checkout
+# -----------------------------
 @app.post("/stripe/checkout/thread-unlock", response_model=CheckoutSessionResponse)
 def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
-    if not STRIPE_SECRET_KEY or not STRIPE_MESSAGE_UNLOCK_PRICE_ID:
+    # ✅ Only need Stripe secret key now (we build price inline)
+    if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=500, detail="Stripe is not configured for thread unlocks.")
 
     user_id = _ensure_user(payload.user_id)
@@ -2027,23 +2031,31 @@ def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
     if not thread_id:
         raise HTTPException(status_code=400, detail="thread_id is required")
 
-    success_url = f"{APP_WEB_BASE_URL}/messages?threadId={thread_id}&checkout=success"
-    cancel_url = f"{APP_WEB_BASE_URL}/messages?threadId={thread_id}&checkout=cancel"
+    # ✅ Use WEB_BASE_URL if you have it, otherwise fall back to APP_WEB_BASE_URL
+    WEB_BASE_URL = os.getenv("WEB_BASE_URL") or APP_WEB_BASE_URL
 
     try:
-        session_obj = stripe.checkout.Session.create(
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
             mode="payment",
-            line_items=[{"price": STRIPE_MESSAGE_UNLOCK_PRICE_ID, "quantity": 1}],
-            success_url=success_url,
-            cancel_url=cancel_url,
-            client_reference_id=user_id,
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": 199,  # $1.99
+                        "product_data": {"name": "Unlock Chat Conversation"},
+                    },
+                    "quantity": 1,
+                }
+            ],
+            success_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=success",
+            cancel_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=cancel",
             metadata={
-                "kind": "thread_unlock",
                 "user_id": user_id,
                 "thread_id": thread_id,
             },
         )
-        return CheckoutSessionResponse(url=session_obj.url)
+        return CheckoutSessionResponse(url=checkout_session.url)
 
     except Exception as e:
         # This will make the exact Stripe error show up in your browser Network tab
@@ -2058,8 +2070,11 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
 
     user_id = _ensure_user(payload.user_id)
 
-    success_url = f"{APP_WEB_BASE_URL}/discover?premium=success"
-    cancel_url = f"{APP_WEB_BASE_URL}/discover?premium=cancel"
+    # ✅ Use WEB_BASE_URL if you have it, otherwise fall back to APP_WEB_BASE_URL
+    WEB_BASE_URL = os.getenv("WEB_BASE_URL") or APP_WEB_BASE_URL
+
+    success_url = f"{WEB_BASE_URL}/discover?premium=success"
+    cancel_url = f"{WEB_BASE_URL}/discover?premium=cancel"
 
     try:
         session_obj = stripe.checkout.Session.create(
