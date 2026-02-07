@@ -395,7 +395,8 @@ export default function InboxPage() {
                       `/messages?threadId=${encodeURIComponent(threadId)}` +
                       `&with=${encodeURIComponent(name)}` +
                       (photo ? `&withPhoto=${encodeURIComponent(photo)}` : "");
-
+                      (t.with_profile_id ? `&withProfileId=${encodeURIComponent(t.with_profile_id)}` : "");
+                  
                     return (
                       <Link key={`${threadId}-${idx}`} href={href} style={rowCard}>
                         <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
