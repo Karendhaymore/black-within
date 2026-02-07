@@ -156,6 +156,7 @@ function MessagesInner() {
 
   const threadId = sp.get("threadId") || "";
   const withName = sp.get("with") || "";
+  const withPhoto = sp.get("withPhoto") || "";
 
   const userId = useMemo(() => getLoggedInUserId(), []);
 
