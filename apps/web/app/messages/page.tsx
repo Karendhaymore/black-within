@@ -477,15 +477,15 @@ function MessagesInner() {
                 Speak with intention.
               </h1>
 
-              <div style={subText}>
-                Thread: <code>{threadId || "(none)"}</code>
-                {withName ? (
-                  <>
-                    {" "}
-                    • With: <strong>{withName}</strong>
-                  </>
-                ) : null}
-              </div>
+             <div style={subText}>
+  {withName ? (
+    <>
+      With: <strong>{withName}</strong>
+    </>
+  ) : (
+    <span>Conversation</span>
+  )}
+</div> 
 
               <div style={{ ...subText, fontSize: 12 }}>
                 <strong>Move slow. Move honest. Move protected.</strong>
