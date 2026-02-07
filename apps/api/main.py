@@ -979,7 +979,12 @@ def login(payload: LoginPayload):
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
     _ensure_user(acct.user_id)
-    return {"ok": True, "userId": acct.user_id, "email": email}
+    return {
+    "ok": True,
+    "userId": acct.user_id,
+    "user_id": acct.user_id,
+    "email": email,
+}
 
 
 # ✅ 1) Request reset email (always returns ok to prevent “email existence” leaks)
