@@ -384,7 +384,7 @@ export default function InboxPage() {
                     // ✅ A) Add these two lines (right after threadId is set)
                     const name = (t.with_display_name || (t as any).other_display_name || "Member").trim();
 
-                    const photo = t.with_photo || (t as any).other_photo || null;
+                    const photo = (t.with_photo || (t as any).other_photo || "").trim();
 
                     const last = (t.last_message || "").trim();
                     const when = fmtTime(t.last_at);
