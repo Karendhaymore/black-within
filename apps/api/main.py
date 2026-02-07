@@ -245,7 +245,10 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
-class MessagingEntitlement(Base):
+# -----------------------------
+# Premium entitlement (renamed to match Stripe webhook expectation)
+# -----------------------------
+class Entitlement(Base):
     __tablename__ = "messaging_entitlements"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True, unique=True)
@@ -1661,20 +1664,20 @@ def _sorted_pair(a: str, b: str) -> Tuple[str, str]:
     return (a, b) if a < b else (b, a)
 
 
-def _get_entitlement(session: Session, user_id: str) -> MessagingEntitlement:
+def _get_entitlement(session: Session, user_id: str) -> Entitlement:
     row = session.execute(
-        select(MessagingEntitlement).where(MessagingEntitlement.user_id == user_id)
+        select(Entitlement).where(Entitlement.user_id == user_id)
     ).scalar_one_or_none()
     if row:
         return row
-    row = MessagingEntitlement(user_id=user_id, is_premium=False, updated_at=datetime.utcnow())
+    row = Entitlement(user_id=user_id, is_premium=False, updated_at=datetime.utcnow())
     session.add(row)
     try:
         session.commit()
     except IntegrityError:
         session.rollback()
         row = session.execute(
-            select(MessagingEntitlement).where(MessagingEntitlement.user_id == user_id)
+            select(Entitlement).where(Entitlement.user_id == user_id)
         ).scalar_one()
     return row
 
@@ -2122,87 +2125,74 @@ def create_unlock_session(payload: CreateUnlockSessionPayload):
 
 
 # -----------------------------
-# Stripe Webhook  ✅ REPLACED (working ThreadUnlock writer)
+# Stripe Webhook ✅ REPLACED (per your instructions)
 # -----------------------------
 @app.post("/stripe/webhook")
-async def stripe_webhook(
-    request: Request,
-    stripe_signature: str = Header(None, alias="Stripe-Signature"),
-):
-    # Stripe needs the RAW body for signature verification
+async def stripe_webhook(request: Request):
     payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
 
     if not STRIPE_WEBHOOK_SECRET:
-        # Don't 500 — return a clear error so you see it in logs
-        print("STRIPE webhook error: STRIPE_WEBHOOK_SECRET is missing")
-        raise HTTPException(status_code=500, detail="STRIPE_WEBHOOK_SECRET missing")
+        raise HTTPException(status_code=500, detail="Webhook secret not configured.")
 
     try:
         event = stripe.Webhook.construct_event(
-            payload=payload,
-            sig_header=stripe_signature,
-            secret=STRIPE_WEBHOOK_SECRET,
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
         )
-    except Exception as e:
-        # Signature failed or payload invalid
-        print("STRIPE webhook signature/parse error:", str(e))
-        raise HTTPException(status_code=400, detail=f"Webhook Error: {str(e)}")
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
-    try:
-        etype = event.get("type")
-        obj = event.get("data", {}).get("object", {}) or {}
+    # 👇 THIS is the important event
+    if event["type"] == "checkout.session.completed":
+        session_obj = event["data"]["object"]
+        metadata = session_obj.get("metadata", {})
+        kind = metadata.get("kind")
 
-        # ---- Thread unlock: checkout.session.completed ----
-        if etype == "checkout.session.completed":
-            meta = obj.get("metadata", {}) or {}
-            kind = (meta.get("kind") or "").strip()
-            user_id = (meta.get("user_id") or "").strip()
-            thread_id = (meta.get("thread_id") or "").strip()
-            payment_status = (obj.get("payment_status") or "").strip()
-            session_id = (obj.get("id") or "").strip()
+        with Session(engine) as db:
 
-            print("STRIPE checkout.session.completed received:", {
-                "kind": kind,
-                "user_id": user_id,
-                "thread_id": thread_id,
-                "payment_status": payment_status,
-                "session_id": session_id,
-            })
+            # 🔓 THREAD UNLOCK PURCHASE
+            if kind == "thread_unlock":
+                user_id = metadata.get("user_id")
+                thread_id = metadata.get("thread_id")
 
-            # Only unlock if the session is paid and it is a thread unlock
-            if kind == "thread_unlock" and payment_status == "paid":
-                if not user_id or not thread_id:
-                    print("STRIPE webhook missing user_id or thread_id in metadata")
-                    return {"ok": True}
+                if user_id and thread_id:
+                    unlock = ThreadUnlock(
+                        user_id=user_id,
+                        thread_id=thread_id
+                    )
+                    db.add(unlock)
+                    try:
+                        db.commit()
+                    except IntegrityError:
+                        db.rollback()
+                    print(f"Thread unlocked: {thread_id} for user {user_id}")
 
-                with Session(engine) as session:
-                    # Idempotent insert: do nothing if it already exists
-                    existing = session.execute(
-                        select(ThreadUnlock).where(
-                            ThreadUnlock.user_id == user_id,
-                            ThreadUnlock.thread_id == thread_id,
-                        )
+            # ⭐ PREMIUM SUBSCRIPTION
+            if kind == "premium":
+                user_id = metadata.get("user_id")
+                if user_id:
+                    # NOTE: db.merge() would not be safe with your current table PK.
+                    # We do an idempotent upsert here.
+                    existing = db.execute(
+                        select(Entitlement).where(Entitlement.user_id == user_id)
                     ).scalar_one_or_none()
 
                     if existing:
-                        print("ThreadUnlock already exists — no action needed")
-                        return {"ok": True}
+                        existing.is_premium = True
+                        existing.updated_at = datetime.utcnow()
+                    else:
+                        ent = Entitlement(
+                            user_id=user_id,
+                            is_premium=True,
+                            updated_at=datetime.utcnow(),
+                        )
+                        db.add(ent)
 
-                    tu = ThreadUnlock(
-                        user_id=user_id,
-                        thread_id=thread_id,
-                        created_at=datetime.utcnow(),
-                    )
-                    session.add(tu)
-                    session.commit()
+                    try:
+                        db.commit()
+                    except IntegrityError:
+                        db.rollback()
 
-                    print("✅ ThreadUnlock created:", {"user_id": user_id, "thread_id": thread_id})
+                    print(f"Premium activated for {user_id}")
 
-        # (Optional later) premium: invoice.paid / customer.subscription.updated
-
-    except Exception as e:
-        # Prevent Stripe retries from being blocked by a 500 with no info
-        print("STRIPE webhook handler error:", str(e))
-        raise HTTPException(status_code=500, detail=f"Webhook handler error: {str(e)}")
-
-    return {"ok": True}
+    return {"status": "success"}
