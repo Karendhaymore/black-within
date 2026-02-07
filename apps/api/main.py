@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, date, time
 from typing import List, Optional, Dict, Any, Tuple
 
 import stripe
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -980,11 +980,11 @@ def login(payload: LoginPayload):
 
     _ensure_user(acct.user_id)
     return {
-    "ok": True,
-    "userId": acct.user_id,
-    "user_id": acct.user_id,
-    "email": email,
-}
+        "ok": True,
+        "userId": acct.user_id,
+        "user_id": acct.user_id,
+        "email": email,
+    }
 
 
 # ✅ 1) Request reset email (always returns ok to prevent “email existence” leaks)
@@ -1027,7 +1027,6 @@ def forgot_password(payload: ForgotPasswordPayload):
     # Send email (use your configured SendGrid sender)
     reset_link = f"{APP_WEB_BASE_URL}/auth/reset?token={token}"
 
-    # If you want, keep this minimal and premium
     html = f"""
     <div style="font-family:Arial,sans-serif;font-size:16px;color:#111;line-height:1.5">
       <p>We received a request to reset your Black Within password.</p>
@@ -1044,7 +1043,6 @@ def forgot_password(payload: ForgotPasswordPayload):
     try:
         _send_email_sendgrid(email, "Reset your Black Within password", html)
     except Exception as e:
-        # Still return ok to user; log server side
         print("Forgot password send error:", str(e))
 
     return {"ok": True}
@@ -1808,13 +1806,6 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
         return ThreadsInboxResponse(items=items)
 
 
-# ✅ NEW ENDPOINT: GET /threads?user_id=...  (as requested)
-from sqlalchemy import or_, desc, select
-from typing import Dict, List
-
-from sqlalchemy import or_, desc, select
-from typing import Dict, List
-
 # ✅ NEW ENDPOINT: GET /threads?user_id=...
 @app.get("/threads", response_model=ThreadsResponse)
 def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
@@ -2017,12 +2008,8 @@ def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default
 # -----------------------------
 # Stripe Checkout
 # -----------------------------
-# -----------------------------
-# Stripe Checkout
-# -----------------------------
 @app.post("/stripe/checkout/thread-unlock", response_model=CheckoutSessionResponse)
 def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
-    # ✅ Only need Stripe secret key now (we build price inline)
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=500, detail="Stripe is not configured for thread unlocks.")
 
@@ -2031,7 +2018,6 @@ def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
     if not thread_id:
         raise HTTPException(status_code=400, detail="thread_id is required")
 
-    # ✅ Use WEB_BASE_URL if you have it, otherwise fall back to APP_WEB_BASE_URL
     WEB_BASE_URL = os.getenv("WEB_BASE_URL") or APP_WEB_BASE_URL
 
     try:
@@ -2051,6 +2037,7 @@ def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
             success_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=success",
             cancel_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=cancel",
             metadata={
+                "kind": "thread_unlock",  # ✅ REQUIRED for webhook to write ThreadUnlock
                 "user_id": user_id,
                 "thread_id": thread_id,
             },
@@ -2058,7 +2045,6 @@ def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
         return CheckoutSessionResponse(url=checkout_session.url)
 
     except Exception as e:
-        # This will make the exact Stripe error show up in your browser Network tab
         print("STRIPE thread-unlock error:", str(e))
         raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
 
@@ -2070,7 +2056,6 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
 
     user_id = _ensure_user(payload.user_id)
 
-    # ✅ Use WEB_BASE_URL if you have it, otherwise fall back to APP_WEB_BASE_URL
     WEB_BASE_URL = os.getenv("WEB_BASE_URL") or APP_WEB_BASE_URL
 
     success_url = f"{WEB_BASE_URL}/discover?premium=success"
@@ -2097,7 +2082,6 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
 
 # -----------------------------
 # NEW ROUTE 1: Create Stripe Checkout Session (Unlock Conversation – $1.99)
-# (keeps your intended behavior but in a valid endpoint function)
 # -----------------------------
 @app.post("/stripe/create-unlock-session")
 def create_unlock_session(payload: CreateUnlockSessionPayload):
@@ -2122,6 +2106,7 @@ def create_unlock_session(payload: CreateUnlockSessionPayload):
                 "quantity": 1,
             }],
             metadata={
+                "kind": "thread_unlock",  # ✅ REQUIRED for webhook to write ThreadUnlock
                 "user_id": user_id,
                 "target_profile_id": payload.target_profile_id,
                 "thread_id": payload.thread_id,
@@ -2137,63 +2122,87 @@ def create_unlock_session(payload: CreateUnlockSessionPayload):
 
 
 # -----------------------------
-# Stripe Webhook
+# Stripe Webhook  ✅ REPLACED (working ThreadUnlock writer)
 # -----------------------------
 @app.post("/stripe/webhook")
-async def stripe_webhook(request: Request):
-    if not STRIPE_WEBHOOK_SECRET:
-        raise HTTPException(status_code=500, detail="Stripe webhook not configured (missing STRIPE_WEBHOOK_SECRET).")
-
+async def stripe_webhook(
+    request: Request,
+    stripe_signature: str = Header(None, alias="Stripe-Signature"),
+):
+    # Stripe needs the RAW body for signature verification
     payload = await request.body()
-    sig = request.headers.get("stripe-signature", "")
+
+    if not STRIPE_WEBHOOK_SECRET:
+        # Don't 500 — return a clear error so you see it in logs
+        print("STRIPE webhook error: STRIPE_WEBHOOK_SECRET is missing")
+        raise HTTPException(status_code=500, detail="STRIPE_WEBHOOK_SECRET missing")
 
     try:
-        event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature.")
+        event = stripe.Webhook.construct_event(
+            payload=payload,
+            sig_header=stripe_signature,
+            secret=STRIPE_WEBHOOK_SECRET,
+        )
+    except Exception as e:
+        # Signature failed or payload invalid
+        print("STRIPE webhook signature/parse error:", str(e))
+        raise HTTPException(status_code=400, detail=f"Webhook Error: {str(e)}")
 
-    event_type = event["type"]
-    data_object = event["data"]["object"]
+    try:
+        etype = event.get("type")
+        obj = event.get("data", {}).get("object", {}) or {}
 
-    with Session(engine) as session:
-        if event_type == "checkout.session.completed":
-            meta = (data_object.get("metadata") or {})
-            kind = meta.get("kind", "")
-            user_id = meta.get("user_id", "") or data_object.get("client_reference_id", "")
+        # ---- Thread unlock: checkout.session.completed ----
+        if etype == "checkout.session.completed":
+            meta = obj.get("metadata", {}) or {}
+            kind = (meta.get("kind") or "").strip()
+            user_id = (meta.get("user_id") or "").strip()
+            thread_id = (meta.get("thread_id") or "").strip()
+            payment_status = (obj.get("payment_status") or "").strip()
+            session_id = (obj.get("id") or "").strip()
 
-            if kind == "thread_unlock":
-                thread_id = meta.get("thread_id", "")
-                if user_id and thread_id:
+            print("STRIPE checkout.session.completed received:", {
+                "kind": kind,
+                "user_id": user_id,
+                "thread_id": thread_id,
+                "payment_status": payment_status,
+                "session_id": session_id,
+            })
+
+            # Only unlock if the session is paid and it is a thread unlock
+            if kind == "thread_unlock" and payment_status == "paid":
+                if not user_id or not thread_id:
+                    print("STRIPE webhook missing user_id or thread_id in metadata")
+                    return {"ok": True}
+
+                with Session(engine) as session:
+                    # Idempotent insert: do nothing if it already exists
                     existing = session.execute(
                         select(ThreadUnlock).where(
                             ThreadUnlock.user_id == user_id,
                             ThreadUnlock.thread_id == thread_id,
                         )
                     ).scalar_one_or_none()
-                    if not existing:
-                        session.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=datetime.utcnow()))
-                        session.commit()
 
-            elif kind == "premium":
-                if user_id:
-                    ent = _get_entitlement(session, user_id)
-                    ent.is_premium = True
-                    ent.updated_at = datetime.utcnow()
+                    if existing:
+                        print("ThreadUnlock already exists — no action needed")
+                        return {"ok": True}
+
+                    tu = ThreadUnlock(
+                        user_id=user_id,
+                        thread_id=thread_id,
+                        created_at=datetime.utcnow(),
+                    )
+                    session.add(tu)
                     session.commit()
 
-            else:
-                # NEW unlock flow (from /stripe/create-unlock-session)
-                thread_id = meta.get("thread_id", "")
-                if user_id and thread_id:
-                    session.execute(text("""
-                        INSERT INTO thread_unlocks (thread_id, user_id, created_at)
-                        VALUES (:thread_id, :user_id, NOW())
-                        ON CONFLICT DO NOTHING
-                    """), {"thread_id": thread_id, "user_id": user_id})
-                    session.commit()
+                    print("✅ ThreadUnlock created:", {"user_id": user_id, "thread_id": thread_id})
 
-        elif event_type == "customer.subscription.deleted":
-            # Not implemented yet (store customer/subscription mapping later)
-            pass
+        # (Optional later) premium: invoice.paid / customer.subscription.updated
+
+    except Exception as e:
+        # Prevent Stripe retries from being blocked by a 500 with no info
+        print("STRIPE webhook handler error:", str(e))
+        raise HTTPException(status_code=500, detail=f"Webhook handler error: {str(e)}")
 
     return {"ok": True}
