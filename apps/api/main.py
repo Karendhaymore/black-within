@@ -2151,51 +2151,23 @@ async def stripe_webhook(request: Request):
         with Session(engine) as db:
 
             # 🔓 THREAD UNLOCK PURCHASE
-            if kind == "thread_unlock":
-                user_id = metadata.get("user_id")
-                thread_id = metadata.get("thread_id")
+   if kind == "thread_unlock":
+    user_id = metadata.get("user_id")
+    thread_id = metadata.get("thread_id")
 
-                if user_id and thread_id:
-                    from datetime import datetime
+    if not user_id or not thread_id:
+        raise HTTPException(status_code=400, detail="Missing user_id or thread_id")
 
-unlock = ThreadUnlock(
-    user_id=user_id,
-    thread_id=thread_id,
-    created_at=datetime.utcnow(),
-    updated_at=datetime.utcnow(),
-)
+    unlock = ThreadUnlock(
+        user_id=user_id,
+        thread_id=thread_id,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
 
-                    db.add(unlock)
-                    try:
-                        db.commit()
-                    except IntegrityError:
-                        db.rollback()
-                    print(f"Thread unlocked: {thread_id} for user {user_id}")
-
-            # ⭐ PREMIUM SUBSCRIPTION
-            if kind == "premium":
-                user_id = metadata.get("user_id")
-                if user_id:
-                    # NOTE: db.merge() would not be safe with your current table PK.
-                    # We do an idempotent upsert here.
-                    existing = db.execute(
-                        select(Entitlement).where(Entitlement.user_id == user_id)
-                    ).scalar_one_or_none()
-
-                    if existing:
-                        existing.is_premium = True
-                        existing.updated_at = datetime.utcnow()
-                    else:
-                        ent = Entitlement(
-    user_id=user_id,
-    is_premium=True,
-    created_at=datetime.utcnow(),
-    updated_at=datetime.utcnow(),
-)
-                        db.add(ent)
-
-                    try:
-                        db.commit()
+    db.add(unlock)
+    db.commit()
+ 
                     except IntegrityError:
                         db.rollback()
 
