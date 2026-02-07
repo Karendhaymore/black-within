@@ -2156,10 +2156,15 @@ async def stripe_webhook(request: Request):
                 thread_id = metadata.get("thread_id")
 
                 if user_id and thread_id:
-                    unlock = ThreadUnlock(
-                        user_id=user_id,
-                        thread_id=thread_id
-                    )
+                    from datetime import datetime
+
+unlock = ThreadUnlock(
+    user_id=user_id,
+    thread_id=thread_id,
+    created_at=datetime.utcnow(),
+    updated_at=datetime.utcnow(),
+)
+
                     db.add(unlock)
                     try:
                         db.commit()
