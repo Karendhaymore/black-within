@@ -478,15 +478,33 @@ function MessagesInner() {
                 Speak with intention.
               </h1>
 
-             <div style={subText}>
-  {withName ? (
-    <>
-      With: <strong>{withName}</strong>
-    </>
-  ) : (
-    <span>Conversation</span>
-  )}
-</div> 
+             <div style={{ display: "flex", alignItems: "center", gap: 10, ...subText }}>
+  {withPhoto ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={withPhoto}
+      alt={withName || "Member"}
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 999,
+        objectFit: "cover",
+        border: "1px solid rgba(0,0,0,0.14)",
+      }}
+    />
+  ) : null}
+
+  <div>
+    {withName ? (
+      <>
+        With: <strong>{withName}</strong>
+      </>
+    ) : (
+      <>With: <strong>Member</strong></>
+    )}
+  </div>
+</div>
+
 
               <div style={{ ...subText, fontSize: 12 }}>
                 <strong>Move slow. Move honest. Move protected.</strong>
