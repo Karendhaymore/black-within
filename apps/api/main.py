@@ -1815,113 +1815,47 @@ from typing import Dict, List
 from sqlalchemy import or_, desc, select
 from typing import Dict, List
 
+# ✅ NEW ENDPOINT: GET /threads?user_id=...
 @app.get("/threads", response_model=ThreadsResponse)
-def get_threads(
-    user_id: str = Query(..., description="The current user's id"),
-    limit: int = Query(50, ge=1, le=200),
-):
+def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, le=200)):
     user_id = _ensure_user(user_id)
 
-    def _pick_thread_user_cols():
-        # Try common column name pairs and use the first pair that exists
-        candidates = [
-            ("user_a_id", "user_b_id"),
-            ("user1_id", "user2_id"),
-            ("from_user_id", "to_user_id"),
-            ("a_user_id", "b_user_id"),
-        ]
-        for a_name, b_name in candidates:
-            if hasattr(Thread, a_name) and hasattr(Thread, b_name):
-                return getattr(Thread, a_name), getattr(Thread, b_name)
-        raise RuntimeError(
-            "Thread model is missing participant columns. Expected something like "
-            "user_a_id/user_b_id or user1_id/user2_id."
-        )
-
-    def _message_text(m: "Message"):
-        # Try common message text field names
-        for name in ["text", "content", "message_text", "body"]:
-            if hasattr(m, name):
-                return getattr(m, name)
-        return None
-
-    def _message_created_at(m: "Message"):
-        for name in ["created_at", "createdAt", "sent_at", "sentAt", "timestamp"]:
-            if hasattr(m, name):
-                v = getattr(m, name)
-                return v
-        return None
-
     with Session(engine) as session:
-        THREAD_USER_A, THREAD_USER_B = _pick_thread_user_cols()
-
-        q_threads = (
+        rows = session.execute(
             select(Thread)
-            .where(or_(THREAD_USER_A == user_id, THREAD_USER_B == user_id))
-            .order_by(desc(getattr(Thread, "updated_at", getattr(Thread, "created_at", None))))
+            .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
+            .order_by(Thread.updated_at.desc())
             .limit(limit)
-        )
-        threads = session.execute(q_threads).scalars().all()
-
-        if not threads:
-            return ThreadsResponse(items=[])
-
-        thread_ids = [t.id for t in threads]
-
-        q_msgs = (
-            select(Message)
-            .where(Message.thread_id.in_(thread_ids))
-            .order_by(desc(Message.created_at))
-        )
-        messages = session.execute(q_msgs).scalars().all()
-
-        last_by_thread: Dict[str, Message] = {}
-        for m in messages:
-            if m.thread_id not in last_by_thread:
-                last_by_thread[m.thread_id] = m
-
-        other_user_ids: List[str] = []
-        for t in threads:
-            a = getattr(t, THREAD_USER_A.key)
-            b = getattr(t, THREAD_USER_B.key)
-            other_user_ids.append(b if str(a) == str(user_id) else a)
-
-        q_profiles = select(Profile).where(Profile.owner_user_id.in_(other_user_ids))
-        other_profiles = session.execute(q_profiles).scalars().all()
+        ).scalars().all()
 
         items: List[ThreadListItem] = []
 
-        for t in threads:
-            a = getattr(t, THREAD_USER_A.key)
-            b = getattr(t, THREAD_USER_B.key)
-            other_user_id = b if str(a) == str(user_id) else a
+        for t in rows:
+            other_user_id = t.user_high if t.user_low == user_id else t.user_low
 
-            op = next(
-                (p for p in other_profiles if str(p.owner_user_id) == str(other_user_id)),
-                None,
-            )
+            other_profile = session.execute(
+                select(Profile).where(Profile.owner_user_id == other_user_id)
+            ).scalar_one_or_none()
 
-            lm = last_by_thread.get(t.id)
-            lm_text = _message_text(lm) if lm else None
-            lm_time = _message_created_at(lm) if lm else None
+            last_msg = session.execute(
+                select(Message)
+                .where(Message.thread_id == t.id)
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
 
             items.append(
                 ThreadListItem(
                     thread_id=str(t.id),
                     other_user_id=str(other_user_id),
-                    other_profile_id=str(op.id) if op else None,
-                    other_display_name=op.display_name if op else None,
-                    other_photo=op.photo if op else None,
-                    last_message_text=lm_text,
-                    last_message_at=(lm_time.isoformat() if lm_time else None),
-                   updated_at=(
-    getattr(t, "updated_at", getattr(t, "created_at", None)).isoformat()
-    if getattr(t, "updated_at", getattr(t, "created_at", None))
-    else None
-),
-
+                    other_profile_id=(str(other_profile.id) if other_profile else None),
+                    other_display_name=(other_profile.display_name if other_profile else None),
+                    other_photo=(other_profile.photo if other_profile else None),
+                    last_message_text=(last_msg.body if last_msg else None),
+                    last_message_at=(last_msg.created_at.isoformat() if last_msg else None),
+                    updated_at=(t.updated_at.isoformat() if t.updated_at else None),
+                )
             )
-              )
 
         return ThreadsResponse(items=items)
 
