@@ -140,6 +140,22 @@ async function apiCheckoutPremium(userId: string): Promise<CheckoutSessionRespon
   return (await res.json()) as CheckoutSessionResponse;
 }
 
+// -----------------------------
+// NEW: Profile lite helper
+// -----------------------------
+type ProfileLiteResponse = {
+  profile_id: string;
+  display_name: string;
+  photo?: string | null;
+};
+
+async function apiGetProfileLite(profileId: string): Promise<ProfileLiteResponse> {
+  const url = `${API_BASE}/profiles/by-id?profile_id=${encodeURIComponent(profileId)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return (await res.json()) as ProfileLiteResponse;
+}
+
 /**
  * Next.js requires useSearchParams() to be wrapped in <Suspense>.
  */
@@ -156,8 +172,7 @@ function MessagesInner() {
 
   const threadId = sp.get("threadId") || "";
   const withName = sp.get("with") || "";
-  // 3) Read withPhoto right under withName
-  const withPhoto = sp.get("withPhoto") || "";
+  const withPhotoParam = sp.get("withPhoto") || "";
   const withProfileId = sp.get("withProfileId") || "";
 
   const userId = useMemo(() => getLoggedInUserId(), []);
@@ -167,9 +182,11 @@ function MessagesInner() {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [text, setText] = useState("");
   const [err, setErr] = useState<string>("");
-  const [withPhoto, setWithPhoto] = useState<string | null>(null);
+
+  // Canonical "with" identity shown in header (from URL fallback OR fetched by-id)
+  const [withPhoto, setWithPhoto] = useState<string | null>(withPhotoParam || null);
   const [withDisplayName, setWithDisplayName] = useState<string>(withName || "");
-  
+
   const pollRef = useRef<number | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -224,6 +241,24 @@ function MessagesInner() {
       if (!userId) {
         window.location.href = "/auth";
         return;
+      }
+
+      // ✅ Call the new endpoint on load (right after verifying threadId + userId)
+      // Fetch "with" profile details (photo + canonical name) if present
+      if (withProfileId) {
+        apiGetProfileLite(withProfileId)
+          .then((p) => {
+            if (cancelled) return;
+            setWithPhoto(p.photo || null);
+            if (p.display_name) setWithDisplayName(p.display_name);
+          })
+          .catch(() => {
+            // If it fails, we still show text fallback from URL
+            if (!cancelled) setWithPhoto(null);
+          });
+      } else {
+        setWithPhoto(withPhotoParam || null);
+        setWithDisplayName(withName || "");
       }
 
       setStatus("loading");
@@ -482,13 +517,13 @@ function MessagesInner() {
                 Speak with intention.
               </h1>
 
-              {/* 4) Header "With" line updated */}
+              {/* Header "With" line uses fetched canonical name/photo if available */}
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
                 {withPhoto ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={withPhoto}
-                    alt={withName || "Member"}
+                    alt={withDisplayName || "Member"}
                     style={{
                       width: 34,
                       height: 34,
@@ -511,12 +546,12 @@ function MessagesInner() {
                       color: "rgba(0,0,0,0.6)",
                     }}
                   >
-                    {(withName || "M").slice(0, 1).toUpperCase()}
+                    {(withDisplayName || "M").slice(0, 1).toUpperCase()}
                   </div>
                 )}
 
                 <div style={{ color: "rgba(0,0,0,0.65)", fontSize: 13 }}>
-                  With: <strong style={{ color: "#111" }}>{withName || "Member"}</strong>
+                  With: <strong style={{ color: "#111" }}>{withDisplayName || "Member"}</strong>
                 </div>
               </div>
 
@@ -645,7 +680,7 @@ function MessagesInner() {
                           }}
                         >
                           <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6, fontWeight: 700 }}>
-                            {mine ? "You" : withName || "Member"} • {ts}
+                            {mine ? "You" : withDisplayName || "Member"} • {ts}
                           </div>
                           <div style={{ fontSize: 15, lineHeight: 1.45 }}>{m.body}</div>
                         </div>
