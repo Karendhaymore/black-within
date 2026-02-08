@@ -90,9 +90,7 @@ async function fetchThreads(userId: string): Promise<ThreadItem[]> {
       // Normalize response shape -> array
       let rows: any[] = [];
       if (Array.isArray(data)) rows = data;
-      // @ts-ignore
       else if (Array.isArray((data as any).items)) rows = (data as any).items;
-      // @ts-ignore
       else if (Array.isArray((data as any).threads)) rows = (data as any).threads;
 
       // Normalize field names from API -> UI expectations
@@ -153,9 +151,9 @@ async function fetchThreads(userId: string): Promise<ThreadItem[]> {
   }
 
   throw new Error(
-    `Could not load inbox threads from the API.\n\nTried:\n- ${candidates.join(
-      "\n- "
-    )}\n\nLast error:\n${lastErr || "(unknown)"}`
+    `Could not load inbox threads from the API.\n\nTried:\n- ${candidates.join("\n- ")}\n\nLast error:\n${
+      lastErr || "(unknown)"
+    }`
   );
 }
 
@@ -334,9 +332,7 @@ export default function InboxPage() {
             </div>
           </div>
 
-          {status === "loading" ? (
-            <div style={{ marginTop: 18, color: "rgba(0,0,0,0.7)" }}>Loading…</div>
-          ) : null}
+          {status === "loading" ? <div style={{ marginTop: 18, color: "rgba(0,0,0,0.7)" }}>Loading…</div> : null}
 
           {status === "error" ? (
             <div
@@ -381,26 +377,31 @@ export default function InboxPage() {
                   {items.map((t, idx) => {
                     const threadId = (t.thread_id || "").trim();
 
-                    // ✅ A) Add these two lines (right after threadId is set)
+                    // ✅ Name/photo (normalized fallback)
                     const name = (t.with_display_name || (t as any).other_display_name || "Member").trim();
 
-                    const photo = (t.with_photo || (t as any).other_photo || "").trim();
+                    const photo = (t.with_photo || (t as any).other_photo || null) as string | null;
+
+                    // ✅ NEW: pick up profile id (normalized fallback)
+                    const withProfileId = (t.with_profile_id || (t as any).other_profile_id || "").trim();
 
                     const last = (t.last_message || "").trim();
                     const when = fmtTime(t.last_at);
                     const unread = Math.max(0, Number(t.unread_count || 0));
 
-                    // ✅ Updated href to include withPhoto when present
+                    // ✅ Updated href:
+                    // - includes withPhoto if present
+                    // - includes withProfileId if present
                     const href =
                       `/messages?threadId=${encodeURIComponent(threadId)}` +
                       `&with=${encodeURIComponent(name)}` +
-                      (photo ? `&withPhoto=${encodeURIComponent(photo)}` : "");
-                      (t.with_profile_id ? `&withProfileId=${encodeURIComponent(t.with_profile_id)}` : "");
-                  
+                      (photo ? `&withPhoto=${encodeURIComponent(photo)}` : "") +
+                      (withProfileId ? `&withProfileId=${encodeURIComponent(withProfileId)}` : "");
+
                     return (
                       <Link key={`${threadId}-${idx}`} href={href} style={rowCard}>
                         <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-                          {/* ✅ B) Avatar now uses `photo` (fallback handles initials) */}
+                          {/* Avatar uses `photo` (fallback handles initials) */}
                           {photo ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={photo} alt={name} style={avatar} />
