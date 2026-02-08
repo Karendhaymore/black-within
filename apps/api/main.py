@@ -598,6 +598,11 @@ class ThreadItem(BaseModel):
     last_message: Optional[str] = None
     last_message_at: Optional[str] = None
 
+class ProfileLiteResponse(BaseModel):
+    profile_id: str
+    display_name: str
+    photo: Optional[str] = None
+
 
 # (renamed internally to avoid clashing with new ThreadsResponse below)
 class ThreadsInboxResponse(BaseModel):
