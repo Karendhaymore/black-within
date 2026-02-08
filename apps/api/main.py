@@ -379,6 +379,9 @@ def _auto_migrate_profiles_table():
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
 
+        # ✅ NEW: backfill NULLs so older rows behave as available by default
+        conn.execute(text("""UPDATE profiles SET is_available = TRUE WHERE is_available IS NULL;"""))
+
 
 def _auto_migrate_notifications_table():
     """
@@ -597,6 +600,7 @@ class ThreadItem(BaseModel):
     with_photo: Optional[str] = None
     last_message: Optional[str] = None
     last_message_at: Optional[str] = None
+
 
 class ProfileLiteResponse(BaseModel):
     profile_id: str
@@ -1231,7 +1235,6 @@ def get_profile(profile_id: str):
             personalTruth=getattr(p, "personal_truth_text", None),
         )
 
-
         return ProfilesResponse(items=items)
 
 
@@ -1367,6 +1370,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             personalTruth=getattr(p, "personal_truth_text", None),
         )
 
+
 @app.get("/profiles/by-id", response_model=ProfileLiteResponse)
 def get_profile_by_id(profile_id: str = Query(...)):
     pid = (profile_id or "").strip()
@@ -1383,6 +1387,7 @@ def get_profile_by_id(profile_id: str = Query(...)):
             display_name=p.display_name,
             photo=p.photo,
         )
+
 
 @app.post("/profiles", response_model=ProfileItem)
 def upsert_profile_alias(payload: UpsertMyProfilePayload):
