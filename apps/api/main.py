@@ -1282,6 +1282,53 @@ def _coerce_alignment_fields(payload: UpsertMyProfilePayload):
 
     return cultural_list, spiritual_list, rel_intent, dating_challenge, personal_truth
 
+@app.get("/profiles", response_model=ProfilesResponse)
+def list_profiles(
+    exclude_owner_user_id: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    with Session(engine) as session:
+        q = (
+            select(Profile)
+            .where(Profile.is_available == True)
+            .order_by(Profile.updated_at.desc())
+            .limit(limit)
+        )
+
+        if exclude_owner_user_id:
+            q = q.where(Profile.owner_user_id != exclude_owner_user_id)
+
+        rows = session.execute(q).scalars().all()
+
+        items: List[ProfileItem] = []
+        for p in rows:
+            tags = _parse_json_list(p.tags_csv)
+            cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
+            spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
+
+            items.append(
+                ProfileItem(
+                    id=p.id,
+                    owner_user_id=p.owner_user_id,
+                    displayName=p.display_name,
+                    age=p.age,
+                    city=p.city,
+                    stateUS=p.state_us,
+                    photo=p.photo,
+                    identityPreview=p.identity_preview,
+                    intention=p.intention,
+                    tags=tags,
+                    isAvailable=bool(p.is_available),
+                    culturalIdentity=cultural,
+                    spiritualFramework=spiritual,
+                    relationshipIntent=getattr(p, "relationship_intent", None),
+                    datingChallenge=getattr(p, "dating_challenge_text", None),
+                    personalTruth=getattr(p, "personal_truth_text", None),
+                )
+            )
+
+        return ProfilesResponse(items=items)
+
 
 @app.post("/profiles/upsert", response_model=ProfileItem)
 def upsert_my_profile(payload: UpsertMyProfilePayload):
