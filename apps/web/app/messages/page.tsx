@@ -243,7 +243,6 @@ function MessagesInner() {
         return;
       }
 
-      // ✅ Call the new endpoint on load (right after verifying threadId + userId)
       // Fetch "with" profile details (photo + canonical name) if present
       if (withProfileId) {
         apiGetProfileLite(withProfileId)
@@ -257,7 +256,7 @@ function MessagesInner() {
             if (!cancelled) setWithPhoto(null);
           });
       } else {
-        setWithPhoto(withPhotoParam || null);
+        setWithPhoto(null);
         setWithDisplayName(withName || "");
       }
 
@@ -293,8 +292,9 @@ function MessagesInner() {
       cancelled = true;
       stopPolling();
     };
+    // ✅ Make reactive to URL param changes (useSearchParams)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, userId]);
+  }, [threadId, userId, withProfileId, withName]);
 
   useEffect(() => {
     if (!bottomRef.current) return;
@@ -517,42 +517,44 @@ function MessagesInner() {
                 Speak with intention.
               </h1>
 
-              {/* Header "With" line uses fetched canonical name/photo if available */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
-                {withPhoto ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={withPhoto}
-                    alt={withDisplayName || "Member"}
-                    style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: 999,
-                      objectFit: "cover",
-                      border: "1px solid rgba(0,0,0,0.14)",
-                    }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: 999,
-                      border: "1px solid rgba(0,0,0,0.14)",
-                      background: "rgba(0,0,0,0.06)",
-                      display: "grid",
-                      placeItems: "center",
-                      fontWeight: 900,
-                      color: "rgba(0,0,0,0.6)",
-                    }}
-                  >
-                    {(withDisplayName || "M").slice(0, 1).toUpperCase()}
-                  </div>
-                )}
+              {/* ✅ Replace "With:" block with avatar + name */}
+              <div style={{ color: "rgba(0,0,0,0.65)", fontSize: 13, marginTop: 6 }}>
+                • With:{" "}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                  {withPhoto ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={withPhoto}
+                      alt={withDisplayName || withName || "Member"}
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 999,
+                        objectFit: "cover",
+                        border: "1px solid rgba(0,0,0,0.15)",
+                        background: "rgba(0,0,0,0.06)",
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 999,
+                        display: "grid",
+                        placeItems: "center",
+                        fontWeight: 900,
+                        border: "1px solid rgba(0,0,0,0.15)",
+                        background: "rgba(0,0,0,0.06)",
+                        color: "rgba(0,0,0,0.65)",
+                      }}
+                    >
+                      {(withDisplayName || withName || "M").slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
 
-                <div style={{ color: "rgba(0,0,0,0.65)", fontSize: 13 }}>
-                  With: <strong style={{ color: "#111" }}>{withDisplayName || "Member"}</strong>
-                </div>
+                  <strong style={{ color: "#111" }}>{withDisplayName || withName || "Member"}</strong>
+                </span>
               </div>
 
               <div style={{ ...subText, fontSize: 12 }}>
@@ -680,7 +682,7 @@ function MessagesInner() {
                           }}
                         >
                           <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6, fontWeight: 700 }}>
-                            {mine ? "You" : withDisplayName || "Member"} • {ts}
+                            {mine ? "You" : withDisplayName || withName || "Member"} • {ts}
                           </div>
                           <div style={{ fontSize: 15, lineHeight: 1.45 }}>{m.body}</div>
                         </div>
@@ -729,3 +731,4 @@ function MessagesInner() {
     </main>
   );
 }
+  
