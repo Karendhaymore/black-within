@@ -1192,48 +1192,40 @@ def likes_status(user_id: str = Query(...)):
 # -----------------------------
 # PROFILES
 # -----------------------------
-@app.get("/profiles", response_model=ProfilesResponse)
-def list_profiles(
-    exclude_owner_user_id: Optional[str] = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
-):
+@app.get("/profiles/{profile_id}", response_model=ProfileItem)
+def get_profile(profile_id: str):
+    profile_id = (profile_id or "").strip()
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
     with Session(engine) as session:
-        q = (
-            select(Profile)
-            .where(Profile.is_available == True)
-            .order_by(Profile.updated_at.desc())
-            .limit(limit)
+        p = session.get(Profile, profile_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        tags = _parse_json_list(p.tags_csv)
+        cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
+        spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
+
+        return ProfileItem(
+            id=p.id,
+            owner_user_id=p.owner_user_id,
+            displayName=p.display_name,
+            age=p.age,
+            city=p.city,
+            stateUS=p.state_us,
+            photo=p.photo,
+            identityPreview=p.identity_preview,
+            intention=p.intention,
+            tags=tags,
+            isAvailable=bool(p.is_available),
+            culturalIdentity=cultural,
+            spiritualFramework=spiritual,
+            relationshipIntent=getattr(p, "relationship_intent", None),
+            datingChallenge=getattr(p, "dating_challenge_text", None),
+            personalTruth=getattr(p, "personal_truth_text", None),
         )
-        if exclude_owner_user_id:
-            q = q.where(Profile.owner_user_id != exclude_owner_user_id)
 
-        rows = session.execute(q).scalars().all()
-        items: List[ProfileItem] = []
-
-        for p in rows:
-            tags = _parse_json_list(p.tags_csv)
-            cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
-            spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
-
-            items.append(
-                ProfileItem(
-                    id=p.id,
-                    owner_user_id=p.owner_user_id,
-                    displayName=p.display_name,
-                    age=p.age,
-                    city=p.city,
-                    stateUS=p.state_us,
-                    photo=p.photo,
-                    identityPreview=p.identity_preview,
-                    intention=p.intention,
-                    tags=tags,
-                    isAvailable=bool(p.is_available),
-                    culturalIdentity=cultural,
-                    spiritualFramework=spiritual,
-                    relationshipIntent=getattr(p, "relationship_intent", None),
-                    datingChallenge=getattr(p, "dating_challenge_text", None),
-                    personalTruth=getattr(p, "personal_truth_text", None),
-                )
             )
 
         return ProfilesResponse(items=items)
