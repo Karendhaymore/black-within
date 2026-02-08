@@ -1563,7 +1563,7 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
         prof_rows = session.execute(
             select(Profile)
             .where(Profile.owner_user_id.in_(liker_user_ids))
-            .where(Profile.is_available == True)
+            .where(or_(Profile.is_available == True, Profile.is_available.is_(None)))
         ).scalars().all()
 
         prof_by_owner = {p.owner_user_id: p for p in prof_rows}
