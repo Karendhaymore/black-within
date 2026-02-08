@@ -167,7 +167,9 @@ function MessagesInner() {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [text, setText] = useState("");
   const [err, setErr] = useState<string>("");
-
+  const [withPhoto, setWithPhoto] = useState<string | null>(null);
+  const [withDisplayName, setWithDisplayName] = useState<string>(withName || "");
+  
   const pollRef = useRef<number | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
