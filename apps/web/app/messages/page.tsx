@@ -141,19 +141,15 @@ async function apiCheckoutPremium(userId: string): Promise<CheckoutSessionRespon
 }
 
 // -----------------------------
-// NEW: Profile lite helper
+// STEP 3 — Add API call (photo only)
 // -----------------------------
-type ProfileLiteResponse = {
-  profile_id: string;
-  display_name: string;
-  photo?: string | null;
-};
-
-async function apiGetProfileLite(profileId: string): Promise<ProfileLiteResponse> {
-  const url = `${API_BASE}/profiles/by-id?profile_id=${encodeURIComponent(profileId)}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-  return (await res.json()) as ProfileLiteResponse;
+async function apiGetProfilePhoto(profileId: string): Promise<string | null> {
+  const res = await fetch(`${API_BASE}/profiles/${encodeURIComponent(profileId)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json?.photo || null;
 }
 
 /**
@@ -171,8 +167,9 @@ function MessagesInner() {
   const sp = useSearchParams();
 
   const threadId = sp.get("threadId") || "";
+
+  // 🧩 STEP 1 — Read withProfileId from URL
   const withName = sp.get("with") || "";
-  const withPhotoParam = sp.get("withPhoto") || "";
   const withProfileId = sp.get("withProfileId") || "";
 
   const userId = useMemo(() => getLoggedInUserId(), []);
@@ -183,9 +180,8 @@ function MessagesInner() {
   const [text, setText] = useState("");
   const [err, setErr] = useState<string>("");
 
-  // Canonical "with" identity shown in header (from URL fallback OR fetched by-id)
-  const [withPhoto, setWithPhoto] = useState<string | null>(withPhotoParam || null);
-  const [withDisplayName, setWithDisplayName] = useState<string>(withName || "");
+  // 🧩 STEP 2 — Add state for the photo
+  const [withPhoto, setWithPhoto] = useState<string | null>(null);
 
   const pollRef = useRef<number | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -243,29 +239,25 @@ function MessagesInner() {
         return;
       }
 
-      // Fetch "with" profile details (photo + canonical name) if present
-      if (withProfileId) {
-        apiGetProfileLite(withProfileId)
-          .then((p) => {
-            if (cancelled) return;
-            setWithPhoto(p.photo || null);
-            if (p.display_name) setWithDisplayName(p.display_name);
-          })
-          .catch(() => {
-            // If it fails, we still show text fallback from URL
-            if (!cancelled) setWithPhoto(null);
-          });
-      } else {
-        setWithPhoto(null);
-        setWithDisplayName(withName || "");
-      }
-
       setStatus("loading");
       setErr("");
 
       try {
         const a = await refreshAll(userId);
         if (cancelled) return;
+
+        // 🧩 STEP 4 — Fetch the photo on load (after refreshAll)
+        if (withProfileId) {
+          try {
+            const photo = await apiGetProfilePhoto(withProfileId);
+            if (!cancelled) setWithPhoto(photo);
+          } catch {
+            // ignore photo errors
+            if (!cancelled) setWithPhoto(null);
+          }
+        } else {
+          setWithPhoto(null);
+        }
 
         setStatus("ready");
 
@@ -499,7 +491,6 @@ function MessagesInner() {
 
   function formatTs(iso: string) {
     if (!iso) return "";
-    // Keep it simple & stable (no locale surprises on server/client)
     return iso.slice(0, 19).replace("T", " ");
   }
 
@@ -517,43 +508,37 @@ function MessagesInner() {
                 Speak with intention.
               </h1>
 
-              {/* ✅ Replace "With:" block with avatar + name */}
-              <div style={{ color: "rgba(0,0,0,0.65)", fontSize: 13, marginTop: 6 }}>
-                • With:{" "}
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                  {withPhoto ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={withPhoto}
-                      alt={withDisplayName || withName || "Member"}
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 999,
-                        objectFit: "cover",
-                        border: "1px solid rgba(0,0,0,0.15)",
-                        background: "rgba(0,0,0,0.06)",
-                      }}
-                    />
-                  ) : (
-                    <span
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 999,
-                        display: "grid",
-                        placeItems: "center",
-                        fontWeight: 900,
-                        border: "1px solid rgba(0,0,0,0.15)",
-                        background: "rgba(0,0,0,0.06)",
-                        color: "rgba(0,0,0,0.65)",
-                      }}
-                    >
-                      {(withDisplayName || withName || "M").slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
-
-                  <strong style={{ color: "#111" }}>{withDisplayName || withName || "Member"}</strong>
+              {/* 🧩 STEP 5 — Render avatar in header */}
+              <div style={{ ...subText, display: "flex", alignItems: "center", gap: 8 }}>
+                {withPhoto ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={withPhoto}
+                    alt={withName}
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: "50%",
+                      objectFit: "cover",
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: "50%",
+                      background: "rgba(0,0,0,0.1)",
+                      display: "grid",
+                      placeItems: "center",
+                      fontWeight: 900,
+                    }}
+                  >
+                    {withName?.[0]?.toUpperCase()}
+                  </div>
+                )}
+                <span>
+                  With: <strong>{withName}</strong>
                 </span>
               </div>
 
@@ -682,7 +667,7 @@ function MessagesInner() {
                           }}
                         >
                           <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6, fontWeight: 700 }}>
-                            {mine ? "You" : withDisplayName || withName || "Member"} • {ts}
+                            {mine ? "You" : withName || "Member"} • {ts}
                           </div>
                           <div style={{ fontSize: 15, lineHeight: 1.45 }}>{m.body}</div>
                         </div>
@@ -731,4 +716,3 @@ function MessagesInner() {
     </main>
   );
 }
-  
