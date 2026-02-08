@@ -158,6 +158,7 @@ function MessagesInner() {
   const withName = sp.get("with") || "";
   // 3) Read withPhoto right under withName
   const withPhoto = sp.get("withPhoto") || "";
+  const withProfileId = sp.get("withProfileId") || "";
 
   const userId = useMemo(() => getLoggedInUserId(), []);
 
