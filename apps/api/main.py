@@ -1367,6 +1367,22 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             personalTruth=getattr(p, "personal_truth_text", None),
         )
 
+@app.get("/profiles/by-id", response_model=ProfileLiteResponse)
+def get_profile_by_id(profile_id: str = Query(...)):
+    pid = (profile_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
+    with Session(engine) as session:
+        p = session.get(Profile, pid)
+        if not p:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        return ProfileLiteResponse(
+            profile_id=p.id,
+            display_name=p.display_name,
+            photo=p.photo,
+        )
 
 @app.post("/profiles", response_model=ProfileItem)
 def upsert_profile_alias(payload: UpsertMyProfilePayload):
