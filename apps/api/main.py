@@ -106,6 +106,7 @@ class AuthAccount(Base):
     Email + password login (password is stored hashed, never plaintext).
     user_id is stable and derived from email (via _make_user_id_from_email()).
     """
+
     __tablename__ = "auth_accounts"
     user_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
@@ -149,21 +150,17 @@ class SavedProfile(Base):
     profile_id: Mapped[str] = mapped_column(String(60), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "profile_id", name="uq_saved_user_profile"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_saved_user_profile"),)
 
 
 class Like(Base):
     __tablename__ = "likes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)       # liker
-    profile_id: Mapped[str] = mapped_column(String(60), index=True)    # liked profile
+    user_id: Mapped[str] = mapped_column(String(40), index=True)  # liker
+    profile_id: Mapped[str] = mapped_column(String(60), index=True)  # liked profile
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
 
 
 class DailyLikeCount(Base):
@@ -176,9 +173,7 @@ class DailyLikeCount(Base):
 
     window_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "day", name="uq_daily_like_user_day"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "day", name="uq_daily_like_user_day"),)
 
 
 class Notification(Base):
@@ -229,9 +224,7 @@ class Thread(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
-    __table_args__ = (
-        UniqueConstraint("user_low", "user_high", name="uq_threads_userpair"),
-    )
+    __table_args__ = (UniqueConstraint("user_low", "user_high", name="uq_threads_userpair"),)
 
 
 class Message(Base):
@@ -243,6 +236,20 @@ class Message(Base):
     body: Mapped[str] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+# ✅ NEW: Thread read receipts (per-user last read timestamp)
+class ThreadRead(Base):
+    __tablename__ = "thread_reads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[str] = mapped_column(String(60), index=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    last_read_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "user_id", name="uq_thread_reads_thread_user"),
+    )
 
 
 # -----------------------------
@@ -270,9 +277,7 @@ class ThreadUnlock(Base):
     # ✅ FIX: ensure updated_at always has a default for inserts
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),
-    )
+    __table_args__ = (UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),)
 
 
 # -----------------------------
@@ -280,10 +285,12 @@ class ThreadUnlock(Base):
 # -----------------------------
 def _auto_migrate_threads_messages_tables():
     """
-    Create threads/messages/messaging_entitlements/thread_unlocks tables (if missing).
+    Create threads/messages/messaging_entitlements/thread_unlocks/thread_reads tables (if missing).
     """
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS threads (
               id VARCHAR(60) PRIMARY KEY,
               user_low VARCHAR(40),
@@ -292,11 +299,15 @@ def _auto_migrate_threads_messages_tables():
               updated_at TIMESTAMP DEFAULT NOW(),
               CONSTRAINT uq_threads_userpair UNIQUE (user_low, user_high)
             );
-        """))
+        """
+            )
+        )
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_low ON threads(user_low);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_high ON threads(user_high);"""))
 
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS messages (
               id SERIAL PRIMARY KEY,
               thread_id VARCHAR(60),
@@ -304,23 +315,31 @@ def _auto_migrate_threads_messages_tables():
               body TEXT,
               created_at TIMESTAMP DEFAULT NOW()
             );
-        """))
+        """
+            )
+        )
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_thread_id ON messages(thread_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_sender_user_id ON messages(sender_user_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages(created_at);"""))
 
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS messaging_entitlements (
               id SERIAL PRIMARY KEY,
               user_id VARCHAR(40) UNIQUE,
               is_premium BOOLEAN DEFAULT FALSE,
               updated_at TIMESTAMP DEFAULT NOW()
             );
-        """))
+        """
+            )
+        )
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"""))
 
         # ✅ include updated_at in table definition
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS thread_unlocks (
               id SERIAL PRIMARY KEY,
               thread_id VARCHAR(60),
@@ -329,12 +348,35 @@ def _auto_migrate_threads_messages_tables():
               updated_at TIMESTAMP DEFAULT NOW(),
               CONSTRAINT uq_thread_user_unlock UNIQUE (thread_id, user_id)
             );
-        """))
+        """
+            )
+        )
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_thread_id ON thread_unlocks(thread_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_user_id ON thread_unlocks(user_id);"""))
 
         # ✅ backfill/migrate for existing databases
         conn.execute(text("""ALTER TABLE thread_unlocks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
+
+        # ✅ NEW: thread_reads (read receipts)
+        conn.execute(
+            text(
+                """
+            CREATE TABLE IF NOT EXISTS thread_reads (
+              id SERIAL PRIMARY KEY,
+              thread_id VARCHAR(60),
+              user_id VARCHAR(40),
+              last_read_at TIMESTAMP DEFAULT NOW(),
+              CONSTRAINT uq_thread_reads_thread_user UNIQUE (thread_id, user_id)
+            );
+        """
+            )
+        )
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_last_read_at ON thread_reads(last_read_at);"""))
+
+        # Optional safety for older DBs
+        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP DEFAULT NOW();"""))
 
 
 def _auto_migrate_profiles_table():
@@ -354,7 +396,9 @@ def _auto_migrate_profiles_table():
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tags_csv TEXT DEFAULT '[]';"""))
 
         # Back-compat: if older column tags_json exists, copy into tags_csv when empty
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             DO $$
             BEGIN
               IF EXISTS (
@@ -367,7 +411,9 @@ def _auto_migrate_profiles_table():
                 WHERE tags_csv IS NULL OR tags_csv = '';
               END IF;
             END $$;
-        """))
+        """
+            )
+        )
 
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS cultural_identity_csv TEXT DEFAULT '[]';"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spiritual_framework_csv TEXT DEFAULT '[]';"""))
@@ -398,14 +444,18 @@ def _auto_migrate_auth_accounts_table():
     Create auth_accounts table if missing (email + password auth).
     """
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS auth_accounts (
               user_id VARCHAR(40) PRIMARY KEY,
               email VARCHAR(320) UNIQUE,
               password_hash VARCHAR(500),
               created_at TIMESTAMP DEFAULT NOW()
             );
-        """))
+        """
+            )
+        )
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_auth_accounts_email ON auth_accounts(email);"""))
 
 
@@ -415,7 +465,9 @@ def _auto_migrate_daily_like_counts_table():
     and add window_started_at if missing (for test reset mode).
     """
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS daily_like_counts (
               id SERIAL PRIMARY KEY,
               user_id VARCHAR(40),
@@ -425,7 +477,9 @@ def _auto_migrate_daily_like_counts_table():
               window_started_at TIMESTAMP NULL,
               CONSTRAINT uq_daily_like_user_day UNIQUE (user_id, day)
             );
-        """))
+        """
+            )
+        )
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_user_id ON daily_like_counts(user_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_day ON daily_like_counts(day);"""))
 
@@ -434,7 +488,9 @@ def _auto_migrate_daily_like_counts_table():
 
 def _auto_migrate_password_reset_tokens_table():
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS password_reset_tokens (
               id SERIAL PRIMARY KEY,
               token_hash VARCHAR(64) UNIQUE,
@@ -444,7 +500,9 @@ def _auto_migrate_password_reset_tokens_table():
               expires_at TIMESTAMP,
               used_at TIMESTAMP NULL
             );
-        """))
+        """
+            )
+        )
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_token_hash ON password_reset_tokens(token_hash);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_user_id ON password_reset_tokens(user_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_email ON password_reset_tokens(email);"""))
@@ -647,8 +705,10 @@ class MessageItem(BaseModel):
     created_at: str
 
 
+# ✅ UPDATED: include otherLastReadAt for "Seen"
 class MessagesResponse(BaseModel):
     items: List[MessageItem]
+    otherLastReadAt: Optional[str] = None
 
 
 class MessagingAccessResponse(BaseModel):
@@ -662,8 +722,8 @@ class MessagingUnlockPayload(BaseModel):
     # ADMIN/TESTING helper (until Stripe is wired)
     user_id: str
     thread_id: Optional[str] = None  # unlock a specific thread for this user
-    minutes: int = 1440              # kept for backward-compat; thread unlock is permanent now
-    make_premium: bool = False       # premium unlock everywhere
+    minutes: int = 1440  # kept for backward-compat; thread unlock is permanent now
+    make_premium: bool = False  # premium unlock everywhere
 
 
 class ThreadUnlockCheckoutPayload(BaseModel):
@@ -683,6 +743,12 @@ class CheckoutSessionResponse(BaseModel):
 class CreateUnlockSessionPayload(BaseModel):
     user_id: str
     target_profile_id: str
+    thread_id: str
+
+
+# ✅ NEW: mark thread as read
+class MarkReadPayload(BaseModel):
+    user_id: str
     thread_id: str
 
 
@@ -861,7 +927,7 @@ def _utc_midnight_of_day(d: date) -> datetime:
 
 
 def _next_utc_midnight(now_utc: datetime) -> datetime:
-    tomorrow = (now_utc.date() + timedelta(days=1))
+    tomorrow = now_utc.date() + timedelta(days=1)
     return _utc_midnight_of_day(tomorrow)
 
 
@@ -970,9 +1036,7 @@ def signup(payload: SignupPayload):
     pwd_hash = _hash_password(password)
 
     with Session(engine) as session:
-        existing = session.execute(
-            select(AuthAccount).where(AuthAccount.email == email)
-        ).scalar_one_or_none()
+        existing = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
         if existing:
             raise HTTPException(status_code=409, detail="An account with that email already exists. Please log in.")
 
@@ -989,9 +1053,7 @@ def login(payload: LoginPayload):
     password = payload.password or ""
 
     with Session(engine) as session:
-        acct = session.execute(
-            select(AuthAccount).where(AuthAccount.email == email)
-        ).scalar_one_or_none()
+        acct = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
         if not acct:
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
@@ -1013,9 +1075,7 @@ def forgot_password(payload: ForgotPasswordPayload):
 
     # IMPORTANT: always return ok, even if email doesn't exist
     with Session(engine) as session:
-        acct = session.execute(
-            select(AuthAccount).where(AuthAccount.email == email)
-        ).scalar_one_or_none()
+        acct = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
 
         if not acct:
             return {"ok": True}
@@ -1027,9 +1087,7 @@ def forgot_password(payload: ForgotPasswordPayload):
         expires_at = now + timedelta(minutes=RESET_TOKEN_TTL_MINUTES)
 
         # Optional cleanup: remove old tokens for this user (keeps table tidy)
-        session.execute(
-            delete(PasswordResetToken).where(PasswordResetToken.user_id == acct.user_id)
-        )
+        session.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == acct.user_id))
 
         session.add(
             PasswordResetToken(
@@ -1080,9 +1138,7 @@ def reset_password(payload: ResetPasswordPayload):
     now = datetime.utcnow()
 
     with Session(engine) as session:
-        row = session.execute(
-            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
-        ).scalar_one_or_none()
+        row = session.execute(select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)).scalar_one_or_none()
 
         if not row:
             raise HTTPException(status_code=400, detail="This reset link is invalid or expired.")
@@ -1098,7 +1154,6 @@ def reset_password(payload: ResetPasswordPayload):
             raise HTTPException(status_code=400, detail="Account not found.")
 
         acct.password_hash = _hash_password(new_password)
-
         row.used_at = now
         session.commit()
 
@@ -1118,15 +1173,7 @@ def request_code(payload: RequestCodePayload):
 
     with Session(engine) as session:
         session.execute(delete(LoginCode).where(LoginCode.email == email))
-        session.add(
-            LoginCode(
-                id=_new_id(),
-                email=email,
-                code=code,
-                expires_at=expires_at,
-                created_at=now,
-            )
-        )
+        session.add(LoginCode(id=_new_id(), email=email, code=code, expires_at=expires_at, created_at=now))
         session.commit()
 
     if AUTH_PREVIEW_MODE:
@@ -1159,9 +1206,7 @@ def verify_code(payload: VerifyCodePayload):
         raise HTTPException(status_code=400, detail="A 6-digit code is required")
 
     with Session(engine) as session:
-        row = session.execute(
-            select(LoginCode).where(LoginCode.email == email)
-        ).scalar_one_or_none()
+        row = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
 
         if not row:
             raise HTTPException(status_code=401, detail="Invalid or expired code")
@@ -1266,21 +1311,14 @@ def _coerce_alignment_fields(payload: UpsertMyProfilePayload):
 
     rel_intent = (payload.relationshipIntent or payload.relationship_intent or "").strip() or None
 
-    dating_challenge = (
-        payload.datingChallenge
-        if payload.datingChallenge is not None
-        else payload.dating_challenge_text
-    )
-    personal_truth = (
-        payload.personalTruth
-        if payload.personalTruth is not None
-        else payload.personal_truth_text
-    )
+    dating_challenge = payload.datingChallenge if payload.datingChallenge is not None else payload.dating_challenge_text
+    personal_truth = payload.personalTruth if payload.personalTruth is not None else payload.personal_truth_text
 
     dating_challenge = (dating_challenge or "").strip() or None
     personal_truth = (personal_truth or "").strip() or None
 
     return cultural_list, spiritual_list, rel_intent, dating_challenge, personal_truth
+
 
 @app.get("/profiles", response_model=ProfilesResponse)
 def list_profiles(
@@ -1288,12 +1326,7 @@ def list_profiles(
     limit: int = Query(default=50, ge=1, le=200),
 ):
     with Session(engine) as session:
-        q = (
-            select(Profile)
-            .where(Profile.is_available == True)
-            .order_by(Profile.updated_at.desc())
-            .limit(limit)
-        )
+        q = select(Profile).where(Profile.is_available == True).order_by(Profile.updated_at.desc()).limit(limit)
 
         if exclude_owner_user_id:
             q = q.where(Profile.owner_user_id != exclude_owner_user_id)
@@ -1339,9 +1372,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
 
     now = datetime.utcnow()
     with Session(engine) as session:
-        existing = session.execute(
-            select(Profile).where(Profile.owner_user_id == owner_user_id)
-        ).scalar_one_or_none()
+        existing = session.execute(select(Profile).where(Profile.owner_user_id == owner_user_id)).scalar_one_or_none()
 
         tags_csv = json.dumps(_coerce_str_list(payload.tags)[:25])
         cultural_csv = json.dumps(cultural_list)
@@ -1448,9 +1479,7 @@ def upsert_profile_alias(payload: UpsertMyProfilePayload):
 def get_saved(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
-        rows = session.execute(
-            select(SavedProfile.profile_id).where(SavedProfile.user_id == user_id)
-        ).all()
+        rows = session.execute(select(SavedProfile.profile_id).where(SavedProfile.user_id == user_id)).all()
         return IdListResponse(ids=[r[0] for r in rows])
 
 
@@ -1463,21 +1492,12 @@ def save_profile(payload: ProfileAction):
 
     with Session(engine) as session:
         existing = session.execute(
-            select(SavedProfile).where(
-                SavedProfile.user_id == user_id,
-                SavedProfile.profile_id == profile_id,
-            )
+            select(SavedProfile).where(SavedProfile.user_id == user_id, SavedProfile.profile_id == profile_id)
         ).scalar_one_or_none()
         if existing:
             return {"ok": True}
 
-        session.add(
-            SavedProfile(
-                user_id=user_id,
-                profile_id=profile_id,
-                created_at=datetime.utcnow(),
-            )
-        )
+        session.add(SavedProfile(user_id=user_id, profile_id=profile_id, created_at=datetime.utcnow()))
         try:
             session.commit()
         except IntegrityError:
@@ -1495,12 +1515,7 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
-        session.execute(
-            delete(SavedProfile).where(
-                SavedProfile.user_id == user_id,
-                SavedProfile.profile_id == profile_id,
-            )
-        )
+        session.execute(delete(SavedProfile).where(SavedProfile.user_id == user_id, SavedProfile.profile_id == profile_id))
         session.commit()
 
     return {"ok": True}
@@ -1514,20 +1529,22 @@ def get_notifications(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        rows = session.execute(
-            select(Notification)
-            .where(Notification.user_id == user_id)
-            .order_by(Notification.created_at.desc())
-            .limit(NOTIFICATIONS_LIMIT)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(Notification)
+                .where(Notification.user_id == user_id)
+                .order_by(Notification.created_at.desc())
+                .limit(NOTIFICATIONS_LIMIT)
+            )
+            .scalars()
+            .all()
+        )
 
         actor_ids = [n.actor_user_id for n in rows if n.actor_user_id]
         actor_map: Dict[str, Dict[str, Optional[str]]] = {}
 
         if actor_ids:
-            prof_rows = session.execute(
-                select(Profile).where(Profile.owner_user_id.in_(actor_ids))
-            ).scalars().all()
+            prof_rows = session.execute(select(Profile).where(Profile.owner_user_id.in_(actor_ids))).scalars().all()
 
             for p in prof_rows:
                 actor_map[p.owner_user_id] = {
@@ -1594,29 +1611,31 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        my_profile = session.execute(
-            select(Profile).where(Profile.owner_user_id == user_id)
-        ).scalar_one_or_none()
+        my_profile = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
 
         if not my_profile:
             return ProfilesListResponse(items=[])
 
-        liker_rows = session.execute(
-            select(Like.user_id)
-            .where(Like.profile_id == my_profile.id)
-            .order_by(Like.created_at.desc())
-            .limit(limit)
-        ).all()
+        liker_rows = (
+            session.execute(
+                select(Like.user_id).where(Like.profile_id == my_profile.id).order_by(Like.created_at.desc()).limit(limit)
+            )
+            .all()
+        )
         liker_user_ids = [r[0] for r in liker_rows]
 
         if not liker_user_ids:
             return ProfilesListResponse(items=[])
 
-        prof_rows = session.execute(
-            select(Profile)
-            .where(Profile.owner_user_id.in_(liker_user_ids))
-            .where(or_(Profile.is_available == True, Profile.is_available.is_(None)))
-        ).scalars().all()
+        prof_rows = (
+            session.execute(
+                select(Profile)
+                .where(Profile.owner_user_id.in_(liker_user_ids))
+                .where(or_(Profile.is_available == True, Profile.is_available.is_(None)))
+            )
+            .scalars()
+            .all()
+        )
 
         prof_by_owner = {p.owner_user_id: p for p in prof_rows}
         ordered_profiles = [prof_by_owner[uid] for uid in liker_user_ids if uid in prof_by_owner]
@@ -1661,9 +1680,7 @@ def like(payload: ProfileAction):
     with Session(engine) as session:
         counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
 
-        existing = session.execute(
-            select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
-        ).scalar_one_or_none()
+        existing = session.execute(select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)).scalar_one_or_none()
         if existing:
             return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
 
@@ -1673,10 +1690,7 @@ def like(payload: ProfileAction):
                     status_code=429,
                     detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.",
                 )
-            raise HTTPException(
-                status_code=429,
-                detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.",
-            )
+            raise HTTPException(status_code=429, detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.")
 
         prof = session.get(Profile, profile_id)
         if not prof:
@@ -1693,9 +1707,7 @@ def like(payload: ProfileAction):
 
         recipient_user_id = prof.owner_user_id
 
-        actor_profile = session.execute(
-            select(Profile).where(Profile.owner_user_id == liker_user_id)
-        ).scalar_one_or_none()
+        actor_profile = session.execute(select(Profile).where(Profile.owner_user_id == liker_user_id)).scalar_one_or_none()
 
         if recipient_user_id and recipient_user_id != liker_user_id:
             session.add(
@@ -1733,9 +1745,7 @@ def _sorted_pair(a: str, b: str) -> Tuple[str, str]:
 
 
 def _get_entitlement(session: Session, user_id: str) -> Entitlement:
-    row = session.execute(
-        select(Entitlement).where(Entitlement.user_id == user_id)
-    ).scalar_one_or_none()
+    row = session.execute(select(Entitlement).where(Entitlement.user_id == user_id)).scalar_one_or_none()
     if row:
         return row
     row = Entitlement(user_id=user_id, is_premium=False, updated_at=datetime.utcnow())
@@ -1744,9 +1754,7 @@ def _get_entitlement(session: Session, user_id: str) -> Entitlement:
         session.commit()
     except IntegrityError:
         session.rollback()
-        row = session.execute(
-            select(Entitlement).where(Entitlement.user_id == user_id)
-        ).scalar_one()
+        row = session.execute(select(Entitlement).where(Entitlement.user_id == user_id)).scalar_one()
     return row
 
 
@@ -1766,10 +1774,7 @@ def _can_message_thread(session: Session, user_id: str, thread_id: str) -> Tuple
         return True, True, ""
 
     tu = session.execute(
-        select(ThreadUnlock).where(
-            ThreadUnlock.user_id == user_id,
-            ThreadUnlock.thread_id == thread_id,
-        )
+        select(ThreadUnlock).where(ThreadUnlock.user_id == user_id, ThreadUnlock.thread_id == thread_id)
     ).scalar_one_or_none()
 
     if tu:
@@ -1805,9 +1810,7 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
             raise HTTPException(status_code=400, detail="You cannot message yourself.")
 
         low, high = _sorted_pair(user_id, other_user_id)
-        existing = session.execute(
-            select(Thread).where(Thread.user_low == low, Thread.user_high == high)
-        ).scalar_one_or_none()
+        existing = session.execute(select(Thread).where(Thread.user_low == low, Thread.user_high == high)).scalar_one_or_none()
 
         now = datetime.utcnow()
 
@@ -1834,28 +1837,28 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        rows = session.execute(
-            select(Thread)
-            .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
-            .order_by(Thread.updated_at.desc())
-            .limit(limit)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(Thread)
+                .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
+                .order_by(Thread.updated_at.desc())
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
 
         items: List[ThreadItem] = []
 
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
 
-            other_profile = session.execute(
-                select(Profile).where(Profile.owner_user_id == other_user_id)
-            ).scalar_one_or_none()
+            other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
 
-            last_msg = session.execute(
-                select(Message)
-                .where(Message.thread_id == t.id)
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).scalar_one_or_none()
+            last_msg = (
+                session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1))
+                .scalar_one_or_none()
+            )
 
             items.append(
                 ThreadItem(
@@ -1877,28 +1880,28 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        rows = session.execute(
-            select(Thread)
-            .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
-            .order_by(Thread.updated_at.desc())
-            .limit(limit)
-        ).scalars().all()
+        rows = (
+            session.execute(
+                select(Thread)
+                .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
+                .order_by(Thread.updated_at.desc())
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
 
         items: List[ThreadListItem] = []
 
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
 
-            other_profile = session.execute(
-                select(Profile).where(Profile.owner_user_id == other_user_id)
-            ).scalar_one_or_none()
+            other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
 
-            last_msg = session.execute(
-                select(Message)
-                .where(Message.thread_id == t.id)
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            ).scalar_one_or_none()
+            last_msg = (
+                session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1))
+                .scalar_one_or_none()
+            )
 
             items.append(
                 ThreadListItem(
@@ -1943,6 +1946,39 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
 
 
 # -----------------------------
+# Thread read receipts
+# -----------------------------
+@app.post("/threads/mark-read")
+def mark_thread_read(payload: MarkReadPayload):
+    user_id = _ensure_user(payload.user_id)
+    thread_id = (payload.thread_id or "").strip()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        thread = session.get(Thread, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        _ensure_thread_participant(thread, user_id)
+
+        row = session.execute(
+            select(ThreadRead).where(ThreadRead.thread_id == thread_id, ThreadRead.user_id == user_id)
+        ).scalar_one_or_none()
+
+        if row:
+            row.last_read_at = now
+        else:
+            session.add(ThreadRead(thread_id=thread_id, user_id=user_id, last_read_at=now))
+
+        session.commit()
+
+    return {"ok": True, "thread_id": thread_id, "user_id": user_id, "last_read_at": now.isoformat()}
+
+
+# -----------------------------
 # Messages
 # -----------------------------
 @app.get("/messages", response_model=MessagesResponse)
@@ -1961,14 +1997,24 @@ def list_messages(
         if not thread:
             raise HTTPException(status_code=404, detail="Thread not found")
 
-        _ensure_thread_participant(thread, user_id)
+        # ✅ get other user id so we can fetch their read-receipt timestamp
+        other_user_id = _ensure_thread_participant(thread, user_id)
 
-        rows = session.execute(
-            select(Message)
-            .where(Message.thread_id == thread_id)
-            .order_by(Message.created_at.desc())
-            .limit(limit)
-        ).scalars().all()
+        other_read = session.execute(
+            select(ThreadRead).where(ThreadRead.thread_id == thread_id, ThreadRead.user_id == other_user_id)
+        ).scalar_one_or_none()
+        other_last_read_at = other_read.last_read_at.isoformat() if other_read else None
+
+        rows = (
+            session.execute(
+                select(Message)
+                .where(Message.thread_id == thread_id)
+                .order_by(Message.created_at.desc())
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
 
         rows = list(reversed(rows))
         items = [
@@ -1981,7 +2027,7 @@ def list_messages(
             )
             for m in rows
         ]
-        return MessagesResponse(items=items)
+        return MessagesResponse(items=items, otherLastReadAt=other_last_read_at)
 
 
 @app.post("/messages", response_model=MessageItem)
@@ -2157,17 +2203,19 @@ def create_unlock_session(payload: CreateUnlockSessionPayload):
         session_obj = stripe.checkout.Session.create(
             payment_method_types=["card"],
             mode="payment",
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {
-                        "name": "Black Within — Conversation Unlock",
-                        "description": "Unlock messaging with this person forever",
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {
+                            "name": "Black Within — Conversation Unlock",
+                            "description": "Unlock messaging with this person forever",
+                        },
+                        "unit_amount": 199,
                     },
-                    "unit_amount": 199,
-                },
-                "quantity": 1,
-            }],
+                    "quantity": 1,
+                }
+            ],
             metadata={
                 "kind": "thread_unlock",  # ✅ REQUIRED for webhook to write ThreadUnlock
                 "user_id": user_id,
