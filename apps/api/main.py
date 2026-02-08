@@ -1226,7 +1226,6 @@ def get_profile(profile_id: str):
             personalTruth=getattr(p, "personal_truth_text", None),
         )
 
-            )
 
         return ProfilesResponse(items=items)
 
