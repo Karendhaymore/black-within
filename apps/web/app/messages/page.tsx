@@ -25,7 +25,11 @@ type MessageItem = {
   created_at: string;
 };
 
-type MessagesResponse = { items: MessageItem[] };
+// ✅ UPDATED: includes otherLastReadAt
+type MessagesResponse = {
+  items: MessageItem[];
+  otherLastReadAt?: string | null;
+};
 
 type MessagingAccessResponse = {
   canMessage: boolean;
@@ -96,7 +100,8 @@ async function apiMessagingAccess(userId: string, threadId: string): Promise<Mes
   return (await res.json()) as MessagingAccessResponse;
 }
 
-async function apiGetMessages(userId: string, threadId: string): Promise<MessageItem[]> {
+// ✅ UPDATED: return full response (items + otherLastReadAt)
+async function apiGetMessages(userId: string, threadId: string): Promise<MessagesResponse> {
   const url =
     `${API_BASE}/messages` +
     `?user_id=${encodeURIComponent(userId)}` +
@@ -106,7 +111,10 @@ async function apiGetMessages(userId: string, threadId: string): Promise<Message
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   const json = (await res.json()) as MessagesResponse;
-  return Array.isArray(json?.items) ? json.items : [];
+  return {
+    items: Array.isArray(json?.items) ? json.items : [],
+    otherLastReadAt: json?.otherLastReadAt ?? null,
+  };
 }
 
 async function apiSendMessage(userId: string, threadId: string, body: string) {
@@ -152,6 +160,21 @@ async function apiGetProfilePhoto(profileId: string): Promise<string | null> {
   return json?.photo || null;
 }
 
+// -----------------------------
+// ✅ NEW: Mark thread read
+// -----------------------------
+async function apiMarkThreadRead(userId: string, threadId: string) {
+  try {
+    await fetch(`${API_BASE}/threads/mark-read`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, thread_id: threadId }),
+    });
+  } catch {
+    // don't crash UI if it fails
+  }
+}
+
 /**
  * Next.js requires useSearchParams() to be wrapped in <Suspense>.
  */
@@ -182,6 +205,9 @@ function MessagesInner() {
 
   // 🧩 STEP 2 — Add state for the photo
   const [withPhoto, setWithPhoto] = useState<string | null>(null);
+
+  // ✅ NEW: otherLastReadAt state
+  const [otherLastReadAt, setOtherLastReadAt] = useState<string | null>(null);
 
   const pollRef = useRef<number | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -217,8 +243,9 @@ function MessagesInner() {
 
     setAccess(a);
 
-    const items = await apiGetMessages(uid, threadId);
-    setMessages(items);
+    const json = await apiGetMessages(uid, threadId);
+    setMessages(json.items || []);
+    setOtherLastReadAt(json.otherLastReadAt || null);
 
     return a;
   }
@@ -238,6 +265,9 @@ function MessagesInner() {
         window.location.href = "/auth";
         return;
       }
+
+      // ✅ Call mark-read when the thread opens (best-effort)
+      apiMarkThreadRead(userId, threadId);
 
       setStatus("loading");
       setErr("");
@@ -266,7 +296,10 @@ function MessagesInner() {
           pollRef.current = window.setInterval(async () => {
             try {
               const latest = await apiGetMessages(userId, threadId);
-              if (!cancelled) setMessages(latest);
+              if (!cancelled) {
+                setMessages(latest.items || []);
+                setOtherLastReadAt(latest.otherLastReadAt || null);
+              }
             } catch {
               // ignore polling errors
             }
@@ -295,6 +328,20 @@ function MessagesInner() {
 
   const locked = !!access && !access.canMessage;
 
+  // ✅ Find the last message you sent + compute Seen/Sent
+  const lastSentByMe = useMemo(() => {
+    const uid = userId || "";
+    return [...messages].filter((m) => (m.sender_user_id || "") === uid).slice(-1)[0];
+  }, [messages, userId]);
+
+  const seen = useMemo(() => {
+    if (!lastSentByMe) return false;
+    if (!otherLastReadAt) return false;
+    const otherTs = new Date(otherLastReadAt).getTime();
+    const sentTs = new Date(lastSentByMe.created_at).getTime();
+    return Number.isFinite(otherTs) && Number.isFinite(sentTs) && otherTs >= sentTs;
+  }, [lastSentByMe, otherLastReadAt]);
+
   async function handleSend() {
     if (!userId || !threadId) return;
 
@@ -320,6 +367,8 @@ function MessagesInner() {
 
       const saved = await apiSendMessage(userId, threadId, body);
       setMessages((prev) => prev.map((m) => (String(m.id) === tempId ? saved : m)));
+
+      // After sending, best-effort refresh read status + otherLastReadAt soon via polling/refresh.
     } catch (e: any) {
       setErr(stringifyError(e) || "Failed to send message.");
     }
@@ -330,6 +379,9 @@ function MessagesInner() {
 
     setErr("");
     try {
+      // When user refreshes, mark read again (best-effort)
+      apiMarkThreadRead(userId, threadId);
+
       const a = await refreshAll(userId);
 
       stopPolling();
@@ -337,7 +389,8 @@ function MessagesInner() {
         pollRef.current = window.setInterval(async () => {
           try {
             const latest = await apiGetMessages(userId, threadId);
-            setMessages(latest);
+            setMessages(latest.items || []);
+            setOtherLastReadAt(latest.otherLastReadAt || null);
           } catch {}
         }, 4000);
       }
@@ -652,24 +705,39 @@ function MessagesInner() {
                     {messages.map((m) => {
                       const mine = (m.sender_user_id || "") === (userId || "");
                       const ts = formatTs(m.created_at || "");
+
+                      const isLastSentByMe = mine && lastSentByMe && String(m.id) === String(lastSentByMe.id);
+
                       return (
                         <div
                           key={String(m.id)}
                           style={{
                             alignSelf: mine ? "flex-end" : "flex-start",
                             maxWidth: "85%",
-                            padding: "10px 12px",
-                            borderRadius: 16,
-                            border: "1px solid rgba(0,0,0,0.14)",
-                            background: mine ? "rgba(10,85,0,0.06)" : "rgba(255,255,255,0.92)",
-                            whiteSpace: "pre-wrap",
-                            boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
                           }}
                         >
-                          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6, fontWeight: 700 }}>
-                            {mine ? "You" : withName || "Member"} • {ts}
+                          <div
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 16,
+                              border: "1px solid rgba(0,0,0,0.14)",
+                              background: mine ? "rgba(10,85,0,0.06)" : "rgba(255,255,255,0.92)",
+                              whiteSpace: "pre-wrap",
+                              boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+                            }}
+                          >
+                            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6, fontWeight: 700 }}>
+                              {mine ? "You" : withName || "Member"} • {ts}
+                            </div>
+                            <div style={{ fontSize: 15, lineHeight: 1.45 }}>{m.body}</div>
                           </div>
-                          <div style={{ fontSize: 15, lineHeight: 1.45 }}>{m.body}</div>
+
+                          {/* ✅ Seen/Sent under your last sent message */}
+                          {mine && isLastSentByMe ? (
+                            <div style={{ fontSize: 12, opacity: 0.65, marginTop: 4, textAlign: "right" }}>
+                              {seen ? "Seen" : "Sent"}
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
