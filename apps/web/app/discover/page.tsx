@@ -161,16 +161,29 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
 }
 
 /**
- * ✅ STEP 2 — Fetch unread count
- * We reuse the threads list API and total unread_count across threads.
+ * ✅ Fix: refresh unread on focus + visibility change
  */
-async function apiGetThreads(userId: string) {
-  const res = await fetch(`${API_BASE}/threads?user_id=${encodeURIComponent(userId)}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  const json = await res.json();
-  return json.items || [];
+type ThreadListItem = {
+  thread_id: string;
+  other_user_id: string;
+  unread_count?: number;
+};
+
+type ThreadsResponse = { items: ThreadListItem[] };
+
+async function apiGetThreads(userId: string): Promise<ThreadListItem[]> {
+  const res = await fetch(
+    `${API_BASE}/threads?user_id=${encodeURIComponent(userId)}&limit=100`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  const json = (await res.json()) as ThreadsResponse;
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
+async function apiGetUnreadTotal(userId: string): Promise<number> {
+  const items = await apiGetThreads(userId);
+  return items.reduce((sum, t) => sum + (Number(t.unread_count) || 0), 0);
 }
 
 /**
@@ -229,7 +242,6 @@ export default function DiscoverPage() {
 
   const [userId, setUserId] = useState<string>("");
 
-  // ✅ STEP 1 — Add unread state
   const [totalUnread, setTotalUnread] = useState(0);
 
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
@@ -351,7 +363,17 @@ export default function DiscoverPage() {
     }, 400);
   }
 
-  // ✅ REPLACED: the first "load profiles on page load" useEffect
+  // refresh helper (requested)
+  async function refreshUnread(uid: string) {
+    try {
+      const n = await apiGetUnreadTotal(uid);
+      setTotalUnread(n);
+    } catch {
+      // ignore
+    }
+  }
+
+  // ✅ load profiles on page load
   useEffect(() => {
     const uid = getLoggedInUserId();
 
@@ -362,17 +384,6 @@ export default function DiscoverPage() {
     }
 
     setUserId(uid);
-
-    // ✅ STEP 3 — Load unread count (non-blocking)
-    apiGetThreads(uid)
-      .then((threads) => {
-        const count = (threads || []).reduce(
-          (sum: number, t: any) => sum + (t?.unread_count || 0),
-          0
-        );
-        setTotalUnread(count);
-      })
-      .catch(() => {});
 
     (async () => {
       try {
@@ -394,6 +405,29 @@ export default function DiscoverPage() {
     // no deps: run once
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ✅ Fix: refresh unread on focus + visibility change
+  useEffect(() => {
+    if (!userId) return;
+
+    // initial
+    refreshUnread(userId);
+
+    // when you return to tab / page
+    const onFocus = () => refreshUnread(userId);
+    const onVis = () => {
+      if (!document.hidden) refreshUnread(userId);
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) return;
@@ -507,7 +541,6 @@ export default function DiscoverPage() {
     display: "inline-block",
   };
 
-  // (You referenced pillBtn already; define it here so the file compiles cleanly.)
   const pillBtn: CSSProperties = {
     padding: "0.65rem 1rem",
     border: "1px solid #0a5411",
@@ -521,7 +554,6 @@ export default function DiscoverPage() {
     fontWeight: 800,
   };
 
-  // ✅ STEP 4 — Create glow style
   const pillBtnGlow: React.CSSProperties = {
     ...pillBtn,
     background: "#0a5411",
@@ -529,6 +561,9 @@ export default function DiscoverPage() {
     color: "white",
     boxShadow: "0 0 10px rgba(10,85,0,0.5), 0 0 20px rgba(10,85,0,0.3)",
   };
+
+  // ✅ keep glow conditional strictly on unread
+  const messagesStyle = totalUnread > 0 ? pillBtnGlow : pillBtn;
 
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
 
@@ -573,8 +608,7 @@ export default function DiscoverPage() {
               Notifications
             </Link>
 
-            {/* ✅ STEP 5 — Apply it to Messages button */}
-            <Link href="/inbox" style={totalUnread > 0 ? pillBtnGlow : pillBtn}>
+            <Link href="/inbox" style={messagesStyle}>
               Messages
               {totalUnread > 0 && (
                 <span
