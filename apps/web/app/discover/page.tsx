@@ -524,9 +524,7 @@ export default function DiscoverPage() {
             </Link>
 
             {/* Note: /messages without a threadId will show the "Missing threadId" screen (expected for now). */}
-            <Link href="/messages" style={navBtnStyle}>
-              Messages
-            </Link>
+            <Link href="/inbox">Messages</Link>
 
             <button onClick={logout} style={{ ...navBtnStyle, cursor: "pointer" }}>
               Log out
