@@ -1,68 +1,4 @@
-Make these coding additions:
-
-✅ STEP 1 — Add unread state
-At the top of your Discover page component, near other useState:
-const [totalUnread, setTotalUnread] = useState(0);
-
-
-✅ STEP 2 — Fetch unread count
-You already have unread per thread in the Inbox API.
- We just total them.
-Add this function near your other API helpers:
-async function apiGetThreads(userId: string) {
-  const res = await fetch(`${API_BASE}/threads?user_id=${encodeURIComponent(userId)}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  const json = await res.json();
-  return json.items || [];
-}
-
-
-✅ STEP 3 — Load unread count
-Inside your main useEffect in Discover page (where profiles load), add:
-if (userId) {
-  apiGetThreads(userId).then((threads) => {
-    const count = threads.reduce((sum: number, t: any) => sum + (t.unread_count || 0), 0);
-    setTotalUnread(count);
-  }).catch(() => {});
-}
-
-
-✅ STEP 4 — Create glow style
-Near your pillBtn style:
-const pillBtnGlow: React.CSSProperties = {
-  ...pillBtn,
-  background: "#0a5411",
-  border: "1px solid #0a5411",
-  boxShadow: "0 0 10px rgba(10,85,0,0.5), 0 0 20px rgba(10,85,0,0.3)",
-};
-
-
-✅ STEP 5 — Apply it to Messages button
-Find:
-<Link href="/inbox" style={pillBtn}>Messages</Link>
-
-Replace with:
-<Link href="/inbox" style={totalUnread > 0 ? pillBtnGlow : pillBtn}>
-  Messages
-  {totalUnread > 0 && (
-    <span style={{
-      marginLeft: 6,
-      fontSize: 12,
-      fontWeight: 900,
-      background: "white",
-      color: "#0a5411",
-      borderRadius: 999,
-      padding: "2px 6px",
-    }}>
-      {totalUnread}
-    </span>
-  )}
-</Link>
-
-
-Then give me the full updated code that I can copy and paste to replace my current code which is: "use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
@@ -225,6 +161,19 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
 }
 
 /**
+ * ✅ STEP 2 — Fetch unread count
+ * We reuse the threads list API and total unread_count across threads.
+ */
+async function apiGetThreads(userId: string) {
+  const res = await fetch(`${API_BASE}/threads?user_id=${encodeURIComponent(userId)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  const json = await res.json();
+  return json.items || [];
+}
+
+/**
  * ✅ Threads API: POST /threads/get-or-create
  * Your backend error showed it expects: { user_id, with_profile_id }
  */
@@ -279,6 +228,9 @@ export default function DiscoverPage() {
   }, [router]);
 
   const [userId, setUserId] = useState<string>("");
+
+  // ✅ STEP 1 — Add unread state
+  const [totalUnread, setTotalUnread] = useState(0);
 
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [savedIds, setSavedIds] = useState<string[]>([]);
@@ -410,6 +362,17 @@ export default function DiscoverPage() {
     }
 
     setUserId(uid);
+
+    // ✅ STEP 3 — Load unread count (non-blocking)
+    apiGetThreads(uid)
+      .then((threads) => {
+        const count = (threads || []).reduce(
+          (sum: number, t: any) => sum + (t?.unread_count || 0),
+          0
+        );
+        setTotalUnread(count);
+      })
+      .catch(() => {});
 
     (async () => {
       try {
@@ -544,6 +507,29 @@ export default function DiscoverPage() {
     display: "inline-block",
   };
 
+  // (You referenced pillBtn already; define it here so the file compiles cleanly.)
+  const pillBtn: CSSProperties = {
+    padding: "0.65rem 1rem",
+    border: "1px solid #0a5411",
+    borderRadius: 999,
+    textDecoration: "none",
+    color: "#0a5411",
+    background: "white",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontWeight: 800,
+  };
+
+  // ✅ STEP 4 — Create glow style
+  const pillBtnGlow: React.CSSProperties = {
+    ...pillBtn,
+    background: "#0a5411",
+    border: "1px solid #0a5411",
+    color: "white",
+    boxShadow: "0 0 10px rgba(10,85,0,0.5), 0 0 20px rgba(10,85,0,0.3)",
+  };
+
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
 
   return (
@@ -587,8 +573,25 @@ export default function DiscoverPage() {
               Notifications
             </Link>
 
-            {/* Note: /messages without a threadId will show the "Missing threadId" screen (expected for now). */}
-            <Link href="/inbox" style={pillBtn}>Messages</Link>
+            {/* ✅ STEP 5 — Apply it to Messages button */}
+            <Link href="/inbox" style={totalUnread > 0 ? pillBtnGlow : pillBtn}>
+              Messages
+              {totalUnread > 0 && (
+                <span
+                  style={{
+                    marginLeft: 6,
+                    fontSize: 12,
+                    fontWeight: 900,
+                    background: "white",
+                    color: "#0a5411",
+                    borderRadius: 999,
+                    padding: "2px 6px",
+                  }}
+                >
+                  {totalUnread}
+                </span>
+              )}
+            </Link>
 
             <button onClick={logout} style={{ ...navBtnStyle, cursor: "pointer" }}>
               Log out
