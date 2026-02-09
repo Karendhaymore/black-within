@@ -292,6 +292,44 @@ class ThreadUnlock(Base):
 
     __table_args__ = (UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),)
 
+class ThreadMarkReadPayload(BaseModel):
+    user_id: str
+    thread_id: str
+
+
+@app.post("/threads/mark-read")
+def mark_thread_read(payload: ThreadMarkReadPayload):
+    user_id = _ensure_user(payload.user_id)
+    thread_id = (payload.thread_id or "").strip()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        thread = session.get(Thread, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        _ensure_thread_participant(thread, user_id)
+
+        existing = session.execute(
+            select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == thread_id)
+        ).scalar_one_or_none()
+
+        if existing:
+            existing.last_read_at = now
+            existing.updated_at = now
+        else:
+            session.add(ThreadRead(user_id=user_id, thread_id=thread_id, last_read_at=now, updated_at=now))
+
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+
+    return {"ok": True}
+
 
 # -----------------------------
 # MVP auto-migration helpers
