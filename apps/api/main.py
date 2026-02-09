@@ -210,6 +210,19 @@ class PasswordResetToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+class ThreadRead(Base):
+    __tablename__ = "thread_reads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[str] = mapped_column(String(60), index=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    last_read_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "user_id", name="uq_thread_reads_thread_user"),
+    )
+
 
 # -----------------------------
 # Threads + Messages
