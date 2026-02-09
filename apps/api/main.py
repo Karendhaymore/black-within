@@ -521,6 +521,22 @@ def _auto_migrate_password_reset_tokens_table():
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_email ON password_reset_tokens(email);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_expires_at ON password_reset_tokens(expires_at);"""))
 
+def _auto_migrate_thread_reads_table():
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS thread_reads (
+              id SERIAL PRIMARY KEY,
+              thread_id VARCHAR(60),
+              user_id VARCHAR(40),
+              last_read_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW(),
+              CONSTRAINT uq_thread_reads_thread_user UNIQUE (thread_id, user_id)
+            );
+        """))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_last_read_at ON thread_reads(last_read_at);"""))
+
 
 # -----------------------------
 # Create tables + run migrations
