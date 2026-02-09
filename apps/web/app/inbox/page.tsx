@@ -53,7 +53,9 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
   try {
     const data = await res.json();
     if (data?.detail != null)
-      return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+      return typeof data.detail === "string"
+        ? data.detail
+        : JSON.stringify(data.detail);
     return JSON.stringify(data);
   } catch {}
   try {
@@ -91,7 +93,8 @@ async function fetchThreads(userId: string): Promise<ThreadItem[]> {
       let rows: any[] = [];
       if (Array.isArray(data)) rows = data;
       else if (Array.isArray((data as any).items)) rows = (data as any).items;
-      else if (Array.isArray((data as any).threads)) rows = (data as any).threads;
+      else if (Array.isArray((data as any).threads))
+        rows = (data as any).threads;
 
       // Normalize field names from API -> UI expectations
       const normalized: ThreadItem[] = rows
@@ -100,13 +103,21 @@ async function fetchThreads(userId: string): Promise<ThreadItem[]> {
           if (!thread_id) return null;
 
           const with_user_id =
-            r.with_user_id ?? r.withUserId ?? r.other_user_id ?? r.otherUserId ?? null;
+            r.with_user_id ??
+            r.withUserId ??
+            r.other_user_id ??
+            r.otherUserId ??
+            null;
 
           // Filter broken rows (like other_user_id = "undefined")
           if (!with_user_id || String(with_user_id) === "undefined") return null;
 
           const with_profile_id =
-            r.with_profile_id ?? r.withProfileId ?? r.other_profile_id ?? r.otherProfileId ?? null;
+            r.with_profile_id ??
+            r.withProfileId ??
+            r.other_profile_id ??
+            r.otherProfileId ??
+            null;
 
           const with_display_name =
             r.with_display_name ??
@@ -115,10 +126,15 @@ async function fetchThreads(userId: string): Promise<ThreadItem[]> {
             r.otherDisplayName ??
             null;
 
-          const with_photo = r.with_photo ?? r.withPhoto ?? r.other_photo ?? r.otherPhoto ?? null;
+          const with_photo =
+            r.with_photo ?? r.withPhoto ?? r.other_photo ?? r.otherPhoto ?? null;
 
           const last_message =
-            r.last_message ?? r.lastMessage ?? r.last_message_text ?? r.lastMessageText ?? null;
+            r.last_message ??
+            r.lastMessage ??
+            r.last_message_text ??
+            r.lastMessageText ??
+            null;
 
           const last_at =
             r.last_at ??
@@ -151,9 +167,9 @@ async function fetchThreads(userId: string): Promise<ThreadItem[]> {
   }
 
   throw new Error(
-    `Could not load inbox threads from the API.\n\nTried:\n- ${candidates.join("\n- ")}\n\nLast error:\n${
-      lastErr || "(unknown)"
-    }`
+    `Could not load inbox threads from the API.\n\nTried:\n- ${candidates.join(
+      "\n- "
+    )}\n\nLast error:\n${lastErr || "(unknown)"}`
   );
 }
 
@@ -166,7 +182,9 @@ function fmtTime(iso?: string | null): string {
 export default function InboxPage() {
   const userId = useMemo(() => getLoggedInUserId(), []);
 
-  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">(
+    "idle"
+  );
   const [items, setItems] = useState<ThreadItem[]>([]);
   const [err, setErr] = useState<string>("");
 
@@ -305,11 +323,25 @@ export default function InboxPage() {
         <div style={topBarGlow} />
 
         <section style={card}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
             <div>
               <div style={pill}>Black Within</div>
 
-              <h1 style={{ margin: "12px 0 6px", fontSize: "2.2rem", color: "#111", letterSpacing: "-0.02em" }}>
+              <h1
+                style={{
+                  margin: "12px 0 6px",
+                  fontSize: "2.2rem",
+                  color: "#111",
+                  letterSpacing: "-0.02em",
+                }}
+              >
                 Messages
               </h1>
 
@@ -332,7 +364,9 @@ export default function InboxPage() {
             </div>
           </div>
 
-          {status === "loading" ? <div style={{ marginTop: 18, color: "rgba(0,0,0,0.7)" }}>Loading…</div> : null}
+          {status === "loading" ? (
+            <div style={{ marginTop: 18, color: "rgba(0,0,0,0.7)" }}>Loading…</div>
+          ) : null}
 
           {status === "error" ? (
             <div
@@ -347,7 +381,9 @@ export default function InboxPage() {
               }}
             >
               <div style={{ fontWeight: 900, marginBottom: 8 }}>Inbox error</div>
-              <div style={{ fontSize: 13, lineHeight: 1.5 }}>{err || "Something went wrong loading your inbox."}</div>
+              <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+                {err || "Something went wrong loading your inbox."}
+              </div>
 
               <div style={{ marginTop: 12, fontSize: 12, opacity: 0.85 }}>
                 If this happens, it usually means the API doesn’t have a “list threads” endpoint yet (or it’s named
@@ -379,7 +415,6 @@ export default function InboxPage() {
 
                     // ✅ Name/photo (normalized fallback)
                     const name = (t.with_display_name || (t as any).other_display_name || "Member").trim();
-
                     const photo = (t.with_photo || (t as any).other_photo || null) as string | null;
 
                     // ✅ NEW: pick up profile id (normalized fallback)
@@ -387,7 +422,9 @@ export default function InboxPage() {
 
                     const last = (t.last_message || "").trim();
                     const when = fmtTime(t.last_at);
-                    const unread = Math.max(0, Number(t.unread_count || 0));
+
+                    // ✅ REQUIRED by your new change
+                    const unread = Number((t as any).unread_count || 0);
 
                     // ✅ Updated href:
                     // - includes withPhoto if present
@@ -453,21 +490,27 @@ export default function InboxPage() {
                           </div>
                         </div>
 
+                        {/* Right side: unread badge + Open */}
                         <div style={{ display: "flex", gap: 10, alignItems: "center", flex: "0 0 auto" }}>
                           {unread > 0 ? (
                             <div
                               style={{
-                                padding: "0.25rem 0.6rem",
+                                minWidth: 22,
+                                height: 22,
+                                padding: "0 7px",
                                 borderRadius: 999,
-                                background: "rgba(10,85,0,0.12)",
-                                border: "1px solid rgba(10,85,0,0.25)",
-                                color: "rgba(10,85,0,0.95)",
+                                background: "#0a5411",
+                                color: "white",
+                                display: "grid",
+                                placeItems: "center",
                                 fontWeight: 900,
                                 fontSize: 12,
+                                lineHeight: "22px",
                               }}
+                              aria-label={`${unread} unread messages`}
                               title="Unread messages"
                             >
-                              {unread}
+                              {unread > 99 ? "99+" : unread}
                             </div>
                           ) : null}
 
