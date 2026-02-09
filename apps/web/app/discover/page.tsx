@@ -1,4 +1,68 @@
-"use client";
+Make these coding additions:
+
+✅ STEP 1 — Add unread state
+At the top of your Discover page component, near other useState:
+const [totalUnread, setTotalUnread] = useState(0);
+
+
+✅ STEP 2 — Fetch unread count
+You already have unread per thread in the Inbox API.
+ We just total them.
+Add this function near your other API helpers:
+async function apiGetThreads(userId: string) {
+  const res = await fetch(`${API_BASE}/threads?user_id=${encodeURIComponent(userId)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  const json = await res.json();
+  return json.items || [];
+}
+
+
+✅ STEP 3 — Load unread count
+Inside your main useEffect in Discover page (where profiles load), add:
+if (userId) {
+  apiGetThreads(userId).then((threads) => {
+    const count = threads.reduce((sum: number, t: any) => sum + (t.unread_count || 0), 0);
+    setTotalUnread(count);
+  }).catch(() => {});
+}
+
+
+✅ STEP 4 — Create glow style
+Near your pillBtn style:
+const pillBtnGlow: React.CSSProperties = {
+  ...pillBtn,
+  background: "#0a5411",
+  border: "1px solid #0a5411",
+  boxShadow: "0 0 10px rgba(10,85,0,0.5), 0 0 20px rgba(10,85,0,0.3)",
+};
+
+
+✅ STEP 5 — Apply it to Messages button
+Find:
+<Link href="/inbox" style={pillBtn}>Messages</Link>
+
+Replace with:
+<Link href="/inbox" style={totalUnread > 0 ? pillBtnGlow : pillBtn}>
+  Messages
+  {totalUnread > 0 && (
+    <span style={{
+      marginLeft: 6,
+      fontSize: 12,
+      fontWeight: 900,
+      background: "white",
+      color: "#0a5411",
+      borderRadius: 999,
+      padding: "2px 6px",
+    }}>
+      {totalUnread}
+    </span>
+  )}
+</Link>
+
+
+Then give me the full updated code that I can copy and paste to replace my current code which is: "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
