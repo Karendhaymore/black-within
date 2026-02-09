@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
@@ -188,8 +188,19 @@ export default function MessagesPage() {
 
 function MessagesInner() {
   const sp = useSearchParams();
-
   const threadId = sp.get("threadId") || "";
+
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!threadId) {
+      router.replace("/inbox");
+    }
+  }, [threadId, router]);
+
+  if (!threadId) {
+    return null; // or a tiny "Redirecting..." UI
+  }
 
   // 🧩 STEP 1 — Read withProfileId from URL
   const withName = sp.get("with") || "";
@@ -254,13 +265,7 @@ function MessagesInner() {
     let cancelled = false;
 
     async function load() {
-      if (!threadId) {
-        setStatus("error");
-        setErr("Missing threadId in the URL. Go back and open a chat from a profile.");
-        stopPolling();
-        return;
-      }
-
+      // threadId is guaranteed by redirect guard above
       if (!userId) {
         window.location.href = "/auth";
         return;
@@ -317,7 +322,6 @@ function MessagesInner() {
       cancelled = true;
       stopPolling();
     };
-    // ✅ Make reactive to URL param changes (useSearchParams)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, userId, withProfileId, withName]);
 
@@ -367,8 +371,6 @@ function MessagesInner() {
 
       const saved = await apiSendMessage(userId, threadId, body);
       setMessages((prev) => prev.map((m) => (String(m.id) === tempId ? saved : m)));
-
-      // After sending, best-effort refresh read status + otherLastReadAt soon via polling/refresh.
     } catch (e: any) {
       setErr(stringifyError(e) || "Failed to send message.");
     }
