@@ -573,6 +573,11 @@ try:
 except Exception as e:
     print("AUTO_MIGRATE_PASSWORD_RESET failed:", str(e))
 
+try:
+    _auto_migrate_thread_reads_table()
+except Exception as e:
+    print("AUTO_MIGRATE_THREAD_READS failed:", str(e))
+
 
 # -----------------------------
 # Schemas
