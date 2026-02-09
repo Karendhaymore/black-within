@@ -210,19 +210,6 @@ class PasswordResetToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-class ThreadRead(Base):
-    __tablename__ = "thread_reads"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    thread_id: Mapped[str] = mapped_column(String(60), index=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)
-    last_read_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-
-    __table_args__ = (
-        UniqueConstraint("thread_id", "user_id", name="uq_thread_reads_thread_user"),
-    )
-
 
 # -----------------------------
 # Threads + Messages
@@ -251,7 +238,7 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
-# ✅ NEW: Thread read receipts (per-user last read timestamp)
+# ✅ UPDATED: Thread read receipts (per-user last read timestamp) + updated_at
 class ThreadRead(Base):
     __tablename__ = "thread_reads"
 
@@ -259,6 +246,7 @@ class ThreadRead(Base):
     thread_id: Mapped[str] = mapped_column(String(60), index=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     last_read_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
     __table_args__ = (
         UniqueConstraint("thread_id", "user_id", name="uq_thread_reads_thread_user"),
@@ -292,51 +280,14 @@ class ThreadUnlock(Base):
 
     __table_args__ = (UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),)
 
-class ThreadMarkReadPayload(BaseModel):
-    user_id: str
-    thread_id: str
-
-
-@app.post("/threads/mark-read")
-def mark_thread_read(payload: ThreadMarkReadPayload):
-    user_id = _ensure_user(payload.user_id)
-    thread_id = (payload.thread_id or "").strip()
-    if not thread_id:
-        raise HTTPException(status_code=400, detail="thread_id is required")
-
-    now = datetime.utcnow()
-
-    with Session(engine) as session:
-        thread = session.get(Thread, thread_id)
-        if not thread:
-            raise HTTPException(status_code=404, detail="Thread not found")
-
-        _ensure_thread_participant(thread, user_id)
-
-        existing = session.execute(
-            select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == thread_id)
-        ).scalar_one_or_none()
-
-        if existing:
-            existing.last_read_at = now
-            existing.updated_at = now
-        else:
-            session.add(ThreadRead(user_id=user_id, thread_id=thread_id, last_read_at=now, updated_at=now))
-
-        try:
-            session.commit()
-        except IntegrityError:
-            session.rollback()
-
-    return {"ok": True}
-
 
 # -----------------------------
 # MVP auto-migration helpers
 # -----------------------------
 def _auto_migrate_threads_messages_tables():
     """
-    Create threads/messages/messaging_entitlements/thread_unlocks/thread_reads tables (if missing).
+    Create threads/messages/messaging_entitlements/thread_unlocks tables (if missing).
+    (thread_reads is migrated by _auto_migrate_thread_reads_table()).
     """
     with engine.begin() as conn:
         conn.execute(
@@ -408,7 +359,10 @@ def _auto_migrate_threads_messages_tables():
         # ✅ backfill/migrate for existing databases
         conn.execute(text("""ALTER TABLE thread_unlocks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
 
-        # ✅ NEW: thread_reads (read receipts)
+
+# ✅ NEW: thread_reads migration helper (as requested)
+def _auto_migrate_thread_reads_table():
+    with engine.begin() as conn:
         conn.execute(
             text(
                 """
@@ -417,6 +371,7 @@ def _auto_migrate_threads_messages_tables():
               thread_id VARCHAR(60),
               user_id VARCHAR(40),
               last_read_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW(),
               CONSTRAINT uq_thread_reads_thread_user UNIQUE (thread_id, user_id)
             );
         """
@@ -426,8 +381,9 @@ def _auto_migrate_threads_messages_tables():
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_last_read_at ON thread_reads(last_read_at);"""))
 
-        # Optional safety for older DBs
+        # ✅ safety for older DBs that already had thread_reads without updated_at
         conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP DEFAULT NOW();"""))
+        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
 
 
 def _auto_migrate_profiles_table():
@@ -559,22 +515,6 @@ def _auto_migrate_password_reset_tokens_table():
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_email ON password_reset_tokens(email);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_expires_at ON password_reset_tokens(expires_at);"""))
 
-def _auto_migrate_thread_reads_table():
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS thread_reads (
-              id SERIAL PRIMARY KEY,
-              thread_id VARCHAR(60),
-              user_id VARCHAR(40),
-              last_read_at TIMESTAMP DEFAULT NOW(),
-              updated_at TIMESTAMP DEFAULT NOW(),
-              CONSTRAINT uq_thread_reads_thread_user UNIQUE (thread_id, user_id)
-            );
-        """))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_last_read_at ON thread_reads(last_read_at);"""))
-
 
 # -----------------------------
 # Create tables + run migrations
@@ -585,6 +525,11 @@ try:
     _auto_migrate_threads_messages_tables()
 except Exception as e:
     print("AUTO_MIGRATE_THREADS_MESSAGES failed:", str(e))
+
+try:
+    _auto_migrate_thread_reads_table()
+except Exception as e:
+    print("AUTO_MIGRATE_THREAD_READS failed:", str(e))
 
 try:
     _auto_migrate_profiles_table()
@@ -610,11 +555,6 @@ try:
     _auto_migrate_password_reset_tokens_table()
 except Exception as e:
     print("AUTO_MIGRATE_PASSWORD_RESET failed:", str(e))
-
-try:
-    _auto_migrate_thread_reads_table()
-except Exception as e:
-    print("AUTO_MIGRATE_THREAD_READS failed:", str(e))
 
 
 # -----------------------------
@@ -758,6 +698,9 @@ class ThreadListItem(BaseModel):
 
     updated_at: Optional[str] = None
 
+    # ✅ NEW: unread count
+    unread_count: int = 0
+
 
 class ThreadsResponse(BaseModel):
     items: List[ThreadListItem]
@@ -818,10 +761,15 @@ class CreateUnlockSessionPayload(BaseModel):
     thread_id: str
 
 
-# ✅ NEW: mark thread as read
-class MarkReadPayload(BaseModel):
+# ✅ Backend: create/confirm POST /threads/mark-read (as requested)
+class ThreadMarkReadPayload(BaseModel):
     user_id: str
     thread_id: str
+
+
+# Backward-compat alias (if anything still imports MarkReadPayload name)
+class MarkReadPayload(ThreadMarkReadPayload):
+    pass
 
 
 # Accept BOTH camelCase and snake_case (frontend may send either)
@@ -860,7 +808,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.1.3")
+app = FastAPI(title="Black Within API", version="1.1.4")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1083,7 +1031,7 @@ def health():
         "freeLikesPerDay": FREE_LIKES_PER_DAY,
         "likesResetTestSeconds": LIKES_RESET_TEST_SECONDS,
         "corsOrigins": origins,
-        "version": "1.1.3",
+        "version": "1.1.4",
     }
 
 
@@ -1351,8 +1299,6 @@ def get_profile(profile_id: str):
             datingChallenge=getattr(p, "dating_challenge_text", None),
             personalTruth=getattr(p, "personal_truth_text", None),
         )
-
-        return ProfilesResponse(items=items)
 
 
 def _coerce_upsert_fields(payload: UpsertMyProfilePayload):
@@ -1975,6 +1921,24 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
                 .scalar_one_or_none()
             )
 
+            # ✅ Compute unread_count (messages from other user after my last_read_at)
+            my_read = session.execute(
+                select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == t.id)
+            ).scalar_one_or_none()
+
+            my_last_read_at = my_read.last_read_at if my_read else None
+
+            unread_q = select(Message).where(
+                Message.thread_id == t.id,
+                Message.sender_user_id != user_id,
+            )
+            if my_last_read_at:
+                unread_q = unread_q.where(Message.created_at > my_last_read_at)
+
+            unread_count = session.execute(
+                select(text("COUNT(1)")).select_from(unread_q.subquery())
+            ).scalar_one() or 0
+
             items.append(
                 ThreadListItem(
                     thread_id=str(t.id),
@@ -1985,6 +1949,7 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
                     last_message_text=(last_msg.body if last_msg else None),
                     last_message_at=(last_msg.created_at.isoformat() if last_msg else None),
                     updated_at=(t.updated_at.isoformat() if t.updated_at else None),
+                    unread_count=int(unread_count),
                 )
             )
 
@@ -2021,7 +1986,7 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
 # Thread read receipts
 # -----------------------------
 @app.post("/threads/mark-read")
-def mark_thread_read(payload: MarkReadPayload):
+def mark_thread_read(payload: ThreadMarkReadPayload):
     user_id = _ensure_user(payload.user_id)
     thread_id = (payload.thread_id or "").strip()
     if not thread_id:
@@ -2036,18 +2001,22 @@ def mark_thread_read(payload: MarkReadPayload):
 
         _ensure_thread_participant(thread, user_id)
 
-        row = session.execute(
-            select(ThreadRead).where(ThreadRead.thread_id == thread_id, ThreadRead.user_id == user_id)
+        existing = session.execute(
+            select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == thread_id)
         ).scalar_one_or_none()
 
-        if row:
-            row.last_read_at = now
+        if existing:
+            existing.last_read_at = now
+            existing.updated_at = now
         else:
-            session.add(ThreadRead(thread_id=thread_id, user_id=user_id, last_read_at=now))
+            session.add(ThreadRead(user_id=user_id, thread_id=thread_id, last_read_at=now, updated_at=now))
 
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
 
-    return {"ok": True, "thread_id": thread_id, "user_id": user_id, "last_read_at": now.isoformat()}
+    return {"ok": True}
 
 
 # -----------------------------
