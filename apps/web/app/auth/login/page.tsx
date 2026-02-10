@@ -126,3 +126,5 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid #ccc",
   fontSize: 15,
 };
+
+<Link href="/auth/signup">Create account</Link>
