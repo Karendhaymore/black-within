@@ -105,6 +105,26 @@ UPLOAD_DIR = "/var/data/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+# ✅ Helper near your upload helpers
+# This extracts the filename safely from a URL like:
+#  https://black-within-api.onrender.com/photos/abc123.jpg
+def _extract_uploaded_filename(photo_url: str) -> str:
+    s = (photo_url or "").strip()
+    if not s:
+        return ""
+
+    # Accept either full URL or just "/photos/filename"
+    if "/photos/" not in s:
+        return ""
+
+    filename = s.split("/photos/")[-1].strip()
+
+    # Hard safety checks
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        return ""
+    return filename
+
+
 # -----------------------------
 # Database models (Base must be defined ONCE, before any models)
 # -----------------------------
@@ -668,6 +688,12 @@ class MeResponse(BaseModel):
 class ProfileAction(BaseModel):
     user_id: str
     profile_id: str
+
+
+# ✅ 1) NEW: Delete photo request model (requested)
+class DeletePhotoRequest(BaseModel):
+    user_id: str
+    photo_url: str
 
 
 class IdListResponse(BaseModel):
@@ -1620,6 +1646,60 @@ def get_photo(filename: str):
     if not filename or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
     return FileResponse(os.path.join(UPLOAD_DIR, filename))
+
+
+# ✅ 3) NEW: delete photo route (requested)
+# Does:
+# - checks user owns the profile
+# - removes the photo URL from profile’s photo fields
+# - deletes the file from disk (best-effort)
+@app.post("/photos/delete")
+def delete_photo(req: DeletePhotoRequest):
+    user_id = (req.user_id or "").strip()
+    photo_url = (req.photo_url or "").strip()
+
+    if not user_id or not photo_url:
+        raise HTTPException(status_code=400, detail="Missing user_id or photo_url")
+
+    filename = _extract_uploaded_filename(photo_url)
+    if not filename:
+        raise HTTPException(status_code=400, detail="Invalid photo_url")
+
+    file_path = os.path.join(UPLOAD_DIR, filename)
+
+    with Session(engine) as session:
+        # Find the user's profile
+        prof = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
+
+        if not prof:
+            raise HTTPException(status_code=404, detail="Profile not found for this user")
+
+        # Remove from profile fields (supports 2-photo model)
+        changed = False
+
+        if getattr(prof, "photo", None) == photo_url:
+            prof.photo = None
+            changed = True
+
+        if getattr(prof, "photo2", None) == photo_url:
+            prof.photo2 = None
+            changed = True
+
+        # If it's not in either slot, still allow deleting the file
+        # but we won't block the user (helps cleanup).
+        if changed:
+            session.add(prof)
+            session.commit()
+
+    # Delete the file (best-effort)
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        # Don't hard-fail if delete on disk fails
+        pass
+
+    return {"ok": True}
 
 
 # -----------------------------
