@@ -249,7 +249,7 @@ export default function MyProfilePage() {
 
   // ✅ Photo 2 upload state
   const fileInputRef2 = useRef<HTMLInputElement | null>(null);
-  const [photoFile2, setPhotoFile2] = useState<File | null>(null); // ✅ add
+  const [photoFile2, setPhotoFile2] = useState<File | null>(null);
   const [photoPreview2, setPhotoPreview2] = useState<string>("");
 
   const [form, setForm] = useState<FormState>({
@@ -258,7 +258,7 @@ export default function MyProfilePage() {
     city: "",
     stateUS: "",
     photo: "",
-    photo2: "", // ✅ add
+    photo2: "",
 
     relationshipIntent: "Intentional partnership",
     datingChallenge: "",
@@ -365,14 +365,56 @@ export default function MyProfilePage() {
     })();
   }, [userId]);
 
-  // ✅ Generic upload handler (Photo 1 or Photo 2)
-  async function onUploadPhoto(which: "photo" | "photo2") {
+  // ✅ helper: build the upsert payload from "current" values (with optional overrides)
+  function buildUpsertPayload(overrides?: Partial<{ photo: string; photo2: string }>) {
+    const ageNum = parseInt(form.age || "0", 10) || 0;
+
+    const identityPreview = buildIdentityPreview({
+      cultural: culturalSelected,
+      spiritual: spiritualSelected,
+      datingChallenge: form.datingChallenge,
+      personalTruth: form.personalTruth,
+    });
+
+    const photoValue = (overrides?.photo ?? form.photo).trim() || null;
+    const photo2Value = (overrides?.photo2 ?? form.photo2).trim() || null;
+
+    return {
+      owner_user_id: userId,
+
+      displayName: form.displayName.trim(),
+      age: ageNum,
+      city: form.city.trim(),
+      stateUS: form.stateUS.trim(),
+
+      // ✅ persist both slots
+      photo: photoValue,
+      photo2: photo2Value,
+
+      intention: form.relationshipIntent.trim(),
+      identityPreview,
+
+      culturalIdentity: culturalSelected,
+      spiritualFramework: spiritualSelected,
+      relationshipIntent: form.relationshipIntent.trim(),
+      datingChallenge: form.datingChallenge.trim() || null,
+      personalTruth: form.personalTruth.trim() || null,
+
+      tags: selectedTags,
+      isAvailable: !!form.isAvailable,
+    };
+  }
+
+  // ✅ Replace your onUploadPhoto() with this version (slot 1 or 2)
+  async function onUploadPhoto(slot: 1 | 2) {
     if (!userId) return;
 
-    const file = which === "photo" ? photoFile : photoFile2;
+    const file = slot === 1 ? photoFile : photoFile2;
     if (!file) return showToast("Choose a photo first.");
-    if (!file.type.startsWith("image/"))
-      return showToast("Please choose an image file.");
+
+    if (!file.type.startsWith("image/")) {
+      return showToast("Please choose an image file (jpg, png, webp).");
+    }
 
     setUploadingPhoto(true);
     setApiError(null);
@@ -380,20 +422,27 @@ export default function MyProfilePage() {
     try {
       const url = await apiUploadProfilePhoto(file);
 
-      setForm((prev) => ({ ...prev, [which]: url } as any));
-
-      if (which === "photo") {
+      // Update the correct slot in state + preview + clear file input
+      if (slot === 1) {
+        setForm((prev: any) => ({ ...prev, photo: url }));
         setPhotoFile(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
         setPhotoPreview(url);
-      }
-      if (which === "photo2") {
+      } else {
+        setForm((prev: any) => ({ ...prev, photo2: url }));
         setPhotoFile2(null);
         if (fileInputRef2.current) fileInputRef2.current.value = "";
         setPhotoPreview2(url);
       }
 
-      showToast("Photo uploaded. Now click Save profile.");
+      // ✅ AUTO-SAVE immediately so it persists
+      await apiUpsertProfile(
+        buildUpsertPayload(
+          slot === 1 ? { photo: url } : { photo2: url }
+        )
+      );
+
+      showToast("Photo uploaded & saved.");
     } catch (e: any) {
       setApiError(e?.message || "Photo upload failed.");
       showToast("Upload failed. See API notice.");
@@ -402,12 +451,14 @@ export default function MyProfilePage() {
     }
   }
 
-  // ✅ 2) Delete handler (works for Photo 1 or Photo 2)
+  // ✅ Delete handler (works for Photo 1 or Photo 2)
   async function onDeletePhoto(photoUrl: string, slot: 1 | 2) {
     if (!userId) return;
     if (!photoUrl) return;
 
-    const ok = window.confirm("Delete this photo? You can upload a new one after.");
+    const ok = window.confirm(
+      "Delete this photo? You can upload a new one after."
+    );
     if (!ok) return;
 
     setApiError(null);
@@ -459,37 +510,8 @@ export default function MyProfilePage() {
     setSaving(true);
     setApiError(null);
 
-    const identityPreview = buildIdentityPreview({
-      cultural: culturalSelected,
-      spiritual: spiritualSelected,
-      datingChallenge: form.datingChallenge,
-      personalTruth: form.personalTruth,
-    });
-
     try {
-      await apiUpsertProfile({
-        owner_user_id: userId,
-
-        displayName: form.displayName.trim(),
-        age: ageNum,
-        city: form.city.trim(),
-        stateUS: form.stateUS.trim(),
-        photo: form.photo.trim() || null,
-        photo2: form.photo2.trim() || null,
-
-        intention: form.relationshipIntent.trim(),
-        identityPreview,
-
-        culturalIdentity: culturalSelected,
-        spiritualFramework: spiritualSelected,
-        relationshipIntent: form.relationshipIntent.trim(),
-        datingChallenge: form.datingChallenge.trim() || null,
-        personalTruth: form.personalTruth.trim() || null,
-
-        tags: selectedTags,
-        isAvailable: !!form.isAvailable,
-      });
-
+      await apiUpsertProfile(buildUpsertPayload());
       showToast("Profile saved.");
     } catch (e: any) {
       setApiError(e?.message || "Could not save profile.");
@@ -744,7 +766,7 @@ export default function MyProfilePage() {
               </div>
 
               <div style={bigPhotoStyle}>
-                {(photoPreview || form.photo) ? (
+                {photoPreview || form.photo ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={photoPreview || form.photo}
@@ -764,7 +786,6 @@ export default function MyProfilePage() {
                 )}
               </div>
 
-              {/* ✅ 3) Delete button next to preview thumbnail */}
               {form.photo ? (
                 <div style={{ marginTop: 10 }}>
                   <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
@@ -835,7 +856,7 @@ export default function MyProfilePage() {
                       fileInputRef.current?.click();
                       return;
                     }
-                    onUploadPhoto("photo");
+                    onUploadPhoto(1);
                   }}
                   disabled={loadingExisting || uploadingPhoto}
                   style={{
@@ -862,8 +883,8 @@ export default function MyProfilePage() {
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {photoFile ? (
                     <>
-                      Selected: <b>{photoFile.name}</b> • After uploading, click{" "}
-                      <b>Save profile</b>.
+                      Selected: <b>{photoFile.name}</b> • Uploading will{" "}
+                      <b>auto-save</b>.
                     </>
                   ) : (
                     <>Click the button to choose a photo (jpg/png/webp).</>
@@ -892,7 +913,7 @@ export default function MyProfilePage() {
               </div>
 
               <div style={bigPhotoStyle}>
-                {(photoPreview2 || form.photo2) ? (
+                {photoPreview2 || form.photo2 ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={photoPreview2 || form.photo2}
@@ -914,7 +935,6 @@ export default function MyProfilePage() {
                 )}
               </div>
 
-              {/* ✅ 3) Delete button next to preview thumbnail (Photo 2) */}
               {form.photo2 ? (
                 <div style={{ marginTop: 10 }}>
                   <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
@@ -985,7 +1005,7 @@ export default function MyProfilePage() {
                       fileInputRef2.current?.click();
                       return;
                     }
-                    onUploadPhoto("photo2");
+                    onUploadPhoto(2);
                   }}
                   disabled={loadingExisting || uploadingPhoto}
                   style={{
@@ -1012,8 +1032,8 @@ export default function MyProfilePage() {
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {photoFile2 ? (
                     <>
-                      Selected: <b>{photoFile2.name}</b> • After uploading, click{" "}
-                      <b>Save profile</b>.
+                      Selected: <b>{photoFile2.name}</b> • Uploading will{" "}
+                      <b>auto-save</b>.
                     </>
                   ) : (
                     <>Click the button to choose a second photo (optional).</>
@@ -1072,11 +1092,8 @@ export default function MyProfilePage() {
               <div style={{ fontWeight: 700, marginBottom: 6 }}>
                 Cultural Identity (multi-select)
               </div>
-              <div
-                style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}
-              >
-                Choose what describes your cultural identity. You can select
-                multiple.
+              <div style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}>
+                Choose what describes your cultural identity. You can select multiple.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
                 {CULTURAL_IDENTITY_OPTIONS.map((label) => (
@@ -1096,9 +1113,7 @@ export default function MyProfilePage() {
               <div style={{ fontWeight: 700, marginBottom: 6 }}>
                 Spiritual Framework (multi-select)
               </div>
-              <div
-                style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}
-              >
+              <div style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}>
                 Choose what guides your life and love. You can select multiple.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
