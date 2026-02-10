@@ -277,6 +277,7 @@ export default function DiscoverPage() {
 
   const [userId, setUserId] = useState<string>("");
 
+  // NOTE: your UI below uses totalUnread; keeping name consistent
   const [totalUnread, setTotalUnread] = useState(0);
 
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
@@ -372,7 +373,11 @@ export default function DiscoverPage() {
       const now = Date.now();
       const msUntilReset = resetAt - now;
 
-      if (Number.isFinite(msUntilReset) && msUntilReset > 0 && msUntilReset < 24 * 60 * 60 * 1000) {
+      if (
+        Number.isFinite(msUntilReset) &&
+        msUntilReset > 0 &&
+        msUntilReset < 24 * 60 * 60 * 1000
+      ) {
         resetTimerRef.current = window.setTimeout(() => {
           refreshLikesStatus(uid).catch(() => {});
         }, msUntilReset + 1200);
@@ -398,11 +403,11 @@ export default function DiscoverPage() {
     }, 400);
   }
 
-  // refresh helper (requested)
+  // ✅ ADD: helper inside component (requested)
   async function refreshUnread(uid: string) {
     try {
-      const n = await apiGetUnreadTotal(uid);
-      setTotalUnread(n);
+      const total = await apiGetUnreadTotal(uid);
+      setTotalUnread(total);
     } catch {
       // ignore
     }
@@ -441,26 +446,14 @@ export default function DiscoverPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Fix: refresh unread on focus + visibility change
+  // ✅ UPDATED: use startUnreadAutoRefresh + initial refresh (requested)
   useEffect(() => {
     if (!userId) return;
 
-    // initial
+    const cleanup = startUnreadAutoRefresh(() => refreshUnread(userId));
     refreshUnread(userId);
 
-    // when you return to tab / page
-    const onFocus = () => refreshUnread(userId);
-    const onVis = () => {
-      if (!document.hidden) refreshUnread(userId);
-    };
-
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVis);
-
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
-    };
+    return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
