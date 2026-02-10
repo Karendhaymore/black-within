@@ -27,6 +27,7 @@ from sqlalchemy import (
     text,
     or_,
     desc,
+    func,  # ✅ REQUIRED for mark-read + unread_count
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
@@ -238,21 +239,6 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
-# ✅ UPDATED: Thread read receipts (per-user last read timestamp) + updated_at
-class ThreadRead(Base):
-    __tablename__ = "thread_reads"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    thread_id: Mapped[str] = mapped_column(String(60), index=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)
-    last_read_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-
-    __table_args__ = (
-        UniqueConstraint("thread_id", "user_id", name="uq_thread_reads_thread_user"),
-    )
-
-
 # -----------------------------
 # Premium entitlement (renamed to match Stripe webhook expectation)
 # -----------------------------
@@ -279,6 +265,26 @@ class ThreadUnlock(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),)
+
+
+# -----------------------------
+# ✅ NEW: ThreadRead support (model requested)
+# -----------------------------
+class ThreadRead(Base):
+    __tablename__ = "thread_reads"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    thread_id: Mapped[str] = mapped_column(String(60), index=True)
+
+    last_read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "thread_id", name="uq_thread_reads_user_thread"),
+    )
 
 
 # -----------------------------
@@ -360,30 +366,101 @@ def _auto_migrate_threads_messages_tables():
         conn.execute(text("""ALTER TABLE thread_unlocks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
 
 
-# ✅ NEW: thread_reads migration helper (as requested)
+# ✅ NEW: thread_reads migration helper (requested)
 def _auto_migrate_thread_reads_table():
+    """
+    Creates the desired thread_reads schema.
+
+    If an older thread_reads exists with SERIAL id, we replace it with the new schema:
+      - create thread_reads__new
+      - copy data
+      - drop old table
+      - rename
+    """
     with engine.begin() as conn:
+        # Ensure table exists (happy path)
         conn.execute(
             text(
                 """
             CREATE TABLE IF NOT EXISTS thread_reads (
-              id SERIAL PRIMARY KEY,
-              thread_id VARCHAR(60),
+              id VARCHAR(40) PRIMARY KEY,
               user_id VARCHAR(40),
-              last_read_at TIMESTAMP DEFAULT NOW(),
+              thread_id VARCHAR(60),
+              last_read_at TIMESTAMP NULL,
+              created_at TIMESTAMP DEFAULT NOW(),
               updated_at TIMESTAMP DEFAULT NOW(),
-              CONSTRAINT uq_thread_reads_thread_user UNIQUE (thread_id, user_id)
+              CONSTRAINT uq_thread_reads_user_thread UNIQUE (user_id, thread_id)
             );
         """
             )
         )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);"""))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_last_read_at ON thread_reads(last_read_at);"""))
-
-        # ✅ safety for older DBs that already had thread_reads without updated_at
-        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP DEFAULT NOW();"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);"""))
+        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP NULL;"""))
+        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"""))
         conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
+
+        # If the table already existed with an incompatible id type, rebuild it.
+        conn.execute(
+            text(
+                """
+            DO $$
+            DECLARE
+              id_type TEXT;
+              has_old_serial BOOLEAN := FALSE;
+            BEGIN
+              SELECT data_type INTO id_type
+              FROM information_schema.columns
+              WHERE table_name='thread_reads' AND column_name='id'
+              LIMIT 1;
+
+              IF id_type IS NOT NULL AND id_type <> 'character varying' THEN
+                has_old_serial := TRUE;
+              END IF;
+
+              IF has_old_serial THEN
+                -- Create new table in desired shape
+                EXECUTE '
+                  CREATE TABLE IF NOT EXISTS thread_reads__new (
+                    id VARCHAR(40) PRIMARY KEY,
+                    user_id VARCHAR(40),
+                    thread_id VARCHAR(60),
+                    last_read_at TIMESTAMP NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    CONSTRAINT uq_thread_reads_user_thread UNIQUE (user_id, thread_id)
+                  );
+                ';
+
+                -- Copy forward best-effort (generate new string ids)
+                EXECUTE '
+                  INSERT INTO thread_reads__new (id, user_id, thread_id, last_read_at, created_at, updated_at)
+                  SELECT
+                    substring(md5(random()::text || clock_timestamp()::text), 1, 40) as id,
+                    COALESCE(user_id::text, '''') as user_id,
+                    COALESCE(thread_id::text, '''') as thread_id,
+                    last_read_at,
+                    COALESCE(created_at, NOW()) as created_at,
+                    COALESCE(updated_at, NOW()) as updated_at
+                  FROM thread_reads
+                  ON CONFLICT (user_id, thread_id)
+                  DO UPDATE SET
+                    last_read_at = EXCLUDED.last_read_at,
+                    updated_at = EXCLUDED.updated_at;
+                ';
+
+                -- Swap tables
+                EXECUTE 'DROP TABLE thread_reads;';
+                EXECUTE 'ALTER TABLE thread_reads__new RENAME TO thread_reads;';
+
+                -- Recreate indexes
+                EXECUTE 'CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);';
+                EXECUTE 'CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);';
+              END IF;
+            END $$;
+        """
+            )
+        )
 
 
 def _auto_migrate_profiles_table():
@@ -432,7 +509,7 @@ def _auto_migrate_profiles_table():
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
 
-        # ✅ NEW: backfill NULLs so older rows behave as available by default
+        # ✅ backfill NULLs so older rows behave as available by default
         conn.execute(text("""UPDATE profiles SET is_available = TRUE WHERE is_available IS NULL;"""))
 
 
@@ -526,6 +603,7 @@ try:
 except Exception as e:
     print("AUTO_MIGRATE_THREADS_MESSAGES failed:", str(e))
 
+# ✅ NEW (requested): migrate thread_reads
 try:
     _auto_migrate_thread_reads_table()
 except Exception as e:
@@ -720,7 +798,7 @@ class MessageItem(BaseModel):
     created_at: str
 
 
-# ✅ UPDATED: include otherLastReadAt for "Seen"
+# ✅ include otherLastReadAt for "Seen"
 class MessagesResponse(BaseModel):
     items: List[MessageItem]
     otherLastReadAt: Optional[str] = None
@@ -759,17 +837,6 @@ class CreateUnlockSessionPayload(BaseModel):
     user_id: str
     target_profile_id: str
     thread_id: str
-
-
-# ✅ Backend: create/confirm POST /threads/mark-read (as requested)
-class ThreadMarkReadPayload(BaseModel):
-    user_id: str
-    thread_id: str
-
-
-# Backward-compat alias (if anything still imports MarkReadPayload name)
-class MarkReadPayload(ThreadMarkReadPayload):
-    pass
 
 
 # Accept BOTH camelCase and snake_case (frontend may send either)
@@ -1808,13 +1875,9 @@ def _ensure_thread_participant(thread: Thread, user_id: str) -> str:
     return other
 
 
-from sqlalchemy import func  # ✅ add near your other sqlalchemy imports
-
-
 # -----------------------------
 # Threads
 # -----------------------------
-
 class MarkReadPayload(BaseModel):
     user_id: str
     thread_id: str
@@ -1822,13 +1885,6 @@ class MarkReadPayload(BaseModel):
 
 @app.post("/threads/mark-read")
 def mark_thread_read(payload: MarkReadPayload):
-    """
-    Mark a thread read for this user.
-
-    ✅ Critical fix:
-    We set last_read_at to the latest message timestamp in that thread
-    (not just datetime.utcnow()), so unread_count cannot stay > 0.
-    """
     user_id = _ensure_user(payload.user_id)
     thread_id = (payload.thread_id or "").strip()
     if not thread_id:
@@ -1841,7 +1897,7 @@ def mark_thread_read(payload: MarkReadPayload):
 
         _ensure_thread_participant(thread, user_id)
 
-        # Latest message timestamp in this thread (could be None if no messages)
+        # mark read up to latest message timestamp in that thread
         latest_created_at = session.execute(
             select(func.max(Message.created_at)).where(Message.thread_id == thread_id)
         ).scalar_one()
@@ -1850,21 +1906,17 @@ def mark_thread_read(payload: MarkReadPayload):
         now = datetime.utcnow()
 
         tr = session.execute(
-            select(ThreadRead).where(
-                ThreadRead.user_id == user_id,
-                ThreadRead.thread_id == thread_id,
-            )
+            select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == thread_id)
         ).scalar_one_or_none()
 
         if tr:
-            # Only move forward
-            if (tr.last_read_at is None) or (read_at > tr.last_read_at):
+            if tr.last_read_at is None or read_at > tr.last_read_at:
                 tr.last_read_at = read_at
             tr.updated_at = now
         else:
             session.add(
                 ThreadRead(
-                    id=secrets.token_hex(16),
+                    id=secrets.token_hex(20)[:40],
                     user_id=user_id,
                     thread_id=thread_id,
                     last_read_at=read_at,
@@ -2004,14 +2056,13 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
                 .scalar_one_or_none()
             )
 
-            # ✅ My last read timestamp
+            # ✅ My last read timestamp (ThreadRead is per user/thread)
             my_read = session.execute(
                 select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == t.id)
             ).scalar_one_or_none()
-
             my_last_read_at = my_read.last_read_at if my_read else None
 
-            # ✅ Unread count (messages from other user after my last_read_at)
+            # ✅ Unread count: messages from the other user after my_last_read_at
             unread_count_q = select(func.count()).select_from(Message).where(
                 Message.thread_id == t.id,
                 Message.sender_user_id != user_id,
@@ -2065,43 +2116,6 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
 
 
 # -----------------------------
-# Thread read receipts
-# -----------------------------
-@app.post("/threads/mark-read")
-def mark_thread_read(payload: ThreadMarkReadPayload):
-    user_id = _ensure_user(payload.user_id)
-    thread_id = (payload.thread_id or "").strip()
-    if not thread_id:
-        raise HTTPException(status_code=400, detail="thread_id is required")
-
-    now = datetime.utcnow()
-
-    with Session(engine) as session:
-        thread = session.get(Thread, thread_id)
-        if not thread:
-            raise HTTPException(status_code=404, detail="Thread not found")
-
-        _ensure_thread_participant(thread, user_id)
-
-        existing = session.execute(
-            select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == thread_id)
-        ).scalar_one_or_none()
-
-        if existing:
-            existing.last_read_at = now
-            existing.updated_at = now
-        else:
-            session.add(ThreadRead(user_id=user_id, thread_id=thread_id, last_read_at=now, updated_at=now))
-
-        try:
-            session.commit()
-        except IntegrityError:
-            session.rollback()
-
-    return {"ok": True}
-
-
-# -----------------------------
 # Messages
 # -----------------------------
 @app.get("/messages", response_model=MessagesResponse)
@@ -2126,7 +2140,7 @@ def list_messages(
         other_read = session.execute(
             select(ThreadRead).where(ThreadRead.thread_id == thread_id, ThreadRead.user_id == other_user_id)
         ).scalar_one_or_none()
-        other_last_read_at = other_read.last_read_at.isoformat() if other_read else None
+        other_last_read_at = other_read.last_read_at.isoformat() if (other_read and other_read.last_read_at) else None
 
         rows = (
             session.execute(
