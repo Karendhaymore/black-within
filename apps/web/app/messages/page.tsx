@@ -297,18 +297,10 @@ function MessagesInner() {
         setStatus("ready");
 
         stopPolling();
-        if (a?.canMessage) {
-          pollRef.current = window.setInterval(async () => {
-            try {
-              const latest = await apiGetMessages(userId, threadId);
-              if (!cancelled) {
-                setMessages(latest.items || []);
-                setOtherLastReadAt(latest.otherLastReadAt || null);
-              }
-            } catch {
-              // ignore polling errors
-            }
-          }, 4000);
+       pollRef.current = window.setInterval(async () => {
+  ...
+}, 4000);
+
         }
       } catch (e: any) {
         setStatus("error");
