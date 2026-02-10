@@ -242,14 +242,17 @@ class Message(Base):
 class ThreadRead(Base):
     __tablename__ = "thread_reads"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    thread_id: Mapped[str] = mapped_column(String(60), index=True)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
-    last_read_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    thread_id: Mapped[str] = mapped_column(String(60), index=True)
+
+    last_read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
     __table_args__ = (
-        UniqueConstraint("thread_id", "user_id", name="uq_thread_reads_thread_user"),
+        UniqueConstraint("user_id", "thread_id", name="uq_thread_reads_user_thread"),
     )
 
 
