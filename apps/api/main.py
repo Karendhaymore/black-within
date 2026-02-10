@@ -142,6 +142,9 @@ class Profile(Base):
     state_us: Mapped[str] = mapped_column(String(80))
     photo: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # ✅ NEW: second photo field (requested)
+    photo2: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     identity_preview: Mapped[str] = mapped_column(String(500))
     intention: Mapped[str] = mapped_column(String(120))
 
@@ -491,6 +494,10 @@ def _auto_migrate_profiles_table():
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS city VARCHAR(80);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS state_us VARCHAR(80);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo VARCHAR(500);"""))
+
+        # ✅ NEW: add photo2 column (requested)
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo2 TEXT;"""))
+
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS identity_preview VARCHAR(500);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS intention VARCHAR(120);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tags_csv TEXT DEFAULT '[]';"""))
@@ -724,6 +731,9 @@ class ProfileItem(BaseModel):
     stateUS: str
     photo: Optional[str] = None
 
+    # ✅ NEW: second photo
+    photo2: Optional[str] = None
+
     identityPreview: str
     intention: str
     tags: List[str]
@@ -872,6 +882,10 @@ class UpsertMyProfilePayload(BaseModel):
     age: int
     city: str
     photo: Optional[str] = None
+
+    # ✅ NEW: accept second photo (requested)
+    photo2: Optional[str] = None
+
     intention: str
     tags: List[str] = []
 
@@ -891,7 +905,7 @@ class UpsertMyProfilePayload(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
-app = FastAPI(title="Black Within API", version="1.1.4")
+app = FastAPI(title="Black Within API", version="1.1.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1114,7 +1128,7 @@ def health():
         "freeLikesPerDay": FREE_LIKES_PER_DAY,
         "likesResetTestSeconds": LIKES_RESET_TEST_SECONDS,
         "corsOrigins": origins,
-        "version": "1.1.4",
+        "version": "1.1.5",
     }
 
 
@@ -1372,6 +1386,7 @@ def get_profile(profile_id: str):
             city=p.city,
             stateUS=p.state_us,
             photo=p.photo,
+            photo2=getattr(p, "photo2", None),
             identityPreview=p.identity_preview,
             intention=p.intention,
             tags=tags,
@@ -1449,6 +1464,7 @@ def list_profiles(
                     city=p.city,
                     stateUS=p.state_us,
                     photo=p.photo,
+                    photo2=getattr(p, "photo2", None),
                     identityPreview=p.identity_preview,
                     intention=p.intention,
                     tags=tags,
@@ -1479,12 +1495,16 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
         cultural_csv = json.dumps(cultural_list)
         spiritual_csv = json.dumps(spiritual_list)
 
+        photo1 = (payload.photo or "").strip() or None
+        photo2 = (payload.photo2 or "").strip() or None
+
         if existing:
             existing.display_name = display
             existing.age = int(payload.age)
             existing.city = payload.city.strip()
             existing.state_us = state
-            existing.photo = (payload.photo or "").strip() or None
+            existing.photo = photo1
+            existing.photo2 = photo2
             existing.identity_preview = preview
             existing.intention = payload.intention.strip()
             existing.tags_csv = tags_csv
@@ -1509,7 +1529,8 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
                     age=int(payload.age),
                     city=payload.city.strip(),
                     state_us=state,
-                    photo=(payload.photo or "").strip() or None,
+                    photo=photo1,
+                    photo2=photo2,
                     identity_preview=preview,
                     intention=payload.intention.strip(),
                     tags_csv=tags_csv,
@@ -1538,6 +1559,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             city=p.city,
             stateUS=p.state_us,
             photo=p.photo,
+            photo2=getattr(p, "photo2", None),
             identityPreview=p.identity_preview,
             intention=p.intention,
             tags=tags,
@@ -1618,7 +1640,8 @@ def profiles_gate(user_id: str = Query(...)):
         if not p:
             return ProfileGateResponse(hasProfile=False, hasPhoto=False, profileId=None)
 
-        has_photo = bool((p.photo or "").strip())
+        # ✅ Treat either photo or photo2 as satisfying the gate
+        has_photo = bool((p.photo or "").strip() or (getattr(p, "photo2", "") or "").strip())
         return ProfileGateResponse(hasProfile=True, hasPhoto=has_photo, profileId=p.id)
 
 
@@ -1805,6 +1828,7 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
                     city=p.city,
                     stateUS=p.state_us,
                     photo=p.photo,
+                    photo2=getattr(p, "photo2", None),
                     identityPreview=p.identity_preview,
                     intention=p.intention,
                     tags=tags,
@@ -2195,8 +2219,10 @@ def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None
     if not p:
         raise HTTPException(status_code=403, detail="photo_required")
 
-    photo = (p.photo or "").strip()
-    if not photo:
+    # ✅ Treat either photo or photo2 as satisfying the requirement
+    photo1 = (p.photo or "").strip()
+    photo2 = (getattr(p, "photo2", "") or "").strip()
+    if not (photo1 or photo2):
         raise HTTPException(status_code=403, detail="photo_required")
 
 
@@ -2270,7 +2296,7 @@ def send_message(payload: MessageCreatePayload):
 
         _ensure_thread_participant(thread, user_id)
 
-        # ✅ NEW: Require profile photo before sending messages (unless AUTH_PREVIEW_MODE)
+        # ✅ Require profile photo before sending messages (unless AUTH_PREVIEW_MODE)
         _require_profile_photo_for_messaging(session, user_id)
 
         can_msg, is_premium, reason = _can_message_thread(session, user_id, thread_id)
