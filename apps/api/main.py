@@ -12,8 +12,8 @@ from typing import List, Optional, Dict, Any, Tuple
 import stripe
 from fastapi import FastAPI, HTTPException, Query, Request, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from fastapi.staticfiles import StaticFiles
 
 from sqlalchemy import (
     create_engine,
@@ -99,9 +99,9 @@ if STRIPE_SECRET_KEY:
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
 # -----------------------------
-# Uploads (for profile photos)
+# Uploads (for profile photos) ✅ FIX: persistent disk on Render
 # -----------------------------
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = "/var/data/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -1574,7 +1574,7 @@ def upsert_profile_alias(payload: UpsertMyProfilePayload):
 
 
 # -----------------------------
-# ✅ NEW: Photo upload route (place near other profile routes)
+# ✅ Photo upload route ✅ FIXED: saves to /var/data/uploads and serves via /photos/{filename}
 # -----------------------------
 @app.post("/upload/photo")
 async def upload_photo(file: UploadFile = File(...)):
@@ -1586,10 +1586,18 @@ async def upload_photo(file: UploadFile = File(...)):
     file_path = os.path.join(UPLOAD_DIR, filename)
 
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(await file.read())
 
     # Return a URL the frontend can use
-    return {"url": f"{BASE_URL}/uploads/{filename}"}
+    return {"url": f"{BASE_URL}/photos/{filename}"}
+
+
+@app.get("/photos/{filename}")
+def get_photo(filename: str):
+    filename = (filename or "").strip()
+    if not filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    return FileResponse(os.path.join(UPLOAD_DIR, filename))
 
 
 # -----------------------------
@@ -2515,9 +2523,3 @@ async def stripe_webhook(request: Request):
             return {"status": "success"}
 
     return {"status": "ignored"}
-
-
-# -----------------------------
-# ✅ Static file serving (must be at the bottom)
-# -----------------------------
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
