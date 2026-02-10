@@ -160,9 +160,9 @@ class Profile(Base):
     age: Mapped[int] = mapped_column(Integer)
     city: Mapped[str] = mapped_column(String(80))
     state_us: Mapped[str] = mapped_column(String(80))
-    photo: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
-    # ✅ NEW: second photo field (requested)
+    # ✅ Per your request: store both photo fields as TEXT (URLs can be long)
+    photo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     photo2: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     identity_preview: Mapped[str] = mapped_column(String(500))
@@ -506,6 +506,7 @@ def _auto_migrate_profiles_table():
     """
     create_all() does NOT modify existing tables.
     This safely adds any missing columns to profiles so /profiles won't 500.
+    Also ensures photo + photo2 are TEXT (per request).
     """
     with engine.begin() as conn:
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(40);"""))
@@ -513,10 +514,44 @@ def _auto_migrate_profiles_table():
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS age INTEGER;"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS city VARCHAR(80);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS state_us VARCHAR(80);"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo VARCHAR(500);"""))
 
-        # ✅ NEW: add photo2 column (requested)
+        # ✅ Ensure photo exists (use TEXT going forward)
+        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo TEXT;"""))
+
+        # ✅ ensure photo2 exists
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo2 TEXT;"""))
+
+        # ✅ If photo previously existed as VARCHAR(500), widen it to TEXT (safe)
+        conn.execute(
+            text(
+                """
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='profiles' AND column_name='photo'
+              ) THEN
+                BEGIN
+                  ALTER TABLE profiles ALTER COLUMN photo TYPE TEXT;
+                EXCEPTION WHEN others THEN
+                  -- ignore if it can't be altered (shouldn't happen on Postgres, but stay safe)
+                END;
+              END IF;
+
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='profiles' AND column_name='photo2'
+              ) THEN
+                BEGIN
+                  ALTER TABLE profiles ALTER COLUMN photo2 TYPE TEXT;
+                EXCEPTION WHEN others THEN
+                  -- ignore
+                END;
+              END IF;
+            END $$;
+        """
+            )
+        )
 
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS identity_preview VARCHAR(500);"""))
         conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS intention VARCHAR(120);"""))
@@ -756,8 +791,6 @@ class ProfileItem(BaseModel):
     city: str
     stateUS: str
     photo: Optional[str] = None
-
-    # ✅ NEW: second photo
     photo2: Optional[str] = None
 
     identityPreview: str
@@ -908,9 +941,7 @@ class UpsertMyProfilePayload(BaseModel):
     age: int
     city: str
     photo: Optional[str] = None
-
-    # ✅ NEW: accept second photo (requested)
-    photo2: Optional[str] = None
+    photo2: Optional[str] = None  # ✅ required for 2nd photo persistence
 
     intention: str
     tags: List[str] = []
@@ -1529,8 +1560,11 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             existing.age = int(payload.age)
             existing.city = payload.city.strip()
             existing.state_us = state
+
+            # ✅ MUST assign both, or UI “uploads” won’t persist
             existing.photo = photo1
             existing.photo2 = photo2
+
             existing.identity_preview = preview
             existing.intention = payload.intention.strip()
             existing.tags_csv = tags_csv
