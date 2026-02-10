@@ -1,9 +1,7 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
@@ -46,6 +44,13 @@ type FormState = {
   personalTruth: string;
 
   isAvailable: boolean;
+};
+
+type UploadPhotoResponse = {
+  photoUrl?: string;
+  url?: string;
+  photo?: string;
+  ok?: boolean;
 };
 
 const RELATIONSHIP_INTENTS = [
@@ -138,6 +143,26 @@ async function apiUpsertProfile(payload: any) {
   return res.json();
 }
 
+// ✅ NEW: upload a photo file -> returns a URL you can store in profile.photo
+async function apiUploadProfilePhoto(userId: string, file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append("user_id", userId);
+  fd.append("file", file);
+
+  const res = await fetch(`${API_BASE}/upload/photo`, {
+    method: "POST",
+    body: fd,
+  });
+
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+
+  const json = (await res.json()) as UploadPhotoResponse;
+
+  const url = (json.photoUrl || json.url || json.photo || "").trim();
+  if (!url) throw new Error("Upload succeeded but no photo URL was returned.");
+  return url;
+}
+
 function Chip({
   label,
   selected,
@@ -183,16 +208,18 @@ function buildIdentityPreview(args: {
   return parts.join("\n\n");
 }
 
-function MyProfilePageInner() {
+export default function MyProfilePage() {
   const [userId, setUserId] = useState<string>("");
-  const sp = useSearchParams();
-  const reason = sp.get("reason") || "";
- 
+
   const [loadingExisting, setLoadingExisting] = useState<boolean>(true);
   const [saving, setSaving] = useState(false);
 
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // ✅ NEW: photo upload state
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const [form, setForm] = useState<FormState>({
     displayName: "",
@@ -212,13 +239,10 @@ function MyProfilePageInner() {
   const [spiritualSelected, setSpiritualSelected] = useState<string[]>([]);
 
   const selectedTags = useMemo(() => {
-    // Tags are used for filters in Discover. Keep them short and recognizable.
-    // We'll store the user's chosen identity/spiritual items as tags (up to 25).
     const combined = [...culturalSelected, ...spiritualSelected]
       .map((x) => x.trim())
       .filter(Boolean);
 
-    // Remove duplicates while preserving order
     const seen = new Set<string>();
     const deduped: string[] = [];
     for (const t of combined) {
@@ -243,7 +267,7 @@ function MyProfilePageInner() {
     setList(list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
   }
 
-  // ✅ Auth guard (same pattern as Discover)
+  // ✅ Auth guard
   useEffect(() => {
     const uid = getLoggedInUserId();
     if (!uid) {
@@ -253,7 +277,7 @@ function MyProfilePageInner() {
     setUserId(uid);
   }, []);
 
-  // ✅ Load existing profile (if it exists)
+  // ✅ Load existing profile
   useEffect(() => {
     if (!userId) return;
 
@@ -261,8 +285,6 @@ function MyProfilePageInner() {
       setLoadingExisting(true);
       setApiError(null);
       try {
-        // Since /profiles excludes owner when you pass exclude_owner_user_id,
-        // we DO NOT pass that here. We'll just fetch the list and find ours.
         const all = await apiListProfiles();
         const mine = all.find((p) => p.owner_user_id === userId);
 
@@ -292,6 +314,35 @@ function MyProfilePageInner() {
     })();
   }, [userId]);
 
+  // ✅ NEW: upload photo handler
+  async function onUploadPhoto() {
+    if (!userId) return;
+    if (!photoFile) return showToast("Choose a photo first.");
+
+    // optional: basic file validation
+    if (!photoFile.type.startsWith("image/")) {
+      return showToast("Please choose an image file (jpg, png, webp).");
+    }
+
+    setUploadingPhoto(true);
+    setApiError(null);
+
+    try {
+      const url = await apiUploadProfilePhoto(userId, photoFile);
+
+      // put the returned URL into the profile form
+      setForm((prev) => ({ ...prev, photo: url }));
+      setPhotoFile(null);
+
+      showToast("Photo uploaded. Now click Save profile.");
+    } catch (e: any) {
+      setApiError(e?.message || "Photo upload failed.");
+      showToast("Upload failed. See API notice.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
   async function onSave() {
     if (!userId) return;
 
@@ -302,7 +353,6 @@ function MyProfilePageInner() {
     if (!form.stateUS.trim()) return showToast("Please add your state.");
     if (!form.relationshipIntent.trim()) return showToast("Please select a Relationship Intent.");
 
-    // You wanted at least 1 selection to keep the vibe aligned
     if (culturalSelected.length === 0)
       return showToast("Please select at least one Cultural Identity option.");
     if (spiritualSelected.length === 0)
@@ -328,11 +378,9 @@ function MyProfilePageInner() {
         stateUS: form.stateUS.trim(),
         photo: form.photo.trim() || null,
 
-        // keep existing Discover usage
         intention: form.relationshipIntent.trim(),
         identityPreview,
 
-        // NEW richer fields your backend supports
         culturalIdentity: culturalSelected,
         spiritualFramework: spiritualSelected,
         relationshipIntent: form.relationshipIntent.trim(),
@@ -388,9 +436,7 @@ function MyProfilePageInner() {
 
             <div style={{ marginTop: "0.75rem", color: "#777", fontSize: "0.92rem" }}>
               Your user id: <code>{userId || "..."}</code>
-              {loadingExisting ? (
-                <span style={{ marginLeft: 10 }}>(loading your profile…)</span>
-              ) : null}
+              {loadingExisting ? <span style={{ marginLeft: 10 }}>(loading your profile…)</span> : null}
             </div>
           </div>
 
@@ -456,42 +502,6 @@ function MyProfilePageInner() {
             </Link>
           </div>
         </div>
-        {reason === "photo_required" ? (
-          <div
-            style={{
-              marginTop: "0.9rem",
-              padding: "0.95rem",
-              borderRadius: 14,
-              border: "1px solid #ffe0b2",
-              background: "#fff8ee",
-              color: "#5a3b00",
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ fontWeight: 800 }}>
-              Upload a profile photo to message members
-            </div>
-
-            <a
-              href="#photo"
-              style={{
-                padding: "0.65rem 0.95rem",
-                borderRadius: 12,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "white",
-                textDecoration: "none",
-                color: "inherit",
-                fontWeight: 800,
-              }}
-            >
-              Add photo now
-            </a>
-          </div>
-        ) : null}
 
         {apiError && (
           <div
@@ -530,12 +540,7 @@ function MyProfilePageInner() {
               <input
                 value={form.displayName}
                 onChange={(e) => onChange("displayName", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                 placeholder="e.g., NubianGrace"
                 disabled={loadingExisting}
               />
@@ -546,12 +551,7 @@ function MyProfilePageInner() {
               <input
                 value={form.age}
                 onChange={(e) => onChange("age", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                 placeholder="e.g., 31"
                 disabled={loadingExisting}
               />
@@ -563,12 +563,7 @@ function MyProfilePageInner() {
                 <input
                   value={form.city}
                   onChange={(e) => onChange("city", e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "0.7rem",
-                    borderRadius: 10,
-                    border: "1px solid #ccc",
-                  }}
+                  style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                   placeholder="e.g., Atlanta"
                   disabled={loadingExisting}
                 />
@@ -579,75 +574,69 @@ function MyProfilePageInner() {
                 <input
                   value={form.stateUS}
                   onChange={(e) => onChange("stateUS", e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "0.7rem",
-                    borderRadius: 10,
-                    border: "1px solid #ccc",
-                  }}
+                  style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                   placeholder="e.g., GA"
                   disabled={loadingExisting}
                 />
               </label>
             </div>
 
-           <label>
-  <div style={{ fontWeight: 600, marginBottom: 6 }}>Profile Photo</div>
+            {/* ✅ NEW: Photo upload UI + preview */}
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Profile Photo</div>
 
-  {form.photo && (
-    <img
-      src={form.photo}
-      alt="Profile"
-      style={{
-        width: 120,
-        height: 120,
-        objectFit: "cover",
-        borderRadius: 12,
-        marginBottom: 10,
-        border: "1px solid #ddd",
-      }}
-    />
-  )}
+              {form.photo ? (
+                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={form.photo}
+                    alt="Profile photo"
+                    style={{ width: 64, height: 64, borderRadius: 14, objectFit: "cover", border: "1px solid #ddd" }}
+                  />
+                  <div style={{ fontSize: 13, color: "#666", wordBreak: "break-all" }}>{form.photo}</div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: "#666", marginBottom: 10 }}>
+                  No photo uploaded yet.
+                </div>
+              )}
 
-  <input
-    type="file"
-    accept="image/*"
-    onChange={async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                  disabled={loadingExisting || uploadingPhoto}
+                />
 
-      const fd = new FormData();
-      fd.append("file", file);
+                <button
+                  type="button"
+                  onClick={onUploadPhoto}
+                  disabled={loadingExisting || uploadingPhoto || !photoFile}
+                  style={{
+                    padding: "0.6rem 0.9rem",
+                    borderRadius: 10,
+                    border: "1px solid #ccc",
+                    background: uploadingPhoto ? "#f5f5f5" : "white",
+                    cursor: uploadingPhoto ? "not-allowed" : "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  {uploadingPhoto ? "Uploading..." : "Upload Photo"}
+                </button>
 
-      try {
-        const res = await fetch(`${API_BASE}/upload/photo`, {
-          method: "POST",
-          body: fd,
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Upload failed");
-
-        onChange("photo", data.url);
-      } catch (err) {
-        alert("Upload failed");
-      }
-    }}
-  />
-</label>
-
+                <span style={{ fontSize: 12, color: "#777" }}>
+                  After uploading, click <b>Save profile</b>.
+                </span>
+              </div>
+            </div>
 
             <label>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Relationship Intent</div>
               <select
                 value={form.relationshipIntent}
                 onChange={(e) => onChange("relationshipIntent", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc" }}
                 disabled={loadingExisting}
               >
                 {RELATIONSHIP_INTENTS.map((opt) => (
@@ -709,13 +698,7 @@ function MyProfilePageInner() {
               <textarea
                 value={form.datingChallenge}
                 onChange={(e) => onChange("datingChallenge", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                  minHeight: 90,
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc", minHeight: 90 }}
                 placeholder="Share what you’ve experienced (brief is fine)."
                 disabled={loadingExisting}
               />
@@ -726,13 +709,7 @@ function MyProfilePageInner() {
               <textarea
                 value={form.personalTruth}
                 onChange={(e) => onChange("personalTruth", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                  minHeight: 90,
-                }}
+                style={{ width: "100%", padding: "0.7rem", borderRadius: 10, border: "1px solid #ccc", minHeight: 90 }}
                 placeholder="Your truth. Your standard. Your vibe."
                 disabled={loadingExisting}
               />
@@ -763,12 +740,5 @@ function MyProfilePageInner() {
         </div>
       </div>
     </main>
-  );
-}
-export default function MyProfilePage() {
-  return (
-    <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
-      <MyProfilePageInner />
-    </Suspense>
   );
 }
