@@ -1558,6 +1558,28 @@ def upsert_profile_alias(payload: UpsertMyProfilePayload):
 
 
 # -----------------------------
+# Discover gate: require profile photo
+# -----------------------------
+class ProfileGateResponse(BaseModel):
+    hasProfile: bool
+    hasPhoto: bool
+    profileId: Optional[str] = None
+
+
+@app.get("/profiles/gate", response_model=ProfileGateResponse)
+def profiles_gate(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+
+    with Session(engine) as session:
+        p = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
+        if not p:
+            return ProfileGateResponse(hasProfile=False, hasPhoto=False, profileId=None)
+
+        has_photo = bool((p.photo or "").strip())
+        return ProfileGateResponse(hasProfile=True, hasPhoto=has_photo, profileId=p.id)
+
+
+# -----------------------------
 # Saved profiles
 # -----------------------------
 @app.get("/saved", response_model=IdListResponse)
