@@ -166,6 +166,19 @@ async function apiUploadProfilePhoto(file: File): Promise<string> {
   return url;
 }
 
+// ✅ 1) Delete photo API helper
+async function apiDeleteProfilePhoto(
+  userId: string,
+  photoUrl: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/photos/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, photo_url: photoUrl }),
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+}
+
 function Chip({
   label,
   selected,
@@ -320,7 +333,7 @@ export default function MyProfilePage() {
             city: mine.city || "",
             stateUS: mine.stateUS || "",
             photo: (mine.photo as string) || "",
-            photo2: (mine.photo2 as string) || "", // ✅ add
+            photo2: (mine.photo2 as string) || "",
 
             relationshipIntent:
               mine.relationshipIntent ||
@@ -389,6 +402,43 @@ export default function MyProfilePage() {
     }
   }
 
+  // ✅ 2) Delete handler (works for Photo 1 or Photo 2)
+  async function onDeletePhoto(photoUrl: string, slot: 1 | 2) {
+    if (!userId) return;
+    if (!photoUrl) return;
+
+    const ok = window.confirm("Delete this photo? You can upload a new one after.");
+    if (!ok) return;
+
+    setApiError(null);
+
+    try {
+      await apiDeleteProfilePhoto(userId, photoUrl);
+
+      // Clear the correct slot in your form state
+      setForm((prev: any) => {
+        if (slot === 1) return { ...prev, photo: "" };
+        return { ...prev, photo2: "" };
+      });
+
+      // Clear preview + any selected file for that slot
+      if (slot === 1) {
+        setPhotoPreview("");
+        setPhotoFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } else {
+        setPhotoPreview2("");
+        setPhotoFile2(null);
+        if (fileInputRef2.current) fileInputRef2.current.value = "";
+      }
+
+      showToast("Photo deleted. Now click Save profile.");
+    } catch (e: any) {
+      setApiError(e?.message || "Could not delete photo.");
+      showToast("Delete failed. See API notice.");
+    }
+  }
+
   async function onSave() {
     if (!userId) return;
 
@@ -425,7 +475,7 @@ export default function MyProfilePage() {
         city: form.city.trim(),
         stateUS: form.stateUS.trim(),
         photo: form.photo.trim() || null,
-        photo2: form.photo2.trim() || null, // ✅ add
+        photo2: form.photo2.trim() || null,
 
         intention: form.relationshipIntent.trim(),
         identityPreview,
@@ -689,7 +739,9 @@ export default function MyProfilePage() {
 
             {/* ✅ Photo 1 block */}
             <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Profile Photo</div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                Profile Photo
+              </div>
 
               <div style={bigPhotoStyle}>
                 {(photoPreview || form.photo) ? (
@@ -711,6 +763,44 @@ export default function MyProfilePage() {
                   </div>
                 )}
               </div>
+
+              {/* ✅ 3) Delete button next to preview thumbnail */}
+              {form.photo ? (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={form.photo}
+                      alt="Photo 1"
+                      style={{
+                        width: 64,
+                        height: 64,
+                        borderRadius: 14,
+                        objectFit: "cover",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onDeletePhoto(form.photo, 1)}
+                      disabled={loadingExisting || uploadingPhoto}
+                      style={{
+                        padding: "0.55rem 0.8rem",
+                        borderRadius: 10,
+                        border: "1px solid #ccc",
+                        background: "white",
+                        cursor:
+                          loadingExisting || uploadingPhoto
+                            ? "not-allowed"
+                            : "pointer",
+                        fontWeight: 700,
+                        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               <input
                 ref={fileInputRef}
@@ -823,6 +913,44 @@ export default function MyProfilePage() {
                   </div>
                 )}
               </div>
+
+              {/* ✅ 3) Delete button next to preview thumbnail (Photo 2) */}
+              {form.photo2 ? (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={form.photo2}
+                      alt="Photo 2"
+                      style={{
+                        width: 64,
+                        height: 64,
+                        borderRadius: 14,
+                        objectFit: "cover",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onDeletePhoto(form.photo2, 2)}
+                      disabled={loadingExisting || uploadingPhoto}
+                      style={{
+                        padding: "0.55rem 0.8rem",
+                        borderRadius: 10,
+                        border: "1px solid #ccc",
+                        background: "white",
+                        cursor:
+                          loadingExisting || uploadingPhoto
+                            ? "not-allowed"
+                            : "pointer",
+                        fontWeight: 700,
+                        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               <input
                 ref={fileInputRef2}
