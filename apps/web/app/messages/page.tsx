@@ -25,7 +25,7 @@ type MessageItem = {
   created_at: string;
 };
 
-// ✅ UPDATED: includes otherLastReadAt
+// includes otherLastReadAt
 type MessagesResponse = {
   items: MessageItem[];
   otherLastReadAt?: string | null;
@@ -100,7 +100,6 @@ async function apiMessagingAccess(userId: string, threadId: string): Promise<Mes
   return (await res.json()) as MessagingAccessResponse;
 }
 
-// ✅ UPDATED: return full response (items + otherLastReadAt)
 async function apiGetMessages(userId: string, threadId: string): Promise<MessagesResponse> {
   const url =
     `${API_BASE}/messages` +
@@ -148,9 +147,7 @@ async function apiCheckoutPremium(userId: string): Promise<CheckoutSessionRespon
   return (await res.json()) as CheckoutSessionResponse;
 }
 
-// -----------------------------
-// STEP 3 — Add API call (photo only)
-// -----------------------------
+// photo fetch (by profileId)
 async function apiGetProfilePhoto(profileId: string): Promise<string | null> {
   const res = await fetch(`${API_BASE}/profiles/${encodeURIComponent(profileId)}`, {
     cache: "no-store",
@@ -160,9 +157,7 @@ async function apiGetProfilePhoto(profileId: string): Promise<string | null> {
   return json?.photo || null;
 }
 
-// -----------------------------
-// ✅ NEW: Mark thread read
-// -----------------------------
+// mark thread read (best effort)
 async function apiMarkThreadRead(userId: string, threadId: string) {
   try {
     await fetch(`${API_BASE}/threads/mark-read`, {
@@ -198,11 +193,9 @@ function MessagesInner() {
     }
   }, [threadId, router]);
 
-  if (!threadId) {
-    return null; // or a tiny "Redirecting..." UI
-  }
+  if (!threadId) return null;
 
-  // 🧩 STEP 1 — Read withProfileId from URL
+  // Read from URL
   const withName = sp.get("with") || "";
   const withProfileId = sp.get("withProfileId") || "";
 
@@ -214,10 +207,7 @@ function MessagesInner() {
   const [text, setText] = useState("");
   const [err, setErr] = useState<string>("");
 
-  // 🧩 STEP 2 — Add state for the photo
   const [withPhoto, setWithPhoto] = useState<string | null>(null);
-
-  // ✅ NEW: otherLastReadAt state
   const [otherLastReadAt, setOtherLastReadAt] = useState<string | null>(null);
 
   const pollRef = useRef<number | null>(null);
@@ -265,13 +255,12 @@ function MessagesInner() {
     let cancelled = false;
 
     async function load() {
-      // threadId is guaranteed by redirect guard above
       if (!userId) {
         window.location.href = "/auth";
         return;
       }
 
-      // ✅ Call mark-read when the thread opens (best-effort)
+      // mark read on open (best effort)
       apiMarkThreadRead(userId, threadId);
 
       setStatus("loading");
@@ -281,13 +270,12 @@ function MessagesInner() {
         const a = await refreshAll(userId);
         if (cancelled) return;
 
-        // 🧩 STEP 4 — Fetch the photo on load (after refreshAll)
+        // fetch other person's photo by profile id
         if (withProfileId) {
           try {
             const photo = await apiGetProfilePhoto(withProfileId);
             if (!cancelled) setWithPhoto(photo);
           } catch {
-            // ignore photo errors
             if (!cancelled) setWithPhoto(null);
           }
         } else {
@@ -297,10 +285,20 @@ function MessagesInner() {
         setStatus("ready");
 
         stopPolling();
-       pollRef.current = window.setInterval(async () => {
-  ...
-}, 4000);
 
+        // Poll only when canMessage (your current intent)
+        if (a?.canMessage) {
+          pollRef.current = window.setInterval(async () => {
+            try {
+              const latest = await apiGetMessages(userId, threadId);
+              if (!cancelled) {
+                setMessages(latest.items || []);
+                setOtherLastReadAt(latest.otherLastReadAt || null);
+              }
+            } catch {
+              // ignore polling errors
+            }
+          }, 4000);
         }
       } catch (e: any) {
         setStatus("error");
@@ -324,7 +322,7 @@ function MessagesInner() {
 
   const locked = !!access && !access.canMessage;
 
-  // ✅ Find the last message you sent + compute Seen/Sent
+  // Find last message YOU sent
   const lastSentByMe = useMemo(() => {
     const uid = userId || "";
     return [...messages].filter((m) => (m.sender_user_id || "") === uid).slice(-1)[0];
@@ -373,9 +371,7 @@ function MessagesInner() {
 
     setErr("");
     try {
-      // When user refreshes, mark read again (best-effort)
       apiMarkThreadRead(userId, threadId);
-
       const a = await refreshAll(userId);
 
       stopPolling();
@@ -555,19 +551,13 @@ function MessagesInner() {
                 Speak with intention.
               </h1>
 
-              {/* 🧩 STEP 5 — Render avatar in header */}
               <div style={{ ...subText, display: "flex", alignItems: "center", gap: 8 }}>
                 {withPhoto ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={withPhoto}
                     alt={withName}
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: "50%",
-                      objectFit: "cover",
-                    }}
+                    style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover" }}
                   />
                 ) : (
                   <div
@@ -644,22 +634,10 @@ function MessagesInner() {
                       </div>
 
                       {!PREVIEW_MODE ? (
-                        <div
-                          style={{
-                            marginTop: 12,
-                            display: "flex",
-                            gap: 10,
-                            flexWrap: "wrap",
-                            alignItems: "center",
-                          }}
-                        >
+                        <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                           <button
                             onClick={handlePremium}
-                            style={{
-                              ...pillBtn,
-                              background: "#0a5411",
-                              border: "1px solid #0a5411",
-                            }}
+                            style={{ ...pillBtn, background: "#0a5411", border: "1px solid #0a5411" }}
                           >
                             Go Premium — $11.22/month
                           </button>
@@ -699,17 +677,10 @@ function MessagesInner() {
                     {messages.map((m) => {
                       const mine = (m.sender_user_id || "") === (userId || "");
                       const ts = formatTs(m.created_at || "");
-
                       const isLastSentByMe = mine && lastSentByMe && String(m.id) === String(lastSentByMe.id);
 
                       return (
-                        <div
-                          key={String(m.id)}
-                          style={{
-                            alignSelf: mine ? "flex-end" : "flex-start",
-                            maxWidth: "85%",
-                          }}
-                        >
+                        <div key={String(m.id)} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "85%" }}>
                           <div
                             style={{
                               padding: "10px 12px",
@@ -726,7 +697,6 @@ function MessagesInner() {
                             <div style={{ fontSize: 15, lineHeight: 1.45 }}>{m.body}</div>
                           </div>
 
-                          {/* ✅ Seen/Sent under your last sent message */}
                           {mine && isLastSentByMe ? (
                             <div style={{ fontSize: 12, opacity: 0.65, marginTop: 4, textAlign: "right" }}>
                               {seen ? "Seen" : "Sent"}
@@ -767,9 +737,7 @@ function MessagesInner() {
               </div>
 
               {err ? (
-                <div style={{ marginTop: 12, color: "#b00020", whiteSpace: "pre-wrap", fontWeight: 700 }}>
-                  {err}
-                </div>
+                <div style={{ marginTop: 12, color: "#b00020", whiteSpace: "pre-wrap", fontWeight: 700 }}>{err}</div>
               ) : null}
             </>
           ) : null}
