@@ -166,6 +166,16 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
 type ThreadListItem = {
   thread_id: string;
   other_user_id: string;
+
+  // optional enrichment (your API may include these)
+  other_profile_id?: string | null;
+  other_display_name?: string | null;
+  other_photo?: string | null;
+
+  last_message_text?: string | null;
+  last_message_at?: string | null;
+  updated_at?: string | null;
+
   unread_count?: number;
 };
 
@@ -184,6 +194,31 @@ async function apiGetThreads(userId: string): Promise<ThreadListItem[]> {
 async function apiGetUnreadTotal(userId: string): Promise<number> {
   const items = await apiGetThreads(userId);
   return items.reduce((sum, t) => sum + (Number(t.unread_count) || 0), 0);
+}
+
+/**
+ * Call this inside your component useEffect to keep unread accurate.
+ * Example usage:
+ *   useEffect(() => {
+ *     if (!userId) return;
+ *     const cleanup = startUnreadAutoRefresh(() => refreshUnread(userId));
+ *     refreshUnread(userId);
+ *     return cleanup;
+ *   }, [userId]);
+ */
+function startUnreadAutoRefresh(refreshFn: () => void) {
+  const onFocus = () => refreshFn();
+  const onVis = () => {
+    if (document.visibilityState === "visible") refreshFn();
+  };
+
+  window.addEventListener("focus", onFocus);
+  document.addEventListener("visibilitychange", onVis);
+
+  return () => {
+    window.removeEventListener("focus", onFocus);
+    document.removeEventListener("visibilitychange", onVis);
+  };
 }
 
 /**
