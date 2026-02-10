@@ -17,6 +17,7 @@ type ProfileItem = {
   city: string;
   stateUS: string;
   photo?: string | null;
+  photo2?: string | null; // ✅ add
 
   identityPreview: string;
   intention: string;
@@ -38,6 +39,7 @@ type FormState = {
   city: string;
   stateUS: string;
   photo: string;
+  photo2: string; // ✅ add
 
   relationshipIntent: string;
   datingChallenge: string;
@@ -226,11 +228,16 @@ export default function MyProfilePage() {
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  // ✅ Photo upload state (custom button + preview)
+  // ✅ Photo upload state (custom button + preview) - Photo 1
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  // ✅ Photo 2 upload state
+  const fileInputRef2 = useRef<HTMLInputElement | null>(null);
+  const [photoFile2, setPhotoFile2] = useState<File | null>(null); // ✅ add
+  const [photoPreview2, setPhotoPreview2] = useState<string>("");
 
   const [form, setForm] = useState<FormState>({
     displayName: "",
@@ -238,6 +245,7 @@ export default function MyProfilePage() {
     city: "",
     stateUS: "",
     photo: "",
+    photo2: "", // ✅ add
 
     relationshipIntent: "Intentional partnership",
     datingChallenge: "",
@@ -312,6 +320,7 @@ export default function MyProfilePage() {
             city: mine.city || "",
             stateUS: mine.stateUS || "",
             photo: (mine.photo as string) || "",
+            photo2: (mine.photo2 as string) || "", // ✅ add
 
             relationshipIntent:
               mine.relationshipIntent ||
@@ -331,8 +340,9 @@ export default function MyProfilePage() {
             Array.isArray(mine.spiritualFramework) ? mine.spiritualFramework : []
           );
 
-          // ✅ ensure preview resets to stored photo when loading
+          // ✅ ensure preview resets to stored photos when loading
           setPhotoPreview((mine.photo as string) || "");
+          setPhotoPreview2((mine.photo2 as string) || "");
         }
       } catch (e: any) {
         setApiError(e?.message || "Could not load your profile.");
@@ -342,35 +352,33 @@ export default function MyProfilePage() {
     })();
   }, [userId]);
 
-  // ✅ Upload handler:
-  // - If no file selected yet -> open picker
-  // - If file selected -> upload
-  async function onUploadPhoto() {
-    if (loadingExisting || uploadingPhoto) return;
+  // ✅ Generic upload handler (Photo 1 or Photo 2)
+  async function onUploadPhoto(which: "photo" | "photo2") {
+    if (!userId) return;
 
-    if (!photoFile) {
-      fileInputRef.current?.click();
-      return;
-    }
-
-    if (!photoFile.type.startsWith("image/")) {
-      showToast("Please choose an image file (jpg, png, webp).");
-      return;
-    }
+    const file = which === "photo" ? photoFile : photoFile2;
+    if (!file) return showToast("Choose a photo first.");
+    if (!file.type.startsWith("image/"))
+      return showToast("Please choose an image file.");
 
     setUploadingPhoto(true);
     setApiError(null);
 
     try {
-      const url = await apiUploadProfilePhoto(photoFile);
+      const url = await apiUploadProfilePhoto(file);
 
-      // store returned URL into profile field
-      setForm((prev) => ({ ...prev, photo: url }));
-      setPhotoPreview(url);
+      setForm((prev) => ({ ...prev, [which]: url } as any));
 
-      // clear file input
-      setPhotoFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (which === "photo") {
+        setPhotoFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        setPhotoPreview(url);
+      }
+      if (which === "photo2") {
+        setPhotoFile2(null);
+        if (fileInputRef2.current) fileInputRef2.current.value = "";
+        setPhotoPreview2(url);
+      }
 
       showToast("Photo uploaded. Now click Save profile.");
     } catch (e: any) {
@@ -416,7 +424,8 @@ export default function MyProfilePage() {
         age: ageNum,
         city: form.city.trim(),
         stateUS: form.stateUS.trim(),
-        photo: form.photo.trim() || null, // ✅ saved to DB
+        photo: form.photo.trim() || null,
+        photo2: form.photo2.trim() || null, // ✅ add
 
         intention: form.relationshipIntent.trim(),
         identityPreview,
@@ -488,7 +497,13 @@ export default function MyProfilePage() {
               browse in Discover.
             </p>
 
-            <div style={{ marginTop: "0.75rem", color: "#777", fontSize: "0.92rem" }}>
+            <div
+              style={{
+                marginTop: "0.75rem",
+                color: "#777",
+                fontSize: "0.92rem",
+              }}
+            >
               Your user id: <code>{userId || "..."}</code>
               {loadingExisting ? (
                 <span style={{ marginLeft: 10 }}>(loading your profile…)</span>
@@ -632,7 +647,13 @@ export default function MyProfilePage() {
               />
             </label>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.8rem" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "0.8rem",
+              }}
+            >
               <label>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>City</div>
                 <input
@@ -666,7 +687,7 @@ export default function MyProfilePage() {
               </label>
             </div>
 
-            {/* ✅ Photo block: big placeholder + button opens picker + uploads */}
+            {/* ✅ Photo 1 block */}
             <div>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Profile Photo</div>
 
@@ -679,13 +700,18 @@ export default function MyProfilePage() {
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
                   />
                 ) : (
-                  <div style={{ fontSize: 64, fontWeight: 900, color: "rgba(0,0,0,0.35)" }}>
+                  <div
+                    style={{
+                      fontSize: 64,
+                      fontWeight: 900,
+                      color: "rgba(0,0,0,0.35)",
+                    }}
+                  >
                     {(form.displayName || "U").slice(0, 1).toUpperCase()}
                   </div>
                 )}
               </div>
 
-              {/* hidden native input */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -703,10 +729,24 @@ export default function MyProfilePage() {
                 }}
               />
 
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  marginTop: 10,
+                }}
+              >
                 <button
                   type="button"
-                  onClick={onUploadPhoto}
+                  onClick={() => {
+                    if (!photoFile) {
+                      fileInputRef.current?.click();
+                      return;
+                    }
+                    onUploadPhoto("photo");
+                  }}
                   disabled={loadingExisting || uploadingPhoto}
                   style={{
                     padding: "0.6rem 0.9rem",
@@ -714,12 +754,14 @@ export default function MyProfilePage() {
                     border: "1px solid #111",
                     background: "#111",
                     color: "white",
-                    cursor: loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+                    cursor:
+                      loadingExisting || uploadingPhoto
+                        ? "not-allowed"
+                        : "pointer",
                     fontWeight: 900,
                     opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
                   }}
                 >
-                  {/* If no file yet -> acts like "Choose Photo" by opening picker */}
                   {uploadingPhoto
                     ? "Uploading..."
                     : photoFile
@@ -730,7 +772,8 @@ export default function MyProfilePage() {
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {photoFile ? (
                     <>
-                      Selected: <b>{photoFile.name}</b> • After uploading, click <b>Save profile</b>.
+                      Selected: <b>{photoFile.name}</b> • After uploading, click{" "}
+                      <b>Save profile</b>.
                     </>
                   ) : (
                     <>Click the button to choose a photo (jpg/png/webp).</>
@@ -739,14 +782,135 @@ export default function MyProfilePage() {
               </div>
 
               {form.photo ? (
-                <div style={{ marginTop: 8, fontSize: 12, color: "#666", wordBreak: "break-all" }}>
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: "#666",
+                    wordBreak: "break-all",
+                  }}
+                >
                   Saved URL: {form.photo}
                 </div>
               ) : null}
             </div>
 
+            {/* ✅ Photo 2 block (optional) */}
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                Photo 2 (optional)
+              </div>
+
+              <div style={bigPhotoStyle}>
+                {(photoPreview2 || form.photo2) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photoPreview2 || form.photo2}
+                    alt="Profile photo 2"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      fontSize: 48,
+                      fontWeight: 900,
+                      color: "rgba(0,0,0,0.25)",
+                      textAlign: "center",
+                      padding: 20,
+                    }}
+                  >
+                    Optional second photo
+                  </div>
+                )}
+              </div>
+
+              <input
+                ref={fileInputRef2}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setPhotoFile2(f);
+
+                  if (f) {
+                    const localUrl = URL.createObjectURL(f);
+                    setPhotoPreview2(localUrl);
+                    showToast("Photo 2 selected. Click Upload Photo 2.");
+                  }
+                }}
+              />
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  marginTop: 10,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!photoFile2) {
+                      fileInputRef2.current?.click();
+                      return;
+                    }
+                    onUploadPhoto("photo2");
+                  }}
+                  disabled={loadingExisting || uploadingPhoto}
+                  style={{
+                    padding: "0.6rem 0.9rem",
+                    borderRadius: 10,
+                    border: "1px solid #111",
+                    background: "#111",
+                    color: "white",
+                    cursor:
+                      loadingExisting || uploadingPhoto
+                        ? "not-allowed"
+                        : "pointer",
+                    fontWeight: 900,
+                    opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+                  }}
+                >
+                  {uploadingPhoto
+                    ? "Uploading..."
+                    : photoFile2
+                    ? "Upload Photo 2"
+                    : "Choose Photo 2"}
+                </button>
+
+                <div style={{ fontSize: 12, color: "#777" }}>
+                  {photoFile2 ? (
+                    <>
+                      Selected: <b>{photoFile2.name}</b> • After uploading, click{" "}
+                      <b>Save profile</b>.
+                    </>
+                  ) : (
+                    <>Click the button to choose a second photo (optional).</>
+                  )}
+                </div>
+              </div>
+
+              {form.photo2 ? (
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: "#666",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  Saved URL: {form.photo2}
+                </div>
+              ) : null}
+            </div>
+
             <label>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Relationship Intent</div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                Relationship Intent
+              </div>
               <select
                 value={form.relationshipIntent}
                 onChange={(e) => onChange("relationshipIntent", e.target.value)}
@@ -780,8 +944,11 @@ export default function MyProfilePage() {
               <div style={{ fontWeight: 700, marginBottom: 6 }}>
                 Cultural Identity (multi-select)
               </div>
-              <div style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}>
-                Choose what describes your cultural identity. You can select multiple.
+              <div
+                style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}
+              >
+                Choose what describes your cultural identity. You can select
+                multiple.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
                 {CULTURAL_IDENTITY_OPTIONS.map((label) => (
@@ -801,7 +968,9 @@ export default function MyProfilePage() {
               <div style={{ fontWeight: 700, marginBottom: 6 }}>
                 Spiritual Framework (multi-select)
               </div>
-              <div style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}>
+              <div
+                style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}
+              >
                 Choose what guides your life and love. You can select multiple.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
