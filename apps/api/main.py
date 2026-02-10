@@ -1808,9 +1808,75 @@ def _ensure_thread_participant(thread: Thread, user_id: str) -> str:
     return other
 
 
+from sqlalchemy import func  # ✅ add near your other sqlalchemy imports
+
+
 # -----------------------------
 # Threads
 # -----------------------------
+
+class MarkReadPayload(BaseModel):
+    user_id: str
+    thread_id: str
+
+
+@app.post("/threads/mark-read")
+def mark_thread_read(payload: MarkReadPayload):
+    """
+    Mark a thread read for this user.
+
+    ✅ Critical fix:
+    We set last_read_at to the latest message timestamp in that thread
+    (not just datetime.utcnow()), so unread_count cannot stay > 0.
+    """
+    user_id = _ensure_user(payload.user_id)
+    thread_id = (payload.thread_id or "").strip()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    with Session(engine) as session:
+        thread = session.get(Thread, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        _ensure_thread_participant(thread, user_id)
+
+        # Latest message timestamp in this thread (could be None if no messages)
+        latest_created_at = session.execute(
+            select(func.max(Message.created_at)).where(Message.thread_id == thread_id)
+        ).scalar_one()
+
+        read_at = latest_created_at or datetime.utcnow()
+        now = datetime.utcnow()
+
+        tr = session.execute(
+            select(ThreadRead).where(
+                ThreadRead.user_id == user_id,
+                ThreadRead.thread_id == thread_id,
+            )
+        ).scalar_one_or_none()
+
+        if tr:
+            # Only move forward
+            if (tr.last_read_at is None) or (read_at > tr.last_read_at):
+                tr.last_read_at = read_at
+            tr.updated_at = now
+        else:
+            session.add(
+                ThreadRead(
+                    id=secrets.token_hex(16),
+                    user_id=user_id,
+                    thread_id=thread_id,
+                    last_read_at=read_at,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        session.commit()
+        return {"ok": True, "lastReadAt": read_at.isoformat()}
+
+
 @app.post("/threads/get-or-create", response_model=ThreadItem)
 def threads_get_or_create(payload: ThreadGetOrCreatePayload):
     user_id = _ensure_user(payload.user_id)
@@ -1828,7 +1894,10 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
             raise HTTPException(status_code=400, detail="You cannot message yourself.")
 
         low, high = _sorted_pair(user_id, other_user_id)
-        existing = session.execute(select(Thread).where(Thread.user_low == low, Thread.user_high == high)).scalar_one_or_none()
+
+        existing = session.execute(
+            select(Thread).where(Thread.user_low == low, Thread.user_high == high)
+        ).scalar_one_or_none()
 
         now = datetime.utcnow()
 
@@ -1871,10 +1940,17 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
 
-            other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
+            other_profile = session.execute(
+                select(Profile).where(Profile.owner_user_id == other_user_id)
+            ).scalar_one_or_none()
 
             last_msg = (
-                session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1))
+                session.execute(
+                    select(Message)
+                    .where(Message.thread_id == t.id)
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
                 .scalar_one_or_none()
             )
 
@@ -1914,30 +1990,36 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
 
-            other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
+            other_profile = session.execute(
+                select(Profile).where(Profile.owner_user_id == other_user_id)
+            ).scalar_one_or_none()
 
             last_msg = (
-                session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1))
+                session.execute(
+                    select(Message)
+                    .where(Message.thread_id == t.id)
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
                 .scalar_one_or_none()
             )
 
-            # ✅ Compute unread_count (messages from other user after my last_read_at)
+            # ✅ My last read timestamp
             my_read = session.execute(
                 select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == t.id)
             ).scalar_one_or_none()
 
             my_last_read_at = my_read.last_read_at if my_read else None
 
-            unread_q = select(Message).where(
+            # ✅ Unread count (messages from other user after my last_read_at)
+            unread_count_q = select(func.count()).select_from(Message).where(
                 Message.thread_id == t.id,
                 Message.sender_user_id != user_id,
             )
             if my_last_read_at:
-                unread_q = unread_q.where(Message.created_at > my_last_read_at)
+                unread_count_q = unread_count_q.where(Message.created_at > my_last_read_at)
 
-            unread_count = session.execute(
-                select(text("COUNT(1)")).select_from(unread_q.subquery())
-            ).scalar_one() or 0
+            unread_count = session.execute(unread_count_q).scalar_one() or 0
 
             items.append(
                 ThreadListItem(
