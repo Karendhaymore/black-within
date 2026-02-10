@@ -185,7 +185,9 @@ function buildIdentityPreview(args: {
 
 export default function MyProfilePage() {
   const [userId, setUserId] = useState<string>("");
-
+  const sp = useSearchParams();
+  const reason = sp.get("reason") || "";
+ 
   const [loadingExisting, setLoadingExisting] = useState<boolean>(true);
   const [saving, setSaving] = useState(false);
 
