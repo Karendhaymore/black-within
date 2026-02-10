@@ -5,17 +5,15 @@ import hashlib
 import hmac
 import json
 import base64
+import shutil
 from datetime import datetime, timedelta, date, time
 from typing import List, Optional, Dict, Any, Tuple
 
-from fastapi import UploadFile, File
-import os
-import shutil
-
 import stripe
-from fastapi import FastAPI, HTTPException, Query, Request, Header
+from fastapi import FastAPI, HTTPException, Query, Request, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
 
 from sqlalchemy import (
     create_engine,
@@ -83,6 +81,14 @@ STRIPE_PREMIUM_PRICE_ID = os.getenv("STRIPE_PREMIUM_PRICE_ID", "").strip()
 
 APP_WEB_BASE_URL = os.getenv("APP_WEB_BASE_URL", "https://meetblackwithin.com").strip()
 
+# ✅ Used by /upload/photo to build the returned file URL (this should be your API base URL)
+BASE_URL = (
+    os.getenv("BASE_URL", "").strip()
+    or os.getenv("API_BASE_URL", "").strip()
+    or os.getenv("RENDER_EXTERNAL_URL", "").strip()
+    or "https://black-within-api.onrender.com"
+)
+
 # Password reset
 RESET_TOKEN_TTL_MINUTES = int(os.getenv("RESET_TOKEN_TTL_MINUTES", "30"))
 
@@ -91,6 +97,12 @@ if STRIPE_SECRET_KEY:
 
 # ✅ MUST be real DATABASE_URL (NOT create_engine(...))
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+
+# -----------------------------
+# Uploads (for profile photos)
+# -----------------------------
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 # -----------------------------
@@ -1562,6 +1574,25 @@ def upsert_profile_alias(payload: UpsertMyProfilePayload):
 
 
 # -----------------------------
+# ✅ NEW: Photo upload route (place near other profile routes)
+# -----------------------------
+@app.post("/upload/photo")
+async def upload_photo(file: UploadFile = File(...)):
+    ext = (file.filename or "").split(".")[-1].lower()
+    if ext not in ["jpg", "jpeg", "png", "webp"]:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    filename = f"{secrets.token_hex(8)}.{ext}"
+    file_path = os.path.join(UPLOAD_DIR, filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Return a URL the frontend can use
+    return {"url": f"{BASE_URL}/uploads/{filename}"}
+
+
+# -----------------------------
 # Discover gate: require profile photo
 # -----------------------------
 class ProfileGateResponse(BaseModel):
@@ -1791,7 +1822,9 @@ def like(payload: ProfileAction):
     with Session(engine) as session:
         counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
 
-        existing = session.execute(select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)).scalar_one_or_none()
+        existing = session.execute(
+            select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
+        ).scalar_one_or_none()
         if existing:
             return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
 
@@ -2140,6 +2173,7 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
             reason=reason,
         )
 
+
 def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None:
     """
     Enforce: user must have a profile photo before sending messages.
@@ -2156,6 +2190,7 @@ def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None
     photo = (p.photo or "").strip()
     if not photo:
         raise HTTPException(status_code=403, detail="photo_required")
+
 
 # -----------------------------
 # Messages
@@ -2480,3 +2515,9 @@ async def stripe_webhook(request: Request):
             return {"status": "success"}
 
     return {"status": "ignored"}
+
+
+# -----------------------------
+# ✅ Static file serving (must be at the bottom)
+# -----------------------------
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
