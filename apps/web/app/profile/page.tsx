@@ -456,6 +456,42 @@ export default function MyProfilePage() {
             </Link>
           </div>
         </div>
+        {reason === "photo_required" ? (
+          <div
+            style={{
+              marginTop: "0.9rem",
+              padding: "0.95rem",
+              borderRadius: 14,
+              border: "1px solid #ffe0b2",
+              background: "#fff8ee",
+              color: "#5a3b00",
+              display: "flex",
+              gap: 12,
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ fontWeight: 800 }}>
+              Upload a profile photo to message members
+            </div>
+
+            <a
+              href="#photo"
+              style={{
+                padding: "0.65rem 0.95rem",
+                borderRadius: 12,
+                border: "1px solid rgba(0,0,0,0.15)",
+                background: "white",
+                textDecoration: "none",
+                color: "inherit",
+                fontWeight: 800,
+              }}
+            >
+              Add photo now
+            </a>
+          </div>
+        ) : null}
 
         {apiError && (
           <div
