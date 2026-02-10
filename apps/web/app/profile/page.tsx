@@ -591,23 +591,51 @@ function MyProfilePageInner() {
               </label>
             </div>
 
-            <label>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Photo URL (optional)</div>
-              <input
-               id="photo"
-               value={form.photo}
+           <label>
+  <div style={{ fontWeight: 600, marginBottom: 6 }}>Profile Photo</div>
 
-                onChange={(e) => onChange("photo", e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.7rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
-                placeholder="https://..."
-                disabled={loadingExisting}
-              />
-            </label>
+  {form.photo && (
+    <img
+      src={form.photo}
+      alt="Profile"
+      style={{
+        width: 120,
+        height: 120,
+        objectFit: "cover",
+        borderRadius: 12,
+        marginBottom: 10,
+        border: "1px solid #ddd",
+      }}
+    />
+  )}
+
+  <input
+    type="file"
+    accept="image/*"
+    onChange={async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const fd = new FormData();
+      fd.append("file", file);
+
+      try {
+        const res = await fetch(`${API_BASE}/upload/photo`, {
+          method: "POST",
+          body: fd,
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Upload failed");
+
+        onChange("photo", data.url);
+      } catch (err) {
+        alert("Upload failed");
+      }
+    }}
+  />
+</label>
+
 
             <label>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Relationship Intent</div>
