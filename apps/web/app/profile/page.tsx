@@ -594,7 +594,9 @@ export default function MyProfilePage() {
             <label>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Photo URL (optional)</div>
               <input
-                value={form.photo}
+               id="photo"
+               value={form.photo}
+
                 onChange={(e) => onChange("photo", e.target.value)}
                 style={{
                   width: "100%",
