@@ -13,7 +13,6 @@ const API_BASE =
 /**
  * IMPORTANT:
  * This type matches what your API returns (camelCase fields).
- * Do NOT import Profile from sampleProfiles here.
  */
 type ApiProfile = {
   id: string; // profile id
@@ -70,18 +69,24 @@ async function apiListProfiles(): Promise<ApiProfile[]> {
 }
 
 async function apiGetSavedIds(userId: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`,
+    {
+      cache: "no-store",
+    }
+  );
   if (!res.ok) throw new Error(`Failed to load saved profiles (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
 }
 
 async function apiGetLikes(userId: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    `${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`,
+    {
+      cache: "no-store",
+    }
+  );
   if (!res.ok) throw new Error(`Failed to load likes (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
@@ -106,7 +111,11 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
 }
 
 // NOTE: backend currently ignores recipient_user_id, but passing it is future-proof.
-async function apiLikeProfile(userId: string, profileId: string, recipientUserId?: string) {
+async function apiLikeProfile(
+  userId: string,
+  profileId: string,
+  recipientUserId?: string
+) {
   const res = await fetch(`${API_BASE}/likes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -121,8 +130,6 @@ async function apiLikeProfile(userId: string, profileId: string, recipientUserId
 
 /**
  * ✅ Threads API: POST /threads/get-or-create
- * Backend expects: { user_id, with_profile_id }
- * Returns one of: { threadId } | { thread_id } | { id }
  */
 type ThreadGetOrCreateResponse = {
   threadId?: string;
@@ -130,7 +137,10 @@ type ThreadGetOrCreateResponse = {
   id?: string;
 };
 
-async function apiGetOrCreateThread(userId: string, withProfileId: string): Promise<string> {
+async function apiGetOrCreateThread(
+  userId: string,
+  withProfileId: string
+): Promise<string> {
   const res = await fetch(`${API_BASE}/threads/get-or-create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -167,14 +177,12 @@ function parseIdentityPreview(raw: string): { title: string; body: string }[] {
   const text = (raw || "").trim();
   if (!text) return [];
 
-  // Expect blocks separated by blank lines
   const blocks = text
     .split(/\n\s*\n/g)
     .map((b) => b.trim())
     .filter(Boolean);
 
   return blocks.map((b) => {
-    // If it looks like "Label: content" on the first line, split once
     const idx = b.indexOf(":");
     if (idx > 0 && idx < 60) {
       const label = b.slice(0, idx).trim();
@@ -186,6 +194,19 @@ function parseIdentityPreview(raw: string): { title: string; body: string }[] {
     }
     return { title: "About", body: b };
   });
+}
+
+// ✅ NEW: normalize photo url (handles "/photos/xxx" and full urls)
+function normalizePhotoUrl(raw?: string | null): string {
+  const v = (raw || "").trim();
+  if (!v) return "";
+  if (v.startsWith("http://") || v.startsWith("https://")) return v;
+
+  // If API returns "/photos/filename"
+  if (v.startsWith("/")) return `${API_BASE}${v}`;
+
+  // If API returns "photos/filename"
+  return `${API_BASE}/${v}`;
 }
 
 export default function ProfileDetailPage() {
@@ -234,6 +255,16 @@ export default function ProfileDetailPage() {
   const identitySections = useMemo(() => {
     return parseIdentityPreview(profile?.identityPreview || "");
   }, [profile?.identityPreview]);
+
+  // ✅ NEW: compute safe photo URL for <img>
+  const photoUrl = useMemo(() => {
+    return normalizePhotoUrl(profile?.photo);
+  }, [profile?.photo]);
+
+  // ✅ CRITICAL: reset brokenImage any time the profile/photo changes
+  useEffect(() => {
+    setBrokenImage(false);
+  }, [profileId, photoUrl]);
 
   async function refreshSavedAndLikes(uid: string) {
     try {
@@ -334,7 +365,6 @@ export default function ProfileDetailPage() {
     }
   }
 
-  // ✅ NEW: Message button now creates a real thread, then navigates with withProfileId included.
   async function onMessage() {
     if (!profile) return;
     if (!userId) return;
@@ -343,10 +373,8 @@ export default function ProfileDetailPage() {
       setApiError(null);
       showToast("Opening chat…");
 
-      // Create/get a real thread id
       const threadId = await apiGetOrCreateThread(userId, profile.id);
 
-      // Navigate with required params for unlock flow
       window.location.href =
         `/messages?threadId=${encodeURIComponent(threadId)}` +
         `&with=${encodeURIComponent(profile.displayName)}` +
@@ -517,7 +545,7 @@ export default function ProfileDetailPage() {
               </div>
             )}
 
-            {!profile.photo || brokenImage ? (
+            {!photoUrl || brokenImage ? (
               <div
                 style={{
                   width: "100%",
@@ -535,7 +563,7 @@ export default function ProfileDetailPage() {
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={profile.photo}
+                src={photoUrl}
                 alt={profile.displayName}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 onError={() => setBrokenImage(true)}
@@ -545,7 +573,6 @@ export default function ProfileDetailPage() {
 
           {/* Body */}
           <div style={{ padding: "1.25rem" }}>
-            {/* Identity sections */}
             {identitySections.length > 0 ? (
               <div style={{ display: "grid", gap: "0.85rem" }}>
                 {identitySections.map((sec, idx) => (
@@ -590,7 +617,6 @@ export default function ProfileDetailPage() {
               </div>
             )}
 
-            {/* Actions */}
             <div style={{ marginTop: "1.1rem", display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
               <button
                 onClick={onToggleSave}
@@ -622,7 +648,6 @@ export default function ProfileDetailPage() {
                 {isLiked ? "Liked" : "Like"}
               </button>
 
-              {/* ✅ UPDATED: Message button now uses correct thread + includes withProfileId */}
               <button
                 onClick={onMessage}
                 disabled={loadingSets}
