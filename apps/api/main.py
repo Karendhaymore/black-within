@@ -2114,6 +2114,22 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
             reason=reason,
         )
 
+def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None:
+    """
+    Enforce: user must have a profile photo before sending messages.
+    Returns nothing if OK; raises HTTPException if not.
+    """
+    # Let you keep building/testing without getting blocked
+    if AUTH_PREVIEW_MODE:
+        return
+
+    p = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=403, detail="photo_required")
+
+    photo = (p.photo or "").strip()
+    if not photo:
+        raise HTTPException(status_code=403, detail="photo_required")
 
 # -----------------------------
 # Messages
