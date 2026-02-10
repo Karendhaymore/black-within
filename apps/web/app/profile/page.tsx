@@ -406,7 +406,61 @@ export default function MyProfilePage() {
   }
 
   // ✅ Replace your onUploadPhoto() with this version (slot 1 or 2)
-  async function onUploadPhoto(slot: 1 | 2) {
+ async function onUploadPhoto() {
+  if (!userId) return;
+  if (!photoFile) return showToast("Choose a photo first.");
+
+  if (!photoFile.type.startsWith("image/")) {
+    return showToast("Please choose an image file.");
+  }
+
+  setUploadingPhoto(true);
+  setApiError(null);
+
+  try {
+    // STEP 1 — Upload to server disk
+    const url = await apiUploadProfilePhoto(userId, photoFile);
+
+    // Put URL into local state
+    setForm((prev) => ({ ...prev, photo: url }));
+    setPhotoFile(null);
+
+    // STEP 2 — IMMEDIATELY SAVE PROFILE TO DATABASE
+    await apiUpsertProfile({
+      owner_user_id: userId,
+      displayName: form.displayName.trim(),
+      age: parseInt(form.age || "0", 10),
+      city: form.city.trim(),
+      stateUS: form.stateUS.trim(),
+      photo: url, // 🔥 THIS IS WHAT WAS MISSING
+
+      intention: form.relationshipIntent.trim(),
+      identityPreview: buildIdentityPreview({
+        cultural: culturalSelected,
+        spiritual: spiritualSelected,
+        datingChallenge: form.datingChallenge,
+        personalTruth: form.personalTruth,
+      }),
+
+      culturalIdentity: culturalSelected,
+      spiritualFramework: spiritualSelected,
+      relationshipIntent: form.relationshipIntent.trim(),
+      datingChallenge: form.datingChallenge.trim() || null,
+      personalTruth: form.personalTruth.trim() || null,
+
+      tags: selectedTags,
+      isAvailable: !!form.isAvailable,
+    });
+
+    showToast("Photo uploaded & saved!");
+  } catch (e: any) {
+    setApiError(e?.message || "Photo upload failed.");
+    showToast("Upload failed.");
+  } finally {
+    setUploadingPhoto(false);
+  }
+}
+
     if (!userId) return;
 
     const file = slot === 1 ? photoFile : photoFile2;
