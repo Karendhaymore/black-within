@@ -432,7 +432,7 @@ export default function InboxPage() {
                     const href =
                       `/messages?threadId=${encodeURIComponent(threadId)}` +
                       `&with=${encodeURIComponent(name)}` +
-                      (photo ? `&withPhoto=${encodeURIComponent(photo)}` : "") +
+                    
                       (withProfileId ? `&withProfileId=${encodeURIComponent(withProfileId)}` : "");
 
                     return (
