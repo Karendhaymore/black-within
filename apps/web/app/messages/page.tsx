@@ -363,10 +363,17 @@ function MessagesInner() {
 
       const saved = await apiSendMessage(userId, threadId, body);
       setMessages((prev) => prev.map((m) => (String(m.id) === tempId ? saved : m)));
-    } catch (e: any) {
-      setErr(stringifyError(e) || "Failed to send message.");
-    }
+    catch (e: any) {
+  const msg = String(e?.message || "");
+
+  if (msg.includes("photo_required")) {
+    setPhotoRequired(true);
+    setError(null);
+    return;
   }
+
+  setError(msg || "Failed to send");
+}
 
   async function handleRefresh() {
     if (!userId || !threadId) return;
