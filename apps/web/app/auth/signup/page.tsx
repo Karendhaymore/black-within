@@ -1,77 +1,164 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-function newId() {
-  // good enough for your current prototype auth
-  return "u_" + Math.random().toString(16).slice(2) + Date.now().toString(16);
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+  process.env.NEXT_PUBLIC_API_URL?.trim() ||
+  "https://black-within-api.onrender.com";
+
+async function safeReadErrorDetail(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    if (data?.detail) return String(data.detail);
+  } catch {}
+  try {
+    const text = await res.text();
+    if (text) return text;
+  } catch {}
+  return `Request failed (${res.status}).`;
 }
 
 export default function SignupPage() {
   const router = useRouter();
-  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
+  async function onSignup(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+
+    const e2 = email.trim().toLowerCase();
+    if (!e2) return setErr("Please enter your email.");
+    if (!pw) return setErr("Please enter a password.");
+
+    setLoading(true);
     try {
-      const loggedIn = window.localStorage.getItem("bw_logged_in") === "1";
-      if (loggedIn) router.replace("/discover");
-    } catch {}
-  }, [router]);
+      // IMPORTANT: If your API uses /auth/register instead of /auth/signup,
+      // change this URL to match.
+      const res = await fetch(`${API_BASE}/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: e2, password: pw }),
+      });
 
-  function onCreate() {
-    const uid = newId();
+      if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+      const json = await res.json();
 
-    try {
-      window.localStorage.setItem("bw_user_id", uid);
+      // Common shapes: { user_id }, { userId }, { id }
+      const userId = (json?.user_id || json?.userId || json?.id || "").toString();
+      if (!userId) throw new Error("Signup succeeded, but no user id returned.");
+
+      // Match your app’s login guard keys
+      window.localStorage.setItem("bw_user_id", userId);
       window.localStorage.setItem("bw_logged_in", "1");
 
-      // Optional: store a display name hint for your profile form (if you want)
-      if (name.trim()) window.localStorage.setItem("bw_display_name_hint", name.trim());
-    } catch {}
+      // If you also store a session token, keep it:
+      if (json?.session_token) {
+        window.localStorage.setItem("bw_session_token", String(json.session_token));
+      }
 
-    router.replace("/profile");
+      router.replace("/profile"); // or /discover if you prefer
+    } catch (e: any) {
+      setErr(e?.message || "Signup failed.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 520, border: "1px solid #eee", borderRadius: 16, padding: 18 }}>
-        <h1 style={{ marginTop: 0 }}>Create account</h1>
-        <p style={{ marginTop: 6, color: "#555" }}>
-          Quick signup for testing. You’ll create your full profile next.
-        </p>
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        padding: 24,
+        background: "#0b0b0b",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          background: "white",
+          borderRadius: 14,
+          padding: 18,
+          boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: 18 }}>Create account</h1>
 
-        <label style={{ display: "grid", gap: 6, marginTop: 14 }}>
-          <span style={{ fontWeight: 700 }}>Display name (optional)</span>
+        {err && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid #f2c7c7",
+              background: "#fff7f7",
+              color: "#7a1b1b",
+              whiteSpace: "pre-wrap",
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
+
+        <form onSubmit={onSignup} style={{ marginTop: 12, display: "grid", gap: 10 }}>
           <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g., NubianGrace"
-            style={{ padding: "12px 12px", borderRadius: 10, border: "1px solid #ccc" }}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            style={{
+              width: "100%",
+              padding: "12px 12px",
+              borderRadius: 10,
+              border: "1px solid #ddd",
+            }}
+            autoComplete="email"
           />
-        </label>
 
-        <button
-          onClick={onCreate}
-          style={{
-            marginTop: 14,
-            width: "100%",
-            padding: "12px 12px",
-            borderRadius: 12,
-            border: "1px solid #0a5411",
-            background: "#0a5411",
-            color: "white",
-            fontWeight: 900,
-            cursor: "pointer",
-          }}
-        >
-          Create account
-        </button>
+          <input
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            placeholder="Password"
+            type="password"
+            style={{
+              width: "100%",
+              padding: "12px 12px",
+              borderRadius: 10,
+              border: "1px solid #ddd",
+            }}
+            autoComplete="new-password"
+          />
 
-        <div style={{ marginTop: 12, fontSize: 14 }}>
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              marginTop: 4,
+              padding: "12px 12px",
+              borderRadius: 10,
+              border: "1px solid #111",
+              background: "#111",
+              color: "white",
+              fontWeight: 800,
+              cursor: loading ? "not-allowed" : "pointer",
+              opacity: loading ? 0.75 : 1,
+            }}
+          >
+            {loading ? "Creating..." : "Create account"}
+          </button>
+        </form>
+
+        <div style={{ marginTop: 12, textAlign: "center", fontSize: 13 }}>
           Already have an account?{" "}
-          <Link href="/auth/login" style={{ fontWeight: 800 }}>
+          <Link href="/auth/login" style={{ textDecoration: "underline" }}>
             Log in
           </Link>
         </div>
