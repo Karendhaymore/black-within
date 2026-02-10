@@ -366,27 +366,20 @@ def _auto_migrate_threads_messages_tables():
 # ✅ NEW: thread_reads migration helper (as requested)
 def _auto_migrate_thread_reads_table():
     with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS thread_reads (
-              id SERIAL PRIMARY KEY,
-              thread_id VARCHAR(60),
+              id VARCHAR(40) PRIMARY KEY,
               user_id VARCHAR(40),
-              last_read_at TIMESTAMP DEFAULT NOW(),
+              thread_id VARCHAR(60),
+              last_read_at TIMESTAMP NULL,
+              created_at TIMESTAMP DEFAULT NOW(),
               updated_at TIMESTAMP DEFAULT NOW(),
-              CONSTRAINT uq_thread_reads_thread_user UNIQUE (thread_id, user_id)
+              CONSTRAINT uq_thread_reads_user_thread UNIQUE (user_id, thread_id)
             );
-        """
-            )
-        )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);"""))
+        """))
         conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_last_read_at ON thread_reads(last_read_at);"""))
-
-        # ✅ safety for older DBs that already had thread_reads without updated_at
-        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP DEFAULT NOW();"""))
-        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
+        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);"""))
+        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP NULL;"""))
 
 
 def _auto_migrate_profiles_table():
