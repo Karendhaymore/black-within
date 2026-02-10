@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import React, { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -198,13 +198,6 @@ async function apiGetUnreadTotal(userId: string): Promise<number> {
 
 /**
  * Call this inside your component useEffect to keep unread accurate.
- * Example usage:
- *   useEffect(() => {
- *     if (!userId) return;
- *     const cleanup = startUnreadAutoRefresh(() => refreshUnread(userId));
- *     refreshUnread(userId);
- *     return cleanup;
- *   }, [userId]);
  */
 function startUnreadAutoRefresh(refreshFn: () => void) {
   const onFocus = () => refreshFn();
@@ -268,6 +261,10 @@ function formatResetHint(status: LikesStatusResponse | null) {
 export default function DiscoverPage() {
   const router = useRouter();
 
+  // ✅ NEW: photo gate loading state
+  const [gateLoading, setGateLoading] = useState(true);
+
+  // Existing login redirect
   useEffect(() => {
     const loggedIn = localStorage.getItem("bw_logged_in");
     if (!loggedIn) {
@@ -412,6 +409,42 @@ export default function DiscoverPage() {
       // ignore
     }
   }
+
+  // ✅ NEW: Discover gate — block Discover until profile photo exists
+  useEffect(() => {
+    // IMPORTANT: use the same user id you already use in the app
+    const uid = getLoggedInUserId() || "";
+
+    if (!uid) {
+      router.replace("/auth/login");
+      return;
+    }
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/profiles/gate?user_id=${encodeURIComponent(uid)}`,
+          { cache: "no-store" }
+        );
+
+        if (!res.ok) {
+          setGateLoading(false);
+          return;
+        }
+
+        const json = await res.json();
+
+        if (!json?.hasPhoto) {
+          router.replace("/profile?reason=photo_required");
+          return;
+        }
+
+        setGateLoading(false);
+      } catch {
+        setGateLoading(false);
+      }
+    })();
+  }, [router]);
 
   // ✅ load profiles on page load
   useEffect(() => {
@@ -594,6 +627,15 @@ export default function DiscoverPage() {
   const messagesStyle = totalUnread > 0 ? pillBtnGlow : pillBtn;
 
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
+
+  // ✅ NEW: simple guard at top of render
+  if (gateLoading) {
+    return (
+      <div style={{ padding: 24, fontWeight: 700 }}>
+        Loading…
+      </div>
+    );
+  }
 
   return (
     <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
