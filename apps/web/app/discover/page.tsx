@@ -50,6 +50,11 @@ type MessagingAccessResponse = {
   reason?: string | null;
 };
 
+// ✅ Profile gate response
+type ProfileGateResponse = {
+  hasPhoto?: boolean;
+};
+
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
@@ -149,9 +154,7 @@ async function apiLikeProfile(userId: string, profileId: string) {
 async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[]> {
   const url =
     `${API_BASE}/profiles?limit=50` +
-    (excludeOwnerUserId
-      ? `&exclude_owner_user_id=${encodeURIComponent(excludeOwnerUserId)}`
-      : "");
+    (excludeOwnerUserId ? `&exclude_owner_user_id=${encodeURIComponent(excludeOwnerUserId)}` : "");
 
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
@@ -182,10 +185,9 @@ type ThreadListItem = {
 type ThreadsResponse = { items: ThreadListItem[] };
 
 async function apiGetThreads(userId: string): Promise<ThreadListItem[]> {
-  const res = await fetch(
-    `${API_BASE}/threads?user_id=${encodeURIComponent(userId)}&limit=100`,
-    { cache: "no-store" }
-  );
+  const res = await fetch(`${API_BASE}/threads?user_id=${encodeURIComponent(userId)}&limit=100`, {
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   const json = (await res.json()) as ThreadsResponse;
   return Array.isArray(json?.items) ? json.items : [];
@@ -251,6 +253,15 @@ async function apiMessagingAccess(userId: string, threadId: string): Promise<Mes
   return (await res.json()) as MessagingAccessResponse;
 }
 
+// ✅ NEW: profile photo gate
+async function apiProfileGate(userId: string): Promise<ProfileGateResponse> {
+  const res = await fetch(`${API_BASE}/profiles/gate?user_id=${encodeURIComponent(userId)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return (await res.json()) as ProfileGateResponse;
+}
+
 function formatResetHint(status: LikesStatusResponse | null) {
   if (!status?.resetsAtUTC) return "";
   const d = new Date(status.resetsAtUTC);
@@ -261,18 +272,10 @@ function formatResetHint(status: LikesStatusResponse | null) {
 export default function DiscoverPage() {
   const router = useRouter();
 
-  // ✅ NEW: photo gate loading state
-  const [gateLoading, setGateLoading] = useState(true);
-
-  // Existing login redirect
-  useEffect(() => {
-    const loggedIn = localStorage.getItem("bw_logged_in");
-    if (!loggedIn) {
-      router.replace("/auth/login");
-    }
-  }, [router]);
-
   const [userId, setUserId] = useState<string>("");
+
+  // ✅ NEW: photo gate
+  const [gateLoading, setGateLoading] = useState(true);
 
   // NOTE: your UI below uses totalUnread; keeping name consistent
   const [totalUnread, setTotalUnread] = useState(0);
@@ -297,10 +300,7 @@ export default function DiscoverPage() {
 
   const availableProfiles = useMemo(() => profiles.filter((p) => p.isAvailable), [profiles]);
 
-  const availableProfileIds = useMemo(
-    () => new Set(availableProfiles.map((p) => p.id)),
-    [availableProfiles]
-  );
+  const availableProfileIds = useMemo(() => new Set(availableProfiles.map((p) => p.id)), [availableProfiles]);
 
   const intentionOptions = useMemo(() => {
     const set = new Set<string>();
@@ -370,11 +370,7 @@ export default function DiscoverPage() {
       const now = Date.now();
       const msUntilReset = resetAt - now;
 
-      if (
-        Number.isFinite(msUntilReset) &&
-        msUntilReset > 0 &&
-        msUntilReset < 24 * 60 * 60 * 1000
-      ) {
+      if (Number.isFinite(msUntilReset) && msUntilReset > 0 && msUntilReset < 24 * 60 * 60 * 1000) {
         resetTimerRef.current = window.setTimeout(() => {
           refreshLikesStatus(uid).catch(() => {});
         }, msUntilReset + 1200);
@@ -400,7 +396,7 @@ export default function DiscoverPage() {
     }, 400);
   }
 
-  // ✅ ADD: helper inside component (requested)
+  // ✅ helper inside component
   async function refreshUnread(uid: string) {
     try {
       const total = await apiGetUnreadTotal(uid);
@@ -410,55 +406,37 @@ export default function DiscoverPage() {
     }
   }
 
-  // ✅ NEW: Discover gate — block Discover until profile photo exists
-  useEffect(() => {
-    // IMPORTANT: use the same user id you already use in the app
-    const uid = getLoggedInUserId() || "";
-
-    if (!uid) {
-      router.replace("/auth/login");
-      return;
-    }
-
-    (async () => {
-      try {
-        const res = await fetch(
-          `${API_BASE}/profiles/gate?user_id=${encodeURIComponent(uid)}`,
-          { cache: "no-store" }
-        );
-
-        if (!res.ok) {
-          setGateLoading(false);
-          return;
-        }
-
-        const json = await res.json();
-
-        if (!json?.hasPhoto) {
-          router.replace("/profile?reason=photo_required");
-          return;
-        }
-
-        setGateLoading(false);
-      } catch {
-        setGateLoading(false);
-      }
-    })();
-  }, [router]);
-
-  // ✅ load profiles on page load
+  /**
+   * ✅ Single unified boot effect:
+   * - ensures logged-in
+   * - blocks Discover until photo exists
+   * - then loads profiles + saved/likes + likes status
+   */
   useEffect(() => {
     const uid = getLoggedInUserId();
-
-    // If not logged in, send them to login (avoid loops with /auth redirecting to /discover)
     if (!uid) {
-      window.location.href = "/auth/login";
+      router.replace("/auth/login");
       return;
     }
 
     setUserId(uid);
 
     (async () => {
+      // 1) Gate: must have photo
+      try {
+        setGateLoading(true);
+        const gate = await apiProfileGate(uid);
+        if (!gate?.hasPhoto) {
+          router.replace("/profile?reason=photo_required");
+          return; // stop here
+        }
+      } catch {
+        // If gate endpoint fails, we allow page to continue (fail-open)
+      } finally {
+        setGateLoading(false);
+      }
+
+      // 2) Load Discover data
       try {
         setApiError(null);
         setLoadingProfiles(true);
@@ -475,11 +453,10 @@ export default function DiscoverPage() {
       await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
     })();
 
-    // no deps: run once
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [router]);
 
-  // ✅ UPDATED: use startUnreadAutoRefresh + initial refresh (requested)
+  // ✅ Unread auto-refresh
   useEffect(() => {
     if (!userId) return;
 
@@ -628,13 +605,9 @@ export default function DiscoverPage() {
 
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
 
-  // ✅ NEW: simple guard at top of render
+  // ✅ Gate UI while checking photo requirement
   if (gateLoading) {
-    return (
-      <div style={{ padding: 24, fontWeight: 700 }}>
-        Loading…
-      </div>
-    );
+    return <div style={{ padding: 24, fontWeight: 700 }}>Loading…</div>;
   }
 
   return (
@@ -653,8 +626,7 @@ export default function DiscoverPage() {
                   {resetHint ? (
                     <span style={{ color: "#777" }}>
                       {" "}
-                      · resets {likesStatus.windowType === "test_seconds" ? "at" : "after"}{" "}
-                      <strong>{resetHint}</strong>
+                      · resets {likesStatus.windowType === "test_seconds" ? "at" : "after"} <strong>{resetHint}</strong>
                     </span>
                   ) : null}
                 </span>
@@ -777,9 +749,7 @@ export default function DiscoverPage() {
           {loadingProfiles ? (
             <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>Loading profiles…</div>
           ) : filteredProfiles.length === 0 ? (
-            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>
-              No profiles match your filters yet.
-            </div>
+            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>No profiles match your filters yet.</div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
               {filteredProfiles.map((p) => {
