@@ -737,3 +737,10 @@ function MyProfilePageInner() {
     </main>
   );
 }
+export default function MyProfilePage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+      <MyProfilePageInner />
+    </Suspense>
+  );
+}
