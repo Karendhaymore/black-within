@@ -2201,9 +2201,12 @@ def send_message(payload: MessageCreatePayload):
 
         _ensure_thread_participant(thread, user_id)
 
+        # ✅ NEW: Require profile photo before sending messages (unless AUTH_PREVIEW_MODE)
+        _require_profile_photo_for_messaging(session, user_id)
+
         can_msg, is_premium, reason = _can_message_thread(session, user_id, thread_id)
 
-        # ✅ PREVIEW MODE BYPASS
+        # ✅ PREVIEW MODE BYPASS (paywall)
         if not can_msg and not AUTH_PREVIEW_MODE:
             raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
 
