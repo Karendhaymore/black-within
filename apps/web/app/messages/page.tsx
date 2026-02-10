@@ -363,17 +363,21 @@ function MessagesInner() {
 
       const saved = await apiSendMessage(userId, threadId, body);
       setMessages((prev) => prev.map((m) => (String(m.id) === tempId ? saved : m)));
-    catch (e: any) {
-  const msg = String(e?.message || "");
 
-  if (msg.includes("photo_required")) {
-    setPhotoRequired(true);
-    setError(null);
-    return;
+      // success → clear photo-required state if it was showing
+      setPhotoRequired(false);
+    } catch (e: any) {
+      const msg = String(e?.message || "");
+
+      if (msg.includes("photo_required")) {
+        setPhotoRequired(true);
+        setErr("");
+        return;
+      }
+
+      setErr(msg || "Failed to send");
+    }
   }
-
-  setError(msg || "Failed to send");
-}
 
   async function handleRefresh() {
     if (!userId || !threadId) return;
@@ -719,6 +723,39 @@ function MessagesInner() {
 
                 <div ref={bottomRef} />
               </div>
+
+              {/* ✅ ADD: Photo required block ABOVE the input area */}
+              {photoRequired && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    marginBottom: 12,
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    background: "rgba(255,165,0,0.15)",
+                    border: "1px solid rgba(255,165,0,0.4)",
+                    fontWeight: 600,
+                  }}
+                >
+                  Upload a profile photo to message members.
+                  <div style={{ marginTop: 8 }}>
+                    <a
+                      href="/profile"
+                      style={{
+                        display: "inline-block",
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        background: "#111",
+                        color: "#fff",
+                        textDecoration: "none",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Upload Photo
+                    </a>
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
                 <input
