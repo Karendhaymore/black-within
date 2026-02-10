@@ -213,6 +213,8 @@ function MessagesInner() {
   const pollRef = useRef<number | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
+  const [photoRequired, setPhotoRequired] = useState(false);
+
   function stopPolling() {
     if (pollRef.current) {
       window.clearInterval(pollRef.current);
