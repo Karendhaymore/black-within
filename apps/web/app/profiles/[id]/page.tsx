@@ -13,6 +13,7 @@ const API_BASE =
 /**
  * IMPORTANT:
  * This type matches what your API returns (camelCase fields).
+ * Do NOT import Profile from sampleProfiles here.
  */
 type ApiProfile = {
   id: string; // profile id
@@ -71,9 +72,7 @@ async function apiListProfiles(): Promise<ApiProfile[]> {
 async function apiGetSavedIds(userId: string): Promise<string[]> {
   const res = await fetch(
     `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`,
-    {
-      cache: "no-store",
-    }
+    { cache: "no-store" }
   );
   if (!res.ok) throw new Error(`Failed to load saved profiles (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
@@ -83,9 +82,7 @@ async function apiGetSavedIds(userId: string): Promise<string[]> {
 async function apiGetLikes(userId: string): Promise<string[]> {
   const res = await fetch(
     `${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`,
-    {
-      cache: "no-store",
-    }
+    { cache: "no-store" }
   );
   if (!res.ok) throw new Error(`Failed to load likes (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
@@ -130,6 +127,8 @@ async function apiLikeProfile(
 
 /**
  * ✅ Threads API: POST /threads/get-or-create
+ * Backend expects: { user_id, with_profile_id }
+ * Returns one of: { threadId } | { thread_id } | { id }
  */
 type ThreadGetOrCreateResponse = {
   threadId?: string;
@@ -177,12 +176,14 @@ function parseIdentityPreview(raw: string): { title: string; body: string }[] {
   const text = (raw || "").trim();
   if (!text) return [];
 
+  // Expect blocks separated by blank lines
   const blocks = text
     .split(/\n\s*\n/g)
     .map((b) => b.trim())
     .filter(Boolean);
 
   return blocks.map((b) => {
+    // If it looks like "Label: content" on the first line, split once
     const idx = b.indexOf(":");
     if (idx > 0 && idx < 60) {
       const label = b.slice(0, idx).trim();
@@ -194,19 +195,6 @@ function parseIdentityPreview(raw: string): { title: string; body: string }[] {
     }
     return { title: "About", body: b };
   });
-}
-
-// ✅ NEW: normalize photo url (handles "/photos/xxx" and full urls)
-function normalizePhotoUrl(raw?: string | null): string {
-  const v = (raw || "").trim();
-  if (!v) return "";
-  if (v.startsWith("http://") || v.startsWith("https://")) return v;
-
-  // If API returns "/photos/filename"
-  if (v.startsWith("/")) return `${API_BASE}${v}`;
-
-  // If API returns "photos/filename"
-  return `${API_BASE}/${v}`;
 }
 
 export default function ProfileDetailPage() {
@@ -256,22 +244,15 @@ export default function ProfileDetailPage() {
     return parseIdentityPreview(profile?.identityPreview || "");
   }, [profile?.identityPreview]);
 
-  // ✅ NEW: compute safe photo URL for <img>
-  const photoUrl = useMemo(() => {
-    return normalizePhotoUrl(profile?.photo);
-  }, [profile?.photo]);
-
-  // ✅ CRITICAL: reset brokenImage any time the profile/photo changes
-  useEffect(() => {
-    setBrokenImage(false);
-  }, [profileId, photoUrl]);
-
   async function refreshSavedAndLikes(uid: string) {
     try {
       setApiError(null);
       setLoadingSets(true);
 
-      const [saved, likes] = await Promise.all([apiGetSavedIds(uid), apiGetLikes(uid)]);
+      const [saved, likes] = await Promise.all([
+        apiGetSavedIds(uid),
+        apiGetLikes(uid),
+      ]);
 
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
       setLikedIds(likes.filter((id) => availableProfileIds.has(id)));
@@ -322,7 +303,9 @@ export default function ProfileDetailPage() {
     const prev = savedIds;
 
     setSavedIds((curr) =>
-      curr.includes(profile.id) ? curr.filter((x) => x !== profile.id) : [profile.id, ...curr]
+      curr.includes(profile.id)
+        ? curr.filter((x) => x !== profile.id)
+        : [profile.id, ...curr]
     );
 
     try {
@@ -349,7 +332,9 @@ export default function ProfileDetailPage() {
 
     const prev = likedIds;
 
-    setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
+    setLikedIds((curr) =>
+      curr.includes(profile.id) ? curr : [profile.id, ...curr]
+    );
 
     try {
       await apiLikeProfile(userId, profile.id, profile.owner_user_id);
@@ -365,6 +350,7 @@ export default function ProfileDetailPage() {
     }
   }
 
+  // ✅ Message button creates a real thread, then navigates with withProfileId included.
   async function onMessage() {
     if (!profile) return;
     if (!userId) return;
@@ -373,8 +359,10 @@ export default function ProfileDetailPage() {
       setApiError(null);
       showToast("Opening chat…");
 
+      // Create/get a real thread id
       const threadId = await apiGetOrCreateThread(userId, profile.id);
 
+      // Navigate with required params for unlock flow
       window.location.href =
         `/messages?threadId=${encodeURIComponent(threadId)}` +
         `&with=${encodeURIComponent(profile.displayName)}` +
@@ -390,17 +378,30 @@ export default function ProfileDetailPage() {
     return (
       <main style={{ minHeight: "100vh", padding: "2rem" }}>
         <p>Loading profile…</p>
-        <p style={{ color: "#666", fontSize: 13, marginTop: 8 }}>API: {API_BASE}</p>
+        <p style={{ color: "#666", fontSize: 13, marginTop: 8 }}>
+          API: {API_BASE}
+        </p>
       </main>
     );
   }
 
   if (!profile) {
     return (
-      <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
+      <main
+        style={{
+          minHeight: "100vh",
+          padding: "2rem",
+          display: "grid",
+          placeItems: "start center",
+        }}
+      >
         <div style={{ width: "100%", maxWidth: 900 }}>
-          <h1 style={{ fontSize: "2rem", marginBottom: "0.35rem" }}>Profile not found</h1>
-          <p style={{ color: "#666" }}>This profile ID was not found in the API list.</p>
+          <h1 style={{ fontSize: "2rem", marginBottom: "0.35rem" }}>
+            Profile not found
+          </h1>
+          <p style={{ color: "#666" }}>
+            This profile ID was not found in the API list.
+          </p>
 
           <div style={{ marginTop: 10, fontSize: 13, color: "#666" }}>
             <div>
@@ -444,12 +445,34 @@ export default function ProfileDetailPage() {
   const isLiked = likedIds.includes(profile.id);
   const tags = Array.isArray(profile.tags) ? profile.tags : [];
 
+  // ✅ NEW: smaller, responsive hero height (instead of huge 16:9)
+  // - Mobile: ~55vw tall
+  // - Desktop: caps at 420px
+  const photoBoxHeight = "min(420px, 55vw)";
+
   return (
-    <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "2rem",
+        display: "grid",
+        placeItems: "start center",
+      }}
+    >
       <div style={{ width: "100%", maxWidth: 900 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "1rem",
+            flexWrap: "wrap",
+            alignItems: "flex-start",
+          }}
+        >
           <div>
-            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>{profile.displayName}</h1>
+            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
+              {profile.displayName}
+            </h1>
             <p style={{ color: "#555" }}>
               {profile.age} • {profile.city}, {profile.stateUS}
             </p>
@@ -519,12 +542,21 @@ export default function ProfileDetailPage() {
             border: isSaved ? "1px solid #cfe7cf" : "1px solid #e5e5e5",
             borderRadius: 16,
             overflow: "hidden",
-            boxShadow: isSaved ? "0 0 0 2px rgba(207,231,207,0.35) inset" : "none",
+            boxShadow: isSaved
+              ? "0 0 0 2px rgba(207,231,207,0.35) inset"
+              : "none",
             background: "white",
           }}
         >
-          {/* Photo */}
-          <div style={{ width: "100%", aspectRatio: "16 / 9", background: "#f3f3f3", position: "relative" }}>
+          {/* Photo (smaller now) */}
+          <div
+            style={{
+              width: "100%",
+              height: photoBoxHeight,
+              background: "#f3f3f3",
+              position: "relative",
+            }}
+          >
             {isSaved && (
               <div
                 style={{
@@ -545,7 +577,7 @@ export default function ProfileDetailPage() {
               </div>
             )}
 
-            {!photoUrl || brokenImage ? (
+            {!profile.photo || brokenImage ? (
               <div
                 style={{
                   width: "100%",
@@ -563,7 +595,7 @@ export default function ProfileDetailPage() {
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={photoUrl}
+                src={profile.photo}
                 alt={profile.displayName}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 onError={() => setBrokenImage(true)}
@@ -573,6 +605,7 @@ export default function ProfileDetailPage() {
 
           {/* Body */}
           <div style={{ padding: "1.25rem" }}>
+            {/* Identity sections */}
             {identitySections.length > 0 ? (
               <div style={{ display: "grid", gap: "0.85rem" }}>
                 {identitySections.map((sec, idx) => (
@@ -585,13 +618,25 @@ export default function ProfileDetailPage() {
                       background: "white",
                     }}
                   >
-                    <div style={{ fontWeight: 800, marginBottom: 6 }}>{sec.title}</div>
-                    <div style={{ color: "#555", fontSize: "1.02rem", whiteSpace: "pre-wrap" }}>{sec.body}</div>
+                    <div style={{ fontWeight: 800, marginBottom: 6 }}>
+                      {sec.title}
+                    </div>
+                    <div
+                      style={{
+                        color: "#555",
+                        fontSize: "1.02rem",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {sec.body}
+                    </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{ color: "#555", fontSize: "1.05rem" }}>{profile.identityPreview}</div>
+              <div style={{ color: "#555", fontSize: "1.05rem" }}>
+                {profile.identityPreview}
+              </div>
             )}
 
             <div style={{ marginTop: "0.95rem", color: "#666" }}>
@@ -599,7 +644,14 @@ export default function ProfileDetailPage() {
             </div>
 
             {tags.length > 0 && (
-              <div style={{ marginTop: "0.85rem", display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+              <div
+                style={{
+                  marginTop: "0.85rem",
+                  display: "flex",
+                  gap: "0.4rem",
+                  flexWrap: "wrap",
+                }}
+              >
                 {tags.slice(0, 12).map((t, idx) => (
                   <span
                     key={`${profile.id}-tag-${idx}`}
@@ -617,7 +669,15 @@ export default function ProfileDetailPage() {
               </div>
             )}
 
-            <div style={{ marginTop: "1.1rem", display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
+            {/* Actions */}
+            <div
+              style={{
+                marginTop: "1.1rem",
+                display: "flex",
+                gap: "0.6rem",
+                flexWrap: "wrap",
+              }}
+            >
               <button
                 onClick={onToggleSave}
                 disabled={loadingSets}
