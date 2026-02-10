@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
-import Link from "next/link";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
