@@ -23,6 +23,7 @@ type ApiProfile = {
   city: string;
   stateUS: string;
   photo?: string | null;
+  photo2?: string | null; // ✅ NEW
   identityPreview: string;
   intention: string;
   tags: string[];
@@ -212,7 +213,22 @@ export default function ProfileDetailPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingSets, setLoadingSets] = useState<boolean>(true);
 
-  const [brokenImage, setBrokenImage] = useState<boolean>(false);
+  // ✅ For thumbnail error fallback (per-src)
+  const [brokenSrcs, setBrokenSrcs] = useState<Record<string, boolean>>({});
+
+  // ---------- Photo gallery (2 photos) + lightbox ----------
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string>("");
+
+  function openLightbox(src: string) {
+    setLightboxSrc(src);
+    setLightboxOpen(true);
+  }
+
+  function closeLightbox() {
+    setLightboxOpen(false);
+    setLightboxSrc("");
+  }
 
   function showToast(msg: string) {
     setToast(msg);
@@ -244,15 +260,18 @@ export default function ProfileDetailPage() {
     return parseIdentityPreview(profile?.identityPreview || "");
   }, [profile?.identityPreview]);
 
+  const photos = useMemo(() => {
+    const p1 = profile?.photo || null;
+    const p2 = profile?.photo2 || null;
+    return [p1, p2].filter(Boolean) as string[];
+  }, [profile?.photo, profile?.photo2]);
+
   async function refreshSavedAndLikes(uid: string) {
     try {
       setApiError(null);
       setLoadingSets(true);
 
-      const [saved, likes] = await Promise.all([
-        apiGetSavedIds(uid),
-        apiGetLikes(uid),
-      ]);
+      const [saved, likes] = await Promise.all([apiGetSavedIds(uid), apiGetLikes(uid)]);
 
       setSavedIds(saved.filter((id) => availableProfileIds.has(id)));
       setLikedIds(likes.filter((id) => availableProfileIds.has(id)));
@@ -303,9 +322,7 @@ export default function ProfileDetailPage() {
     const prev = savedIds;
 
     setSavedIds((curr) =>
-      curr.includes(profile.id)
-        ? curr.filter((x) => x !== profile.id)
-        : [profile.id, ...curr]
+      curr.includes(profile.id) ? curr.filter((x) => x !== profile.id) : [profile.id, ...curr]
     );
 
     try {
@@ -332,9 +349,7 @@ export default function ProfileDetailPage() {
 
     const prev = likedIds;
 
-    setLikedIds((curr) =>
-      curr.includes(profile.id) ? curr : [profile.id, ...curr]
-    );
+    setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
 
     try {
       await apiLikeProfile(userId, profile.id, profile.owner_user_id);
@@ -378,9 +393,7 @@ export default function ProfileDetailPage() {
     return (
       <main style={{ minHeight: "100vh", padding: "2rem" }}>
         <p>Loading profile…</p>
-        <p style={{ color: "#666", fontSize: 13, marginTop: 8 }}>
-          API: {API_BASE}
-        </p>
+        <p style={{ color: "#666", fontSize: 13, marginTop: 8 }}>API: {API_BASE}</p>
       </main>
     );
   }
@@ -396,12 +409,8 @@ export default function ProfileDetailPage() {
         }}
       >
         <div style={{ width: "100%", maxWidth: 900 }}>
-          <h1 style={{ fontSize: "2rem", marginBottom: "0.35rem" }}>
-            Profile not found
-          </h1>
-          <p style={{ color: "#666" }}>
-            This profile ID was not found in the API list.
-          </p>
+          <h1 style={{ fontSize: "2rem", marginBottom: "0.35rem" }}>Profile not found</h1>
+          <p style={{ color: "#666" }}>This profile ID was not found in the API list.</p>
 
           <div style={{ marginTop: 10, fontSize: 13, color: "#666" }}>
             <div>
@@ -444,11 +453,6 @@ export default function ProfileDetailPage() {
   const isSaved = savedIds.includes(profile.id);
   const isLiked = likedIds.includes(profile.id);
   const tags = Array.isArray(profile.tags) ? profile.tags : [];
-
-  // ✅ NEW: smaller, responsive hero height (instead of huge 16:9)
-  // - Mobile: ~55vw tall
-  // - Desktop: caps at 420px
-  const photoBoxHeight = "min(420px, 55vw)";
 
   return (
     <main
@@ -542,28 +546,19 @@ export default function ProfileDetailPage() {
             border: isSaved ? "1px solid #cfe7cf" : "1px solid #e5e5e5",
             borderRadius: 16,
             overflow: "hidden",
-            boxShadow: isSaved
-              ? "0 0 0 2px rgba(207,231,207,0.35) inset"
-              : "none",
+            boxShadow: isSaved ? "0 0 0 2px rgba(207,231,207,0.35) inset" : "none",
             background: "white",
           }}
         >
-          {/* Photo (smaller now) */}
-          <div
-            style={{
-              width: "100%",
-              height: photoBoxHeight,
-              background: "#f3f3f3",
-              position: "relative",
-            }}
-          >
+          {/* Photos (thumbnails) */}
+          <div style={{ padding: "1.25rem", borderBottom: "1px solid #eee" }}>
+            <div style={{ fontWeight: 800, marginBottom: 10 }}>Photos</div>
+
             {isSaved && (
               <div
                 style={{
-                  position: "absolute",
-                  top: 12,
-                  right: 12,
-                  zIndex: 2,
+                  marginBottom: 10,
+                  display: "inline-block",
                   padding: "0.25rem 0.55rem",
                   borderRadius: 999,
                   border: "1px solid #cfe7cf",
@@ -577,14 +572,15 @@ export default function ProfileDetailPage() {
               </div>
             )}
 
-            {!profile.photo || brokenImage ? (
+            {photos.length === 0 ? (
               <div
                 style={{
                   width: "100%",
-                  height: "100%",
+                  height: 220,
+                  borderRadius: 16,
+                  background: "#f2f2f2",
                   display: "grid",
                   placeItems: "center",
-                  background: "#f2f2f2",
                   color: "#555",
                   fontSize: "2rem",
                   fontWeight: 700,
@@ -593,15 +589,130 @@ export default function ProfileDetailPage() {
                 {getInitials(profile.displayName)}
               </div>
             ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={profile.photo}
-                alt={profile.displayName}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                onError={() => setBrokenImage(true)}
-              />
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                {photos.slice(0, 2).map((src) => {
+                  const isBroken = !!brokenSrcs[src];
+                  return (
+                    <button
+                      key={src}
+                      type="button"
+                      onClick={() => openLightbox(src)}
+                      style={{
+                        border: "1px solid #ddd",
+                        padding: 0,
+                        borderRadius: 14,
+                        overflow: "hidden",
+                        cursor: "pointer",
+                        background: "white",
+                      }}
+                      aria-label="Open photo"
+                    >
+                      {isBroken ? (
+                        <div
+                          style={{
+                            width: 220,
+                            height: 220,
+                            display: "grid",
+                            placeItems: "center",
+                            background: "#f2f2f2",
+                            color: "#555",
+                            fontSize: "2rem",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {getInitials(profile.displayName)}
+                        </div>
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={src}
+                          alt={`${profile.displayName} photo`}
+                          style={{
+                            width: 220,
+                            height: 220,
+                            objectFit: "cover",
+                            display: "block",
+                          }}
+                          onError={() =>
+                            setBrokenSrcs((prev) => ({ ...prev, [src]: true }))
+                          }
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
+
+          {/* Lightbox modal */}
+          {lightboxOpen ? (
+            <div
+              onClick={closeLightbox}
+              role="dialog"
+              aria-modal="true"
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.75)",
+                zIndex: 9999,
+                display: "grid",
+                placeItems: "center",
+                padding: 16,
+              }}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  maxWidth: "min(960px, 96vw)",
+                  maxHeight: "90vh",
+                  background: "transparent",
+                  position: "relative",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={closeLightbox}
+                  style={{
+                    position: "absolute",
+                    top: -6,
+                    right: -6,
+                    width: 40,
+                    height: 40,
+                    borderRadius: 999,
+                    border: "1px solid rgba(255,255,255,0.35)",
+                    background: "rgba(0,0,0,0.5)",
+                    color: "white",
+                    cursor: "pointer",
+                    fontWeight: 900,
+                    fontSize: 18,
+                  }}
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={lightboxSrc}
+                  alt="Expanded photo"
+                  style={{
+                    width: "100%",
+                    height: "auto",
+                    maxHeight: "90vh",
+                    objectFit: "contain",
+                    borderRadius: 16,
+                    display: "block",
+                    background: "rgba(255,255,255,0.04)",
+                  }}
+                  onError={() => {
+                    // if expanded image breaks, close modal (prevents blank overlay)
+                    closeLightbox();
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
 
           {/* Body */}
           <div style={{ padding: "1.25rem" }}>
@@ -618,9 +729,7 @@ export default function ProfileDetailPage() {
                       background: "white",
                     }}
                   >
-                    <div style={{ fontWeight: 800, marginBottom: 6 }}>
-                      {sec.title}
-                    </div>
+                    <div style={{ fontWeight: 800, marginBottom: 6 }}>{sec.title}</div>
                     <div
                       style={{
                         color: "#555",
