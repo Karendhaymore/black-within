@@ -183,7 +183,7 @@ function buildIdentityPreview(args: {
   return parts.join("\n\n");
 }
 
-export default function MyProfilePage() {
+function MyProfilePageInner() {
   const [userId, setUserId] = useState<string>("");
   const sp = useSearchParams();
   const reason = sp.get("reason") || "";
