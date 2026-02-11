@@ -179,6 +179,12 @@ class Profile(Base):
     personal_truth_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # ✅ NEW: Ban fields (Ban #1)
+    is_banned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    banned_reason: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    banned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
@@ -324,6 +330,76 @@ class ThreadRead(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "thread_id", name="uq_thread_reads_user_thread"),
     )
+
+
+# -----------------------------
+# ✅ NEW: Admin Auth (real roles)
+# -----------------------------
+class AdminUser(Base):
+    __tablename__ = "admin_users"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+
+    role: Mapped[str] = mapped_column(String(30), default="admin", index=True)  # admin | moderator
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    admin_user_id: Mapped[str] = mapped_column(String(40), index=True)
+
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+# -----------------------------
+# ✅ NEW: Reports
+# -----------------------------
+class UserReport(Base):
+    __tablename__ = "user_reports"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+
+    reporter_user_id: Mapped[str] = mapped_column(String(40), index=True)
+    reported_user_id: Mapped[str] = mapped_column(String(40), index=True)
+    reported_profile_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+
+    thread_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True, index=True)
+
+    reason: Mapped[str] = mapped_column(String(160), index=True)
+    details: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
+
+    status: Mapped[str] = mapped_column(String(30), default="open", index=True)  # open|reviewing|resolved|dismissed
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+# -----------------------------
+# ✅ NEW: Claim tokens (admin can add users free)
+# -----------------------------
+class UserClaimToken(Base):
+    __tablename__ = "user_claim_tokens"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    profile_id: Mapped[str] = mapped_column(String(40), index=True)
+
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
 # -----------------------------
@@ -672,6 +748,67 @@ def _auto_migrate_password_reset_tokens_table():
 
 
 # -----------------------------
+# ✅ NEW: Admin/Reports migrations
+# -----------------------------
+def _auto_migrate_admin_tables():
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS admin_users (
+              id VARCHAR(40) PRIMARY KEY,
+              email VARCHAR(255) UNIQUE,
+              password_hash VARCHAR(255),
+              role VARCHAR(30),
+              is_enabled BOOLEAN DEFAULT TRUE,
+              created_at TIMESTAMP,
+              updated_at TIMESTAMP
+            );
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS admin_sessions (
+              id VARCHAR(40) PRIMARY KEY,
+              admin_user_id VARCHAR(40),
+              token_hash VARCHAR(128) UNIQUE,
+              expires_at TIMESTAMP,
+              created_at TIMESTAMP
+            );
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_reports (
+              id VARCHAR(40) PRIMARY KEY,
+              reporter_user_id VARCHAR(40),
+              reported_user_id VARCHAR(40),
+              reported_profile_id VARCHAR(40),
+              thread_id VARCHAR(60),
+              reason VARCHAR(160),
+              details VARCHAR(2000),
+              status VARCHAR(30),
+              created_at TIMESTAMP,
+              updated_at TIMESTAMP
+            );
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_claim_tokens (
+              id VARCHAR(40) PRIMARY KEY,
+              token_hash VARCHAR(128) UNIQUE,
+              user_id VARCHAR(40),
+              profile_id VARCHAR(40),
+              expires_at TIMESTAMP,
+              claimed_at TIMESTAMP,
+              created_at TIMESTAMP
+            );
+        """))
+
+
+def _auto_migrate_profiles_ban_fields():
+    # Add ban columns if missing (Postgres-friendly)
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS banned_reason VARCHAR(300);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS banned_at TIMESTAMP;"))
+        conn.execute(text("UPDATE profiles SET is_banned = FALSE WHERE is_banned IS NULL;"))
+
+
+# -----------------------------
 # Create tables + run migrations
 # -----------------------------
 Base.metadata.create_all(engine)
@@ -692,6 +829,12 @@ try:
 except Exception as e:
     print("AUTO_MIGRATE_PROFILES failed:", str(e))
 
+# ✅ NEW: ban columns
+try:
+    _auto_migrate_profiles_ban_fields()
+except Exception as e:
+    print("AUTO_MIGRATE_PROFILES_BAN failed:", str(e))
+
 try:
     _auto_migrate_notifications_table()
 except Exception as e:
@@ -711,6 +854,12 @@ try:
     _auto_migrate_password_reset_tokens_table()
 except Exception as e:
     print("AUTO_MIGRATE_PASSWORD_RESET failed:", str(e))
+
+# ✅ NEW: admin tables
+try:
+    _auto_migrate_admin_tables()
+except Exception as e:
+    print("AUTO_MIGRATE_ADMIN_TABLES failed:", str(e))
 
 
 # -----------------------------
@@ -960,6 +1109,111 @@ class UpsertMyProfilePayload(BaseModel):
 
 
 # -----------------------------
+# ✅ NEW: Admin schemas + Reports schemas
+# -----------------------------
+class AdminLoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class AdminLoginOut(BaseModel):
+    token: str
+    role: str
+    email: str
+
+
+class AdminMeOut(BaseModel):
+    email: str
+    role: str
+
+
+class AdminProfileRow(BaseModel):
+    profile_id: str
+    owner_user_id: str
+    displayName: str
+    age: int
+    city: str
+    stateUS: str
+    photo: Optional[str] = None
+    photo2: Optional[str] = None
+    isAvailable: bool
+    is_banned: bool = False
+    banned_reason: Optional[str] = None
+
+    likes_count: int = 0
+    saved_count: int = 0
+
+
+class AdminProfilesOut(BaseModel):
+    items: List[AdminProfileRow]
+
+
+class AdminPatchProfileIn(BaseModel):
+    isAvailable: Optional[bool] = None
+    is_banned: Optional[bool] = None
+    banned_reason: Optional[str] = None
+
+
+class AdminClearPhotoIn(BaseModel):
+    slot: int  # 1 or 2
+
+
+class ReportIn(BaseModel):
+    reporter_user_id: str
+    reported_user_id: str
+    reported_profile_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    reason: str
+    details: Optional[str] = None
+
+
+class ReportOut(BaseModel):
+    id: str
+    status: str
+
+
+class AdminReportRow(BaseModel):
+    id: str
+    reporter_user_id: str
+    reported_user_id: str
+    reported_profile_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    reason: str
+    details: Optional[str] = None
+    status: str
+    created_at: str
+
+
+class AdminReportsOut(BaseModel):
+    items: List[AdminReportRow]
+
+
+class AdminPatchReportIn(BaseModel):
+    status: str  # open|reviewing|resolved|dismissed
+
+
+class AdminCreateUserIn(BaseModel):
+    displayName: Optional[str] = None
+    city: Optional[str] = None
+    stateUS: Optional[str] = None
+
+
+class AdminCreateUserOut(BaseModel):
+    user_id: str
+    profile_id: str
+    claim_token: str
+
+
+class ClaimIn(BaseModel):
+    token: str
+
+
+class ClaimOut(BaseModel):
+    user_id: str
+    profile_id: str
+
+
+# -----------------------------
 # App
 # -----------------------------
 app = FastAPI(title="Black Within API", version="1.1.5")
@@ -1053,6 +1307,9 @@ def _coerce_str_list(v: Any) -> List[str]:
     return out
 
 
+# -----------------------------
+# Password hashing (USER AUTH)
+# -----------------------------
 def _hash_password(password: str) -> str:
     """
     PBKDF2 hash: pbkdf2$iters$salt$derived_key
@@ -1165,6 +1422,99 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
     return counter, likes_left, reset_at, "daily_utc"
 
 
+# -----------------------------
+# ✅ NEW: Admin security helpers (renamed to avoid clashing with user auth)
+# -----------------------------
+ADMIN_SECRET = (os.getenv("ADMIN_SECRET") or os.getenv("SECRET_KEY") or "dev-admin-secret").encode("utf-8")
+
+
+def _norm_email(x: str) -> str:
+    return (x or "").strip().lower()
+
+
+def _hash_token(token: str) -> str:
+    return hmac.new(ADMIN_SECRET, token.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _admin_hash_password(password: str, salt_hex: Optional[str] = None) -> str:
+    # pbkdf2_hmac: strong, no extra dependency
+    salt = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
+    return f"pbkdf2_sha256${salt.hex()}${dk.hex()}"
+
+
+def _admin_verify_password(password: str, stored: str) -> bool:
+    try:
+        kind, salt_hex, dk_hex = stored.split("$", 2)
+        if kind != "pbkdf2_sha256":
+            return False
+        check = _admin_hash_password(password, salt_hex=salt_hex)
+        return hmac.compare_digest(check, stored)
+    except Exception:
+        return False
+
+
+def _admin_bootstrap_if_needed():
+    """
+    One-time admin creation via env vars:
+      ADMIN_BOOTSTRAP_EMAIL=you@domain.com
+      ADMIN_BOOTSTRAP_PASSWORD=StrongPass123!
+    """
+    email = _norm_email(os.getenv("ADMIN_BOOTSTRAP_EMAIL") or "")
+    pw = os.getenv("ADMIN_BOOTSTRAP_PASSWORD") or ""
+    if not email or not pw:
+        return
+
+    with Session(engine) as session:
+        existing = session.execute(select(AdminUser).where(AdminUser.email == email)).scalar_one_or_none()
+        if existing:
+            return
+
+        u = AdminUser(
+            id=secrets.token_hex(20),
+            email=email,
+            password_hash=_admin_hash_password(pw),
+            role="admin",
+            is_enabled=True,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        session.add(u)
+        session.commit()
+
+
+def require_admin(authorization: Optional[str], allowed_roles: Optional[List[str]] = None) -> AdminUser:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing admin auth token.")
+    token = authorization.replace("Bearer ", "", 1).strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing admin auth token.")
+
+    th = _hash_token(token)
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        s = session.execute(select(AdminSession).where(AdminSession.token_hash == th)).scalar_one_or_none()
+        if not s or s.expires_at <= now:
+            raise HTTPException(status_code=401, detail="Admin session expired.")
+
+        au = session.execute(select(AdminUser).where(AdminUser.id == s.admin_user_id)).scalar_one_or_none()
+        if not au or not au.is_enabled:
+            raise HTTPException(status_code=403, detail="Admin disabled.")
+
+        if allowed_roles and au.role not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Insufficient admin role.")
+
+        return au
+
+
+# Bootstrap admin (safe no-op if env vars not set)
+try:
+    _admin_bootstrap_if_needed()
+except Exception as e:
+    print("ADMIN_BOOTSTRAP failed:", str(e))
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "service": "black-within-api"}
@@ -1235,12 +1585,7 @@ def login(payload: LoginPayload):
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
     _ensure_user(acct.user_id)
-    return {
-        "ok": True,
-        "userId": acct.user_id,
-        "user_id": acct.user_id,
-        "email": email,
-    }
+    return {"ok": True, "userId": acct.user_id, "user_id": acct.user_id, "email": email}
 
 
 @app.post("/auth/forgot-password")
@@ -1250,7 +1595,6 @@ def forgot_password(payload: ForgotPasswordPayload):
     # IMPORTANT: always return ok, even if email doesn't exist
     with Session(engine) as session:
         acct = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
-
         if not acct:
             return {"ok": True}
 
@@ -1312,7 +1656,9 @@ def reset_password(payload: ResetPasswordPayload):
     now = datetime.utcnow()
 
     with Session(engine) as session:
-        row = session.execute(select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)).scalar_one_or_none()
+        row = session.execute(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+        ).scalar_one_or_none()
 
         if not row:
             raise HTTPException(status_code=400, detail="This reset link is invalid or expired.")
@@ -1399,6 +1745,40 @@ def verify_code(payload: VerifyCodePayload):
     user_id = _make_user_id_from_email(email)
     _ensure_user(user_id)
     return {"ok": True, "userId": user_id}
+
+
+# -----------------------------
+# ✅ NEW: Auth claim (admin-created users)
+# -----------------------------
+@app.post("/auth/claim", response_model=ClaimOut)
+def claim_user(body: ClaimIn):
+    tok = (body.token or "").strip()
+    if not tok:
+        raise HTTPException(status_code=400, detail="Missing token.")
+
+    th = _hash_token(tok)
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        ct = session.execute(select(UserClaimToken).where(UserClaimToken.token_hash == th)).scalar_one_or_none()
+        if not ct:
+            raise HTTPException(status_code=404, detail="Invalid token.")
+        if ct.claimed_at is not None:
+            raise HTTPException(status_code=400, detail="Token already used.")
+        if ct.expires_at <= now:
+            raise HTTPException(status_code=400, detail="Token expired.")
+
+        ct.claimed_at = now
+        session.add(ct)
+        session.commit()
+
+        # Ensure user row exists (optional but keeps DB consistent)
+        try:
+            _ensure_user(ct.user_id)
+        except Exception:
+            pass
+
+        return ClaimOut(user_id=ct.user_id, profile_id=ct.profile_id)
 
 
 # -----------------------------
@@ -1499,7 +1879,14 @@ def list_profiles(
     limit: int = Query(default=50, ge=1, le=200),
 ):
     with Session(engine) as session:
-        q = select(Profile).where(Profile.is_available == True).order_by(Profile.updated_at.desc()).limit(limit)
+        # ✅ hide banned users from Discover
+        q = (
+            select(Profile)
+            .where(Profile.is_available == True)
+            .where(or_(Profile.is_banned == False, Profile.is_banned.is_(None)))
+            .order_by(Profile.updated_at.desc())
+            .limit(limit)
+        )
 
         if exclude_owner_user_id:
             q = q.where(Profile.owner_user_id != exclude_owner_user_id)
@@ -1575,7 +1962,12 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             existing.dating_challenge_text = dating_challenge
             existing.personal_truth_text = personal_truth
 
-            existing.is_available = is_avail
+            # ✅ if banned, force hidden regardless of isAvailable input
+            if getattr(existing, "is_banned", False):
+                existing.is_available = False
+            else:
+                existing.is_available = is_avail
+
             existing.updated_at = now
             session.commit()
             pid = existing.id
@@ -1600,6 +1992,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
                     dating_challenge_text=dating_challenge,
                     personal_truth_text=personal_truth,
                     is_available=is_avail,
+                    is_banned=False,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1643,11 +2036,7 @@ def get_profile_by_id(profile_id: str = Query(...)):
         if not p:
             raise HTTPException(status_code=404, detail="Profile not found")
 
-        return ProfileLiteResponse(
-            profile_id=p.id,
-            display_name=p.display_name,
-            photo=p.photo,
-        )
+        return ProfileLiteResponse(profile_id=p.id, display_name=p.display_name, photo=p.photo)
 
 
 @app.post("/profiles", response_model=ProfileItem)
@@ -1682,11 +2071,6 @@ def get_photo(filename: str):
     return FileResponse(os.path.join(UPLOAD_DIR, filename))
 
 
-# ✅ 3) NEW: delete photo route (requested)
-# Does:
-# - checks user owns the profile
-# - removes the photo URL from profile’s photo fields
-# - deletes the file from disk (best-effort)
 @app.post("/photos/delete")
 def delete_photo(req: DeletePhotoRequest):
     user_id = (req.user_id or "").strip()
@@ -1704,7 +2088,6 @@ def delete_photo(req: DeletePhotoRequest):
     with Session(engine) as session:
         # Find the user's profile
         prof = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
-
         if not prof:
             raise HTTPException(status_code=404, detail="Profile not found for this user")
 
@@ -1719,8 +2102,6 @@ def delete_photo(req: DeletePhotoRequest):
             prof.photo2 = None
             changed = True
 
-        # If it's not in either slot, still allow deleting the file
-        # but we won't block the user (helps cleanup).
         if changed:
             session.add(prof)
             session.commit()
@@ -1730,7 +2111,6 @@ def delete_photo(req: DeletePhotoRequest):
         if os.path.exists(file_path):
             os.remove(file_path)
     except Exception:
-        # Don't hard-fail if delete on disk fails
         pass
 
     return {"ok": True}
@@ -1899,7 +2279,6 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
 
     with Session(engine) as session:
         my_profile = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
-
         if not my_profile:
             return ProfilesListResponse(items=[])
 
@@ -1919,6 +2298,7 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
                 select(Profile)
                 .where(Profile.owner_user_id.in_(liker_user_ids))
                 .where(or_(Profile.is_available == True, Profile.is_available.is_(None)))
+                .where(or_(Profile.is_banned == False, Profile.is_banned.is_(None)))
             )
             .scalars()
             .all()
@@ -1968,9 +2348,7 @@ def like(payload: ProfileAction):
     with Session(engine) as session:
         counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
 
-        existing = session.execute(
-            select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)
-        ).scalar_one_or_none()
+        existing = session.execute(select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)).scalar_one_or_none()
         if existing:
             return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
 
@@ -1985,6 +2363,8 @@ def like(payload: ProfileAction):
         prof = session.get(Profile, profile_id)
         if not prof:
             raise HTTPException(status_code=404, detail="Profile not found")
+        if getattr(prof, "is_banned", False):
+            raise HTTPException(status_code=404, detail="Profile not found")
 
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
 
@@ -1996,7 +2376,6 @@ def like(payload: ProfileAction):
                 counter.window_started_at = datetime.utcnow()
 
         recipient_user_id = prof.owner_user_id
-
         actor_profile = session.execute(select(Profile).where(Profile.owner_user_id == liker_user_id)).scalar_one_or_none()
 
         if recipient_user_id and recipient_user_id != liker_user_id:
@@ -2063,10 +2442,7 @@ def _can_message_thread(session: Session, user_id: str, thread_id: str) -> Tuple
     if ent and ent.is_premium:
         return True, True, ""
 
-    tu = session.execute(
-        select(ThreadUnlock).where(ThreadUnlock.user_id == user_id, ThreadUnlock.thread_id == thread_id)
-    ).scalar_one_or_none()
-
+    tu = session.execute(select(ThreadUnlock).where(ThreadUnlock.user_id == user_id, ThreadUnlock.thread_id == thread_id)).scalar_one_or_none()
     if tu:
         return True, False, ""
 
@@ -2102,18 +2478,11 @@ def mark_thread_read(payload: MarkReadPayload):
 
         _ensure_thread_participant(thread, user_id)
 
-        # mark read up to latest message timestamp in that thread
-        latest_created_at = session.execute(
-            select(func.max(Message.created_at)).where(Message.thread_id == thread_id)
-        ).scalar_one()
-
+        latest_created_at = session.execute(select(func.max(Message.created_at)).where(Message.thread_id == thread_id)).scalar_one()
         read_at = latest_created_at or datetime.utcnow()
         now = datetime.utcnow()
 
-        tr = session.execute(
-            select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == thread_id)
-        ).scalar_one_or_none()
-
+        tr = session.execute(select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == thread_id)).scalar_one_or_none()
         if tr:
             if tr.last_read_at is None or read_at > tr.last_read_at:
                 tr.last_read_at = read_at
@@ -2140,7 +2509,7 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
 
     with Session(engine) as session:
         prof = session.get(Profile, (payload.with_profile_id or "").strip())
-        if not prof:
+        if not prof or getattr(prof, "is_banned", False):
             raise HTTPException(status_code=404, detail="Profile not found")
 
         other_user_id = (prof.owner_user_id or "").strip()
@@ -2152,9 +2521,7 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
 
         low, high = _sorted_pair(user_id, other_user_id)
 
-        existing = session.execute(
-            select(Thread).where(Thread.user_low == low, Thread.user_high == high)
-        ).scalar_one_or_none()
+        existing = session.execute(select(Thread).where(Thread.user_low == low, Thread.user_high == high)).scalar_one_or_none()
 
         now = datetime.utcnow()
 
@@ -2183,10 +2550,7 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
     with Session(engine) as session:
         rows = (
             session.execute(
-                select(Thread)
-                .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
-                .order_by(Thread.updated_at.desc())
-                .limit(limit)
+                select(Thread).where((Thread.user_low == user_id) | (Thread.user_high == user_id)).order_by(Thread.updated_at.desc()).limit(limit)
             )
             .scalars()
             .all()
@@ -2197,17 +2561,10 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
 
-            other_profile = session.execute(
-                select(Profile).where(Profile.owner_user_id == other_user_id)
-            ).scalar_one_or_none()
+            other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
 
             last_msg = (
-                session.execute(
-                    select(Message)
-                    .where(Message.thread_id == t.id)
-                    .order_by(Message.created_at.desc())
-                    .limit(1)
-                )
+                session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1))
                 .scalar_one_or_none()
             )
 
@@ -2233,10 +2590,7 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
     with Session(engine) as session:
         rows = (
             session.execute(
-                select(Thread)
-                .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
-                .order_by(Thread.updated_at.desc())
-                .limit(limit)
+                select(Thread).where((Thread.user_low == user_id) | (Thread.user_high == user_id)).order_by(Thread.updated_at.desc()).limit(limit)
             )
             .scalars()
             .all()
@@ -2247,27 +2601,16 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
 
-            other_profile = session.execute(
-                select(Profile).where(Profile.owner_user_id == other_user_id)
-            ).scalar_one_or_none()
+            other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
 
             last_msg = (
-                session.execute(
-                    select(Message)
-                    .where(Message.thread_id == t.id)
-                    .order_by(Message.created_at.desc())
-                    .limit(1)
-                )
+                session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1))
                 .scalar_one_or_none()
             )
 
-            # ✅ My last read timestamp (ThreadRead is per user/thread)
-            my_read = session.execute(
-                select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == t.id)
-            ).scalar_one_or_none()
+            my_read = session.execute(select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == t.id)).scalar_one_or_none()
             my_last_read_at = my_read.last_read_at if my_read else None
 
-            # ✅ Unread count: messages from the other user after my_last_read_at
             unread_count_q = select(func.count()).select_from(Message).where(
                 Message.thread_id == t.id,
                 Message.sender_user_id != user_id,
@@ -2312,12 +2655,7 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
         _ensure_thread_participant(thread, user_id)
 
         can_msg, is_premium, reason = _can_message_thread(session, user_id, thread_id)
-        return MessagingAccessResponse(
-            canMessage=can_msg,
-            isPremium=is_premium,
-            unlockedUntilUTC=None,
-            reason=reason,
-        )
+        return MessagingAccessResponse(canMessage=can_msg, isPremium=is_premium, unlockedUntilUTC=None, reason=reason)
 
 
 def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None:
@@ -2325,7 +2663,6 @@ def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None
     Enforce: user must have a profile photo before sending messages.
     Returns nothing if OK; raises HTTPException if not.
     """
-    # Let you keep building/testing without getting blocked
     if AUTH_PREVIEW_MODE:
         return
 
@@ -2333,7 +2670,9 @@ def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None
     if not p:
         raise HTTPException(status_code=403, detail="photo_required")
 
-    # ✅ Treat either photo or photo2 as satisfying the requirement
+    if getattr(p, "is_banned", False):
+        raise HTTPException(status_code=403, detail="banned")
+
     photo1 = (p.photo or "").strip()
     photo2 = (getattr(p, "photo2", "") or "").strip()
     if not (photo1 or photo2):
@@ -2359,21 +2698,13 @@ def list_messages(
         if not thread:
             raise HTTPException(status_code=404, detail="Thread not found")
 
-        # ✅ get other user id so we can fetch their read-receipt timestamp
         other_user_id = _ensure_thread_participant(thread, user_id)
 
-        other_read = session.execute(
-            select(ThreadRead).where(ThreadRead.thread_id == thread_id, ThreadRead.user_id == other_user_id)
-        ).scalar_one_or_none()
+        other_read = session.execute(select(ThreadRead).where(ThreadRead.thread_id == thread_id, ThreadRead.user_id == other_user_id)).scalar_one_or_none()
         other_last_read_at = other_read.last_read_at.isoformat() if (other_read and other_read.last_read_at) else None
 
         rows = (
-            session.execute(
-                select(Message)
-                .where(Message.thread_id == thread_id)
-                .order_by(Message.created_at.desc())
-                .limit(limit)
-            )
+            session.execute(select(Message).where(Message.thread_id == thread_id).order_by(Message.created_at.desc()).limit(limit))
             .scalars()
             .all()
         )
@@ -2410,12 +2741,10 @@ def send_message(payload: MessageCreatePayload):
 
         _ensure_thread_participant(thread, user_id)
 
-        # ✅ Require profile photo before sending messages (unless AUTH_PREVIEW_MODE)
         _require_profile_photo_for_messaging(session, user_id)
 
         can_msg, is_premium, reason = _can_message_thread(session, user_id, thread_id)
 
-        # ✅ PREVIEW MODE BYPASS (paywall)
         if not can_msg and not AUTH_PREVIEW_MODE:
             raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
 
@@ -2428,13 +2757,7 @@ def send_message(payload: MessageCreatePayload):
         session.commit()
         session.refresh(m)
 
-        return MessageItem(
-            id=m.id,
-            thread_id=m.thread_id,
-            sender_user_id=m.sender_user_id,
-            body=m.body,
-            created_at=m.created_at.isoformat(),
-        )
+        return MessageItem(id=m.id, thread_id=m.thread_id, sender_user_id=m.sender_user_id, body=m.body, created_at=m.created_at.isoformat())
 
 
 # -----------------------------
@@ -2468,9 +2791,7 @@ def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default
         if not thread_id:
             raise HTTPException(status_code=400, detail="thread_id is required unless make_premium=true")
 
-        existing = session.execute(
-            select(ThreadUnlock).where(ThreadUnlock.user_id == user_id, ThreadUnlock.thread_id == thread_id)
-        ).scalar_one_or_none()
+        existing = session.execute(select(ThreadUnlock).where(ThreadUnlock.user_id == user_id, ThreadUnlock.thread_id == thread_id)).scalar_one_or_none()
         if not existing:
             now = datetime.utcnow()
             session.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=now, updated_at=now))
@@ -2480,6 +2801,360 @@ def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default
                 session.rollback()
 
         return {"ok": True, "userId": user_id, "threadId": thread_id, "unlocked": True}
+
+
+# -----------------------------
+# ✅ NEW: ADMIN AUTH + MODERATION + REPORTS
+# -----------------------------
+@app.post("/admin/auth/login", response_model=AdminLoginOut)
+def admin_login(body: AdminLoginIn):
+    email = _norm_email(body.email)
+    if not email or not body.password:
+        raise HTTPException(status_code=400, detail="Email and password required.")
+
+    with Session(engine) as session:
+        au = session.execute(select(AdminUser).where(AdminUser.email == email)).scalar_one_or_none()
+        if not au or not au.is_enabled:
+            raise HTTPException(status_code=401, detail="Invalid credentials.")
+        if not _admin_verify_password(body.password, au.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid credentials.")
+
+        token = secrets.token_urlsafe(32)
+        s = AdminSession(
+            id=secrets.token_hex(20),
+            admin_user_id=au.id,
+            token_hash=_hash_token(token),
+            expires_at=datetime.utcnow() + timedelta(days=7),
+            created_at=datetime.utcnow(),
+        )
+        session.add(s)
+        session.commit()
+
+        return AdminLoginOut(token=token, role=au.role, email=au.email)
+
+
+@app.get("/admin/me", response_model=AdminMeOut)
+def admin_me(authorization: Optional[str] = Header(default=None)):
+    au = require_admin(authorization, allowed_roles=["admin", "moderator"])
+    return AdminMeOut(email=au.email, role=au.role)
+
+
+def _safe_count(conn, sql: str, params: Dict[str, Any]) -> int:
+    try:
+        v = conn.execute(text(sql), params).scalar()
+        return int(v or 0)
+    except Exception:
+        return 0
+
+
+@app.get("/admin/profiles", response_model=AdminProfilesOut)
+def admin_list_profiles(
+    q: Optional[str] = None,
+    limit: int = 200,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_admin(authorization, allowed_roles=["admin", "moderator"])
+
+    qn = (q or "").strip().lower()
+    limit = max(1, min(int(limit or 200), 500))
+
+    with engine.begin() as conn:
+        if qn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, owner_user_id, display_name, age, city, state_us,
+                           photo, photo2, is_available, COALESCE(is_banned,false) as is_banned,
+                           banned_reason
+                    FROM profiles
+                    WHERE LOWER(display_name) LIKE :q
+                       OR LOWER(city) LIKE :q
+                       OR LOWER(state_us) LIKE :q
+                       OR LOWER(owner_user_id) LIKE :q
+                    ORDER BY created_at DESC
+                    LIMIT :lim
+                """
+                ),
+                {"q": f"%{qn}%", "lim": limit},
+            ).mappings().all()
+        else:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, owner_user_id, display_name, age, city, state_us,
+                           photo, photo2, is_available, COALESCE(is_banned,false) as is_banned,
+                           banned_reason
+                    FROM profiles
+                    ORDER BY created_at DESC
+                    LIMIT :lim
+                """
+                ),
+                {"lim": limit},
+            ).mappings().all()
+
+        items: List[AdminProfileRow] = []
+        for r in rows:
+            pid = str(r["id"])
+            likes = _safe_count(conn, "SELECT COUNT(1) FROM likes WHERE profile_id = :pid", {"pid": pid})
+            saved = _safe_count(conn, "SELECT COUNT(1) FROM saved_profiles WHERE profile_id = :pid", {"pid": pid})
+
+            items.append(
+                AdminProfileRow(
+                    profile_id=pid,
+                    owner_user_id=str(r["owner_user_id"]),
+                    displayName=str(r["display_name"] or ""),
+                    age=int(r["age"] or 0),
+                    city=str(r["city"] or ""),
+                    stateUS=str(r["state_us"] or ""),
+                    photo=r.get("photo"),
+                    photo2=r.get("photo2"),
+                    isAvailable=bool(r["is_available"]),
+                    is_banned=bool(r["is_banned"]),
+                    banned_reason=r.get("banned_reason"),
+                    likes_count=likes,
+                    saved_count=saved,
+                )
+            )
+
+        return AdminProfilesOut(items=items)
+
+
+@app.patch("/admin/profiles/{profile_id}")
+def admin_patch_profile(
+    profile_id: str,
+    body: AdminPatchProfileIn,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_admin(authorization, allowed_roles=["admin", "moderator"])
+
+    with Session(engine) as session:
+        p = session.execute(select(Profile).where(Profile.id == profile_id)).scalar_one_or_none()
+        if not p:
+            raise HTTPException(status_code=404, detail="Profile not found.")
+
+        if body.isAvailable is not None:
+            # if banned, still force false
+            if getattr(p, "is_banned", False):
+                p.is_available = False
+            else:
+                p.is_available = bool(body.isAvailable)
+
+        if body.is_banned is not None:
+            p.is_banned = bool(body.is_banned)
+            p.banned_at = datetime.utcnow() if p.is_banned else None
+            if p.is_banned:
+                p.is_available = False
+
+        if body.banned_reason is not None:
+            p.banned_reason = (body.banned_reason or "").strip() or None
+
+        p.updated_at = datetime.utcnow()
+        session.add(p)
+        session.commit()
+
+        return {"ok": True}
+
+
+@app.post("/admin/profiles/{profile_id}/clear-photo")
+def admin_clear_photo(
+    profile_id: str,
+    body: AdminClearPhotoIn,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_admin(authorization, allowed_roles=["admin", "moderator"])
+    slot = int(body.slot or 0)
+    if slot not in (1, 2):
+        raise HTTPException(status_code=400, detail="slot must be 1 or 2")
+
+    with Session(engine) as session:
+        p = session.execute(select(Profile).where(Profile.id == profile_id)).scalar_one_or_none()
+        if not p:
+            raise HTTPException(status_code=404, detail="Profile not found.")
+
+        if slot == 1:
+            p.photo = None
+        else:
+            p.photo2 = None
+        p.updated_at = datetime.utcnow()
+
+        session.add(p)
+        session.commit()
+
+    return {"ok": True}
+
+
+# Reports: user submits + admin views + admin updates status + email notify
+ADMIN_REPORT_EMAIL = (os.getenv("ADMIN_REPORT_EMAIL") or "").strip()
+
+
+def _send_admin_report_email(subject: str, content: str):
+    # If not configured, no-op.
+    if not ADMIN_REPORT_EMAIL:
+        return
+    try:
+        sg = SendGridAPIClient(os.environ.get("SENDGRID_API_KEY"))
+        from_email = os.getenv("SENDGRID_FROM_EMAIL") or "noreply@blackwithin.app"
+        msg = Mail(
+            from_email=from_email,
+            to_emails=ADMIN_REPORT_EMAIL,
+            subject=subject[:120],
+            plain_text_content=content[:6000],
+        )
+        sg.send(msg)
+    except Exception:
+        return
+
+
+@app.post("/reports", response_model=ReportOut)
+def create_report(body: ReportIn):
+    if not body.reporter_user_id or not body.reported_user_id or not (body.reason or "").strip():
+        raise HTTPException(status_code=400, detail="reporter_user_id, reported_user_id, and reason are required.")
+
+    rid = secrets.token_hex(20)
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        r = UserReport(
+            id=rid,
+            reporter_user_id=body.reporter_user_id.strip(),
+            reported_user_id=body.reported_user_id.strip(),
+            reported_profile_id=(body.reported_profile_id.strip() if body.reported_profile_id else None),
+            thread_id=(body.thread_id.strip() if body.thread_id else None),
+            reason=body.reason.strip()[:160],
+            details=(body.details.strip()[:2000] if body.details else None),
+            status="open",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(r)
+        session.commit()
+
+    _send_admin_report_email(
+        subject="Black Within — New user report",
+        content=(
+            f"Report ID: {rid}\n"
+            f"Reporter user_id: {body.reporter_user_id}\n"
+            f"Reported user_id: {body.reported_user_id}\n"
+            f"Reported profile_id: {body.reported_profile_id or ''}\n"
+            f"Thread ID: {body.thread_id or ''}\n"
+            f"Reason: {body.reason}\n"
+            f"Details: {body.details or ''}\n"
+            f"Time (UTC): {now.isoformat()}Z\n"
+        ),
+    )
+
+    return ReportOut(id=rid, status="open")
+
+
+@app.get("/admin/reports", response_model=AdminReportsOut)
+def admin_list_reports(
+    status: Optional[str] = None,
+    limit: int = 200,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_admin(authorization, allowed_roles=["admin", "moderator"])
+    limit = max(1, min(int(limit or 200), 500))
+
+    with Session(engine) as session:
+        q = select(UserReport).order_by(UserReport.created_at.desc())
+        if status:
+            q = q.where(UserReport.status == status)
+        q = q.limit(limit)
+
+        rows = session.execute(q).scalars().all()
+
+        return AdminReportsOut(
+            items=[
+                AdminReportRow(
+                    id=r.id,
+                    reporter_user_id=r.reporter_user_id,
+                    reported_user_id=r.reported_user_id,
+                    reported_profile_id=r.reported_profile_id,
+                    thread_id=r.thread_id,
+                    reason=r.reason,
+                    details=r.details,
+                    status=r.status,
+                    created_at=r.created_at.isoformat() + "Z",
+                )
+                for r in rows
+            ]
+        )
+
+
+@app.patch("/admin/reports/{report_id}")
+def admin_patch_report(
+    report_id: str,
+    body: AdminPatchReportIn,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_admin(authorization, allowed_roles=["admin", "moderator"])
+    st = (body.status or "").strip().lower()
+    if st not in ("open", "reviewing", "resolved", "dismissed"):
+        raise HTTPException(status_code=400, detail="Invalid status.")
+
+    with Session(engine) as session:
+        r = session.execute(select(UserReport).where(UserReport.id == report_id)).scalar_one_or_none()
+        if not r:
+            raise HTTPException(status_code=404, detail="Report not found.")
+        r.status = st
+        r.updated_at = datetime.utcnow()
+        session.add(r)
+        session.commit()
+
+    return {"ok": True}
+
+
+@app.post("/admin/users/create", response_model=AdminCreateUserOut)
+def admin_create_user_free(
+    body: AdminCreateUserIn,
+    authorization: Optional[str] = Header(default=None),
+):
+    require_admin(authorization, allowed_roles=["admin"])  # only full admin creates users
+
+    user_id = secrets.token_hex(20)
+    profile_id = secrets.token_hex(20)
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        p = Profile(
+            id=profile_id,
+            owner_user_id=user_id,
+            display_name=(body.displayName or "New Member").strip(),
+            age=18,
+            city=(body.city or "").strip(),
+            state_us=(body.stateUS or "").strip(),
+            identity_preview="",
+            intention="Intentional partnership",
+            tags_csv="[]",
+            cultural_identity_csv="[]",
+            spiritual_framework_csv="[]",
+            relationship_intent=None,
+            dating_challenge_text=None,
+            personal_truth_text=None,
+            is_available=False,  # start hidden until they finish
+            is_banned=False,
+            banned_reason=None,
+            banned_at=None,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(p)
+
+        token = secrets.token_urlsafe(32)
+        ct = UserClaimToken(
+            id=secrets.token_hex(20),
+            token_hash=_hash_token(token),
+            user_id=user_id,
+            profile_id=profile_id,
+            expires_at=now + timedelta(days=14),
+            claimed_at=None,
+            created_at=now,
+        )
+        session.add(ct)
+
+        session.commit()
+
+    return AdminCreateUserOut(user_id=user_id, profile_id=profile_id, claim_token=token)
 
 
 # -----------------------------
@@ -2503,24 +3178,15 @@ def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
             mode="payment",
             line_items=[
                 {
-                    "price_data": {
-                        "currency": "usd",
-                        "unit_amount": 199,  # $1.99
-                        "product_data": {"name": "Unlock Chat Conversation"},
-                    },
+                    "price_data": {"currency": "usd", "unit_amount": 199, "product_data": {"name": "Unlock Chat Conversation"}},
                     "quantity": 1,
                 }
             ],
             success_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=success",
             cancel_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=cancel",
-            metadata={
-                "kind": "thread_unlock",  # ✅ REQUIRED for webhook to write ThreadUnlock
-                "user_id": user_id,
-                "thread_id": thread_id,
-            },
+            metadata={"kind": "thread_unlock", "user_id": user_id, "thread_id": thread_id},
         )
         return CheckoutSessionResponse(url=checkout_session.url)
-
     except Exception as e:
         print("STRIPE thread-unlock error:", str(e))
         raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
@@ -2545,13 +3211,9 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
             success_url=success_url,
             cancel_url=cancel_url,
             client_reference_id=user_id,
-            metadata={
-                "kind": "premium",
-                "user_id": user_id,
-            },
+            metadata={"kind": "premium", "user_id": user_id},
         )
         return CheckoutSessionResponse(url=session_obj.url)
-
     except Exception as e:
         print("STRIPE premium error:", str(e))
         raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
@@ -2582,7 +3244,7 @@ def create_unlock_session(payload: CreateUnlockSessionPayload):
                 }
             ],
             metadata={
-                "kind": "thread_unlock",  # ✅ REQUIRED for webhook to write ThreadUnlock
+                "kind": "thread_unlock",
                 "user_id": user_id,
                 "target_profile_id": payload.target_profile_id,
                 "thread_id": payload.thread_id,
@@ -2592,7 +3254,6 @@ def create_unlock_session(payload: CreateUnlockSessionPayload):
         )
 
         return {"checkout_url": session_obj.url}
-
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2615,7 +3276,6 @@ async def stripe_webhook(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Webhook error: {str(e)}")
 
-    # Only handle what we need
     if event.get("type") != "checkout.session.completed":
         return {"status": "ignored"}
 
@@ -2624,7 +3284,6 @@ async def stripe_webhook(request: Request):
     kind = metadata.get("kind")
 
     with Session(engine) as db:
-        # 🔓 THREAD UNLOCK PURCHASE
         if kind == "thread_unlock":
             user_id = (metadata.get("user_id") or "").strip()
             thread_id = (metadata.get("thread_id") or "").strip()
@@ -2632,16 +3291,8 @@ async def stripe_webhook(request: Request):
             if not user_id or not thread_id:
                 raise HTTPException(status_code=400, detail="Missing user_id or thread_id")
 
-            # ✅ FIX: set both created_at and updated_at
             now = datetime.utcnow()
-            db.add(
-                ThreadUnlock(
-                    user_id=user_id,
-                    thread_id=thread_id,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+            db.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=now, updated_at=now))
             try:
                 db.commit()
             except IntegrityError:
@@ -2649,7 +3300,6 @@ async def stripe_webhook(request: Request):
 
             return {"status": "success"}
 
-        # ⭐ PREMIUM PURCHASE
         if kind == "premium":
             user_id = (metadata.get("user_id") or "").strip() or (session_obj.get("client_reference_id") or "").strip()
             if not user_id:
