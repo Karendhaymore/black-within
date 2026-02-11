@@ -679,6 +679,14 @@ def _auto_migrate_admin_tables():
             )
         )
 
+        # Ensure status exists + has a usable default
+        conn.execute(text("ALTER TABLE user_reports ADD COLUMN IF NOT EXISTS status VARCHAR(30);"))
+        conn.execute(text("UPDATE user_reports SET status = 'open' WHERE status IS NULL OR status = '';"))
+
+        # Optional: index if not present (helps alerts query)
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_user_reports_status ON user_reports(status);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_user_reports_created_at ON user_reports(created_at);"))
+
 
 def _auto_migrate_profiles_ban_fields():
     with engine.begin() as conn:
