@@ -17,7 +17,7 @@ type ProfileItem = {
   city: string;
   stateUS: string;
   photo?: string | null;
-  photo2?: string | null; // ✅ add
+  photo2?: string | null;
 
   identityPreview: string;
   intention: string;
@@ -39,7 +39,7 @@ type FormState = {
   city: string;
   stateUS: string;
   photo: string;
-  photo2: string; // ✅ add
+  photo2: string;
 
   relationshipIntent: string;
   datingChallenge: string;
@@ -147,30 +147,29 @@ async function apiUpsertProfile(payload: any) {
   return res.json();
 }
 
-// ✅ upload photo file -> returns URL
-async function apiUploadProfilePhoto(file: File): Promise<string> {
+// ✅ Fix #2: signature matches usage (userId + file)
+async function apiUploadProfilePhoto(userId: string, file: File): Promise<string> {
   const fd = new FormData();
   fd.append("file", file);
 
-  const res = await fetch(`${API_BASE}/upload/photo`, {
-    method: "POST",
-    body: fd,
-  });
+  // (safe) send userId both ways in case your backend expects one or the other
+  fd.append("user_id", userId);
+
+  const res = await fetch(
+    `${API_BASE}/upload/photo?user_id=${encodeURIComponent(userId)}`,
+    { method: "POST", body: fd }
+  );
 
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
   const json = (await res.json()) as UploadPhotoResponse;
-
   const url = (json.photoUrl || json.url || json.photo || "").trim();
   if (!url) throw new Error("Upload succeeded but no photo URL was returned.");
   return url;
 }
 
-// ✅ 1) Delete photo API helper
-async function apiDeleteProfilePhoto(
-  userId: string,
-  photoUrl: string
-): Promise<void> {
+// ✅ Delete photo API helper
+async function apiDeleteProfilePhoto(userId: string, photoUrl: string): Promise<void> {
   const res = await fetch(`${API_BASE}/photos/delete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -215,9 +214,7 @@ function buildIdentityPreview(args: {
   personalTruth: string;
 }) {
   const parts = [
-    args.cultural.length
-      ? `Cultural Identity: ${args.cultural.join(" • ")}`
-      : "",
+    args.cultural.length ? `Cultural Identity: ${args.cultural.join(" • ")}` : "",
     args.spiritual.length
       ? `Spiritual Framework: ${args.spiritual.join(" • ")}`
       : "",
@@ -241,7 +238,7 @@ export default function MyProfilePage() {
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  // ✅ Photo upload state (custom button + preview) - Photo 1
+  // ✅ Photo upload state - Photo 1
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>("");
@@ -300,9 +297,7 @@ export default function MyProfilePage() {
     list: string[],
     setList: (v: string[]) => void
   ) {
-    setList(
-      list.includes(value) ? list.filter((x) => x !== value) : [...list, value]
-    );
+    setList(list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
   }
 
   // ✅ Auth guard
@@ -336,24 +331,19 @@ export default function MyProfilePage() {
             photo2: (mine.photo2 as string) || "",
 
             relationshipIntent:
-              mine.relationshipIntent ||
-              mine.intention ||
-              "Intentional partnership",
+              mine.relationshipIntent || mine.intention || "Intentional partnership",
             datingChallenge: mine.datingChallenge || "",
             personalTruth: mine.personalTruth || "",
 
-            isAvailable:
-              typeof mine.isAvailable === "boolean" ? mine.isAvailable : true,
+            isAvailable: typeof mine.isAvailable === "boolean" ? mine.isAvailable : true,
           });
 
-          setCulturalSelected(
-            Array.isArray(mine.culturalIdentity) ? mine.culturalIdentity : []
-          );
+          setCulturalSelected(Array.isArray(mine.culturalIdentity) ? mine.culturalIdentity : []);
           setSpiritualSelected(
             Array.isArray(mine.spiritualFramework) ? mine.spiritualFramework : []
           );
 
-          // ✅ ensure preview resets to stored photos when loading
+          // ✅ reset previews to stored photos when loading
           setPhotoPreview((mine.photo as string) || "");
           setPhotoPreview2((mine.photo2 as string) || "");
         }
@@ -365,7 +355,7 @@ export default function MyProfilePage() {
     })();
   }, [userId]);
 
-  // ✅ helper: build the upsert payload from "current" values (with optional overrides)
+  // ✅ buildUpsertPayload()
   function buildUpsertPayload(overrides?: Partial<{ photo: string; photo2: string }>) {
     const ageNum = parseInt(form.age || "0", 10) || 0;
 
@@ -387,7 +377,6 @@ export default function MyProfilePage() {
       city: form.city.trim(),
       stateUS: form.stateUS.trim(),
 
-      // ✅ persist both slots
       photo: photoValue,
       photo2: photo2Value,
 
@@ -405,152 +394,60 @@ export default function MyProfilePage() {
     };
   }
 
-  // ✅ Replace your onUploadPhoto() with this version (slot 1 or 2)
-async function onUploadPhoto(slot: 1 | 2) {
-  if (!userId) return;
-
-  const file = slot === 1 ? photoFile : photoFile2;
-  if (!file) {
-    showToast("Choose a photo first.");
-    return;
-  }
-
-  if (!file.type.startsWith("image/")) {
-    showToast("Please choose an image file (jpg/png/webp).");
-    return;
-  }
-
-  setUploadingPhoto(true);
-  setApiError(null);
-
-  try {
-    const url = await apiUploadProfilePhoto(userId, file);
-
-    // Update the correct slot in state + preview + clear file input
-    if (slot === 1) {
-      setForm((p) => ({ ...p, photo: url }));
-      setPhotoPreview(null);
-      setPhotoFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    } else {
-      setForm((p) => ({ ...p, photo2: url }));
-      setPhotoPreview2(null);
-      setPhotoFile2(null);
-      if (fileInputRef2.current) fileInputRef2.current.value = "";
-    }
-
-    // ✅ AUTO-SAVE immediately so it persists
-    await apiUpsertProfile(
-      buildUpsertPayload(slot === 1 ? { photo: url } : { photo2: url })
-    );
-
-    showToast(`Photo ${slot} uploaded & saved!`);
-  } catch (e: any) {
-    setApiError(e?.message || "Photo upload failed.");
-    showToast("Upload failed.");
-  } finally {
-    setUploadingPhoto(false);
-  }
-}
-
-  setApiError(null);
-
-  try {
-    // STEP 1 — Upload to server disk
-    const url = await apiUploadProfilePhoto(userId, photoFile);
-
-    // Put URL into local state
-    setForm((prev) => ({ ...prev, photo: url }));
-    setPhotoFile(null);
-
-    // STEP 2 — IMMEDIATELY SAVE PROFILE TO DATABASE
-    await apiUpsertProfile({
-      owner_user_id: userId,
-      displayName: form.displayName.trim(),
-      age: parseInt(form.age || "0", 10),
-      city: form.city.trim(),
-      stateUS: form.stateUS.trim(),
-      photo: url, // 🔥 THIS IS WHAT WAS MISSING
-
-      intention: form.relationshipIntent.trim(),
-      identityPreview: buildIdentityPreview({
-        cultural: culturalSelected,
-        spiritual: spiritualSelected,
-        datingChallenge: form.datingChallenge,
-        personalTruth: form.personalTruth,
-      }),
-
-      culturalIdentity: culturalSelected,
-      spiritualFramework: spiritualSelected,
-      relationshipIntent: form.relationshipIntent.trim(),
-      datingChallenge: form.datingChallenge.trim() || null,
-      personalTruth: form.personalTruth.trim() || null,
-
-      tags: selectedTags,
-      isAvailable: !!form.isAvailable,
-    });
-
-    showToast("Photo uploaded & saved!");
-  } catch (e: any) {
-    setApiError(e?.message || "Photo upload failed.");
-    showToast("Upload failed.");
-  } finally {
-    setUploadingPhoto(false);
-  }
-}
-
+  // ✅ onUploadPhoto()  (ONLY ONE - duplicates removed)
+  async function onUploadPhoto(slot: 1 | 2) {
     if (!userId) return;
 
     const file = slot === 1 ? photoFile : photoFile2;
-    if (!file) return showToast("Choose a photo first.");
+    if (!file) {
+      showToast("Choose a photo first.");
+      return;
+    }
 
     if (!file.type.startsWith("image/")) {
-      return showToast("Please choose an image file (jpg, png, webp).");
+      showToast("Please choose an image file (jpg/png/webp).");
+      return;
     }
 
     setUploadingPhoto(true);
     setApiError(null);
 
     try {
-      const url = await apiUploadProfilePhoto(file);
+      const url = await apiUploadProfilePhoto(userId, file);
 
       // Update the correct slot in state + preview + clear file input
       if (slot === 1) {
-        setForm((prev: any) => ({ ...prev, photo: url }));
+        setForm((p) => ({ ...p, photo: url }));
+        // ✅ Fix #3: keep preview as string (not null)
+        setPhotoPreview("");
         setPhotoFile(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
-        setPhotoPreview(url);
       } else {
-        setForm((prev: any) => ({ ...prev, photo2: url }));
+        setForm((p) => ({ ...p, photo2: url }));
+        // ✅ Fix #3: keep preview as string (not null)
+        setPhotoPreview2("");
         setPhotoFile2(null);
         if (fileInputRef2.current) fileInputRef2.current.value = "";
-        setPhotoPreview2(url);
       }
 
       // ✅ AUTO-SAVE immediately so it persists
-      await apiUpsertProfile(
-        buildUpsertPayload(
-          slot === 1 ? { photo: url } : { photo2: url }
-        )
-      );
+      await apiUpsertProfile(buildUpsertPayload(slot === 1 ? { photo: url } : { photo2: url }));
 
-      showToast("Photo uploaded & saved.");
+      showToast(`Photo ${slot} uploaded & saved!`);
     } catch (e: any) {
       setApiError(e?.message || "Photo upload failed.");
-      showToast("Upload failed. See API notice.");
+      showToast("Upload failed.");
     } finally {
       setUploadingPhoto(false);
     }
   }
 
-  // ✅ Delete handler (works for Photo 1 or Photo 2)
+  // ✅ Fix #4: Delete persists immediately
   async function onDeletePhoto(photoUrl: string, slot: 1 | 2) {
     if (!userId) return;
     if (!photoUrl) return;
 
-    const ok = window.confirm(
-      "Delete this photo? You can upload a new one after."
-    );
+    const ok = window.confirm("Delete this photo? You can upload a new one after.");
     if (!ok) return;
 
     setApiError(null);
@@ -558,24 +455,22 @@ async function onUploadPhoto(slot: 1 | 2) {
     try {
       await apiDeleteProfilePhoto(userId, photoUrl);
 
-      // Clear the correct slot in your form state
-      setForm((prev: any) => {
-        if (slot === 1) return { ...prev, photo: "" };
-        return { ...prev, photo2: "" };
-      });
-
-      // Clear preview + any selected file for that slot
+      // Clear UI immediately + persist immediately
       if (slot === 1) {
+        setForm((p) => ({ ...p, photo: "" }));
         setPhotoPreview("");
         setPhotoFile(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
+        await apiUpsertProfile(buildUpsertPayload({ photo: "" }));
       } else {
+        setForm((p) => ({ ...p, photo2: "" }));
         setPhotoPreview2("");
         setPhotoFile2(null);
         if (fileInputRef2.current) fileInputRef2.current.value = "";
+        await apiUpsertProfile(buildUpsertPayload({ photo2: "" }));
       }
 
-      showToast("Photo deleted. Now click Save profile.");
+      showToast("Photo deleted.");
     } catch (e: any) {
       setApiError(e?.message || "Could not delete photo.");
       showToast("Delete failed. See API notice.");
@@ -587,12 +482,10 @@ async function onUploadPhoto(slot: 1 | 2) {
 
     if (!form.displayName.trim()) return showToast("Please add a display name.");
     const ageNum = parseInt(form.age || "0", 10);
-    if (!ageNum || ageNum < 18)
-      return showToast("Please enter a valid age (18+).");
+    if (!ageNum || ageNum < 18) return showToast("Please enter a valid age (18+).");
     if (!form.city.trim()) return showToast("Please add your city.");
     if (!form.stateUS.trim()) return showToast("Please add your state.");
-    if (!form.relationshipIntent.trim())
-      return showToast("Please select a Relationship Intent.");
+    if (!form.relationshipIntent.trim()) return showToast("Please select a Relationship Intent.");
 
     if (culturalSelected.length === 0)
       return showToast("Please select at least one Cultural Identity option.");
@@ -657,8 +550,8 @@ async function onUploadPhoto(slot: 1 | 2) {
               My Profile
             </h1>
             <p style={{ color: "#555", marginTop: 0 }}>
-              This is your real profile stored in the database — what other users
-              browse in Discover.
+              This is your real profile stored in the database — what other users browse
+              in Discover.
             </p>
 
             <div
@@ -853,9 +746,7 @@ async function onUploadPhoto(slot: 1 | 2) {
 
             {/* ✅ Photo 1 block */}
             <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                Profile Photo
-              </div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Profile Photo</div>
 
               <div style={bigPhotoStyle}>
                 {photoPreview || form.photo ? (
@@ -902,9 +793,7 @@ async function onUploadPhoto(slot: 1 | 2) {
                         border: "1px solid #ccc",
                         background: "white",
                         cursor:
-                          loadingExisting || uploadingPhoto
-                            ? "not-allowed"
-                            : "pointer",
+                          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
                         fontWeight: 700,
                         opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
                       }}
@@ -958,25 +847,18 @@ async function onUploadPhoto(slot: 1 | 2) {
                     background: "#111",
                     color: "white",
                     cursor:
-                      loadingExisting || uploadingPhoto
-                        ? "not-allowed"
-                        : "pointer",
+                      loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
                     fontWeight: 900,
                     opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
                   }}
                 >
-                  {uploadingPhoto
-                    ? "Uploading..."
-                    : photoFile
-                    ? "Upload Photo"
-                    : "Choose Photo"}
+                  {uploadingPhoto ? "Uploading..." : photoFile ? "Upload Photo" : "Choose Photo"}
                 </button>
 
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {photoFile ? (
                     <>
-                      Selected: <b>{photoFile.name}</b> • Uploading will{" "}
-                      <b>auto-save</b>.
+                      Selected: <b>{photoFile.name}</b> • Uploading will <b>auto-save</b>.
                     </>
                   ) : (
                     <>Click the button to choose a photo (jpg/png/webp).</>
@@ -1000,9 +882,7 @@ async function onUploadPhoto(slot: 1 | 2) {
 
             {/* ✅ Photo 2 block (optional) */}
             <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                Photo 2 (optional)
-              </div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Photo 2 (optional)</div>
 
               <div style={bigPhotoStyle}>
                 {photoPreview2 || form.photo2 ? (
@@ -1051,9 +931,7 @@ async function onUploadPhoto(slot: 1 | 2) {
                         border: "1px solid #ccc",
                         background: "white",
                         cursor:
-                          loadingExisting || uploadingPhoto
-                            ? "not-allowed"
-                            : "pointer",
+                          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
                         fontWeight: 700,
                         opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
                       }}
@@ -1107,9 +985,7 @@ async function onUploadPhoto(slot: 1 | 2) {
                     background: "#111",
                     color: "white",
                     cursor:
-                      loadingExisting || uploadingPhoto
-                        ? "not-allowed"
-                        : "pointer",
+                      loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
                     fontWeight: 900,
                     opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
                   }}
@@ -1124,8 +1000,7 @@ async function onUploadPhoto(slot: 1 | 2) {
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {photoFile2 ? (
                     <>
-                      Selected: <b>{photoFile2.name}</b> • Uploading will{" "}
-                      <b>auto-save</b>.
+                      Selected: <b>{photoFile2.name}</b> • Uploading will <b>auto-save</b>.
                     </>
                   ) : (
                     <>Click the button to choose a second photo (optional).</>
@@ -1148,9 +1023,7 @@ async function onUploadPhoto(slot: 1 | 2) {
             </div>
 
             <label>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                Relationship Intent
-              </div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Relationship Intent</div>
               <select
                 value={form.relationshipIntent}
                 onChange={(e) => onChange("relationshipIntent", e.target.value)}
@@ -1193,9 +1066,7 @@ async function onUploadPhoto(slot: 1 | 2) {
                     key={label}
                     label={label}
                     selected={culturalSelected.includes(label)}
-                    onToggle={() =>
-                      toggleInList(label, culturalSelected, setCulturalSelected)
-                    }
+                    onToggle={() => toggleInList(label, culturalSelected, setCulturalSelected)}
                   />
                 ))}
               </div>
@@ -1214,9 +1085,7 @@ async function onUploadPhoto(slot: 1 | 2) {
                     key={label}
                     label={label}
                     selected={spiritualSelected.includes(label)}
-                    onToggle={() =>
-                      toggleInList(label, spiritualSelected, setSpiritualSelected)
-                    }
+                    onToggle={() => toggleInList(label, spiritualSelected, setSpiritualSelected)}
                   />
                 ))}
               </div>
@@ -1280,9 +1149,9 @@ async function onUploadPhoto(slot: 1 | 2) {
         </div>
 
         <div style={{ marginTop: "1.25rem", color: "#777", fontSize: "0.95rem" }}>
-          Tip: open the site in an incognito window (or a different browser) to
-          create a second user + second profile. Then Like each other and watch
-          notifications show up.
+          Tip: open the site in an incognito window (or a different browser) to create a
+          second user + second profile. Then Like each other and watch notifications show
+          up.
         </div>
       </div>
     </main>
