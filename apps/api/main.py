@@ -2560,6 +2560,57 @@ def admin_me(authorization: Optional[str] = Header(default=None)):
     au = require_admin(authorization, allowed_roles=["admin", "moderator"])
     return AdminMeOut(email=au.email, role=au.role)
 
+@app.get("/admin/report-alerts")
+def admin_report_alerts(authorization: Optional[str] = Header(default=None)):
+    require_admin(authorization, allowed_roles=["admin", "moderator"])
+
+    with engine.begin() as conn:
+        open_count = conn.execute(
+            text("""
+                SELECT COUNT(1)
+                FROM user_reports
+                WHERE COALESCE(status, 'open') = 'open'
+            """)
+        ).scalar() or 0
+
+        recent = conn.execute(
+            text("""
+                SELECT
+                  id,
+                  reporter_user_id,
+                  reported_user_id,
+                  reported_profile_id,
+                  thread_id,
+                  reason,
+                  details,
+                  COALESCE(status,'open') AS status,
+                  created_at
+                FROM user_reports
+                ORDER BY created_at DESC
+                LIMIT 10
+            """)
+        ).mappings().all()
+
+    # Convert datetimes safely
+    out_recent = []
+    for r in recent:
+        created = r.get("created_at")
+        out_recent.append(
+            {
+                "id": r.get("id"),
+                "reporter_user_id": r.get("reporter_user_id"),
+                "reported_user_id": r.get("reported_user_id"),
+                "reported_profile_id": r.get("reported_profile_id"),
+                "thread_id": r.get("thread_id"),
+                "reason": r.get("reason"),
+                "details": r.get("details"),
+                "status": r.get("status") or "open",
+                "created_at": created.isoformat() + "Z" if hasattr(created, "isoformat") and created else "",
+            }
+        )
+
+    return {"openCount": int(open_count), "recent": out_recent}
+
 
 def _safe_count(conn, sql: str, params: Dict[str, Any]) -> int:
     try:
