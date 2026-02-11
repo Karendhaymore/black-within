@@ -714,21 +714,6 @@ for fn, label in [
     except Exception as e:
         print(f"{label} failed:", str(e))
 
-def _auto_migrate_reports_table():
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS reports (
-              id TEXT PRIMARY KEY,
-              reporter_user_id TEXT NOT NULL,
-              reported_user_id TEXT NOT NULL,
-              reason TEXT,
-              details TEXT,
-              status TEXT DEFAULT 'open',
-              created_at TEXT,
-              updated_at TEXT,
-              handled_at TEXT
-            );
-        """))
 
         conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'open';"))
         conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS handled_at TEXT;"))
