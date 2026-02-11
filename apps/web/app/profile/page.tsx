@@ -406,15 +406,53 @@ export default function MyProfilePage() {
   }
 
   // ✅ Replace your onUploadPhoto() with this version (slot 1 or 2)
- async function onUploadPhoto() {
+async function onUploadPhoto(slot: 1 | 2) {
   if (!userId) return;
-  if (!photoFile) return showToast("Choose a photo first.");
 
-  if (!photoFile.type.startsWith("image/")) {
-    return showToast("Please choose an image file.");
+  const file = slot === 1 ? photoFile : photoFile2;
+  if (!file) {
+    showToast("Choose a photo first.");
+    return;
+  }
+
+  if (!file.type.startsWith("image/")) {
+    showToast("Please choose an image file (jpg/png/webp).");
+    return;
   }
 
   setUploadingPhoto(true);
+  setApiError(null);
+
+  try {
+    const url = await apiUploadProfilePhoto(userId, file);
+
+    // Update the correct slot in state + preview + clear file input
+    if (slot === 1) {
+      setForm((p) => ({ ...p, photo: url }));
+      setPhotoPreview(null);
+      setPhotoFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } else {
+      setForm((p) => ({ ...p, photo2: url }));
+      setPhotoPreview2(null);
+      setPhotoFile2(null);
+      if (fileInputRef2.current) fileInputRef2.current.value = "";
+    }
+
+    // ✅ AUTO-SAVE immediately so it persists
+    await apiUpsertProfile(
+      buildUpsertPayload(slot === 1 ? { photo: url } : { photo2: url })
+    );
+
+    showToast(`Photo ${slot} uploaded & saved!`);
+  } catch (e: any) {
+    setApiError(e?.message || "Photo upload failed.");
+    showToast("Upload failed.");
+  } finally {
+    setUploadingPhoto(false);
+  }
+}
+
   setApiError(null);
 
   try {
