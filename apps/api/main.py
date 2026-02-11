@@ -6,11 +6,13 @@ import hmac
 import json
 import base64
 import shutil
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta, date, time
 from typing import List, Optional, Dict, Any, Tuple
 
 import stripe
-from fastapi import FastAPI, HTTPException, Query, Request, Header, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Request, Header, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -29,7 +31,7 @@ from sqlalchemy import (
     text,
     or_,
     desc,
-    func,  # ✅ REQUIRED for mark-read + unread_count
+    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 from sqlalchemy.exc import IntegrityError
@@ -46,11 +48,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
-# Render sometimes provides postgres://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Force SQLAlchemy to use psycopg (v3)
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
@@ -81,7 +81,6 @@ STRIPE_PREMIUM_PRICE_ID = os.getenv("STRIPE_PREMIUM_PRICE_ID", "").strip()
 
 APP_WEB_BASE_URL = os.getenv("APP_WEB_BASE_URL", "https://meetblackwithin.com").strip()
 
-# ✅ Used by /upload/photo to build the returned file URL (this should be your API base URL)
 BASE_URL = (
     os.getenv("BASE_URL", "").strip()
     or os.getenv("API_BASE_URL", "").strip()
@@ -89,44 +88,31 @@ BASE_URL = (
     or "https://black-within-api.onrender.com"
 )
 
-# Password reset
 RESET_TOKEN_TTL_MINUTES = int(os.getenv("RESET_TOKEN_TTL_MINUTES", "30"))
 
 if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
-# ✅ MUST be real DATABASE_URL (NOT create_engine(...))
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 
-# -----------------------------
-# Uploads (for profile photos) ✅ FIX: persistent disk on Render
-# -----------------------------
 UPLOAD_DIR = "/var/data/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
-# ✅ Helper near your upload helpers
-# This extracts the filename safely from a URL like:
-#  https://black-within-api.onrender.com/photos/abc123.jpg
 def _extract_uploaded_filename(photo_url: str) -> str:
     s = (photo_url or "").strip()
     if not s:
         return ""
-
-    # Accept either full URL or just "/photos/filename"
     if "/photos/" not in s:
         return ""
-
     filename = s.split("/photos/")[-1].strip()
-
-    # Hard safety checks
     if not filename or "/" in filename or "\\" in filename or ".." in filename:
         return ""
     return filename
 
 
 # -----------------------------
-# Database models (Base must be defined ONCE, before any models)
+# Database models
 # -----------------------------
 class Base(DeclarativeBase):
     pass
@@ -139,11 +125,6 @@ class User(Base):
 
 
 class AuthAccount(Base):
-    """
-    Email + password login (password is stored hashed, never plaintext).
-    user_id is stable and derived from email (via _make_user_id_from_email()).
-    """
-
     __tablename__ = "auth_accounts"
     user_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
@@ -161,7 +142,6 @@ class Profile(Base):
     city: Mapped[str] = mapped_column(String(80))
     state_us: Mapped[str] = mapped_column(String(80))
 
-    # ✅ Per your request: store both photo fields as TEXT (URLs can be long)
     photo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     photo2: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -169,18 +149,15 @@ class Profile(Base):
     intention: Mapped[str] = mapped_column(String(120))
 
     tags_csv: Mapped[str] = mapped_column(Text, default="[]")
-
     cultural_identity_csv: Mapped[str] = mapped_column(Text, default="[]")
     spiritual_framework_csv: Mapped[str] = mapped_column(Text, default="[]")
 
     relationship_intent: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
-
     dating_challenge_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     personal_truth_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    # ✅ NEW: Ban fields (Ban #1)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     banned_reason: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     banned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -195,17 +172,15 @@ class SavedProfile(Base):
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(60), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_saved_user_profile"),)
 
 
 class Like(Base):
     __tablename__ = "likes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)  # liker
-    profile_id: Mapped[str] = mapped_column(String(60), index=True)  # liked profile
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    profile_id: Mapped[str] = mapped_column(String(60), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
     __table_args__ = (UniqueConstraint("user_id", "profile_id", name="uq_like_user_profile"),)
 
 
@@ -216,16 +191,14 @@ class DailyLikeCount(Base):
     day: Mapped[date] = mapped_column(Date, index=True)
     count: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
     window_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
     __table_args__ = (UniqueConstraint("user_id", "day", name="uq_daily_like_user_day"),)
 
 
 class Notification(Base):
     __tablename__ = "notifications"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(40), index=True)  # recipient
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
     type: Mapped[str] = mapped_column(String(20), default="like")
     message: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
@@ -246,30 +219,22 @@ class LoginCode(Base):
 
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # sha256 hex
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     email: Mapped[str] = mapped_column(String(320), index=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
-# -----------------------------
-# Threads + Messages
-# -----------------------------
 class Thread(Base):
     __tablename__ = "threads"
     id: Mapped[str] = mapped_column(String(60), primary_key=True)
-
     user_low: Mapped[str] = mapped_column(String(40), index=True)
     user_high: Mapped[str] = mapped_column(String(40), index=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-
     __table_args__ = (UniqueConstraint("user_low", "user_high", name="uq_threads_userpair"),)
 
 
@@ -277,16 +242,11 @@ class Message(Base):
     __tablename__ = "messages"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     thread_id: Mapped[str] = mapped_column(String(60), index=True)
-
     sender_user_id: Mapped[str] = mapped_column(String(40), index=True)
     body: Mapped[str] = mapped_column(Text)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
-# -----------------------------
-# Premium entitlement (renamed to match Stripe webhook expectation)
-# -----------------------------
 class Entitlement(Base):
     __tablename__ = "messaging_entitlements"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -295,121 +255,76 @@ class Entitlement(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
-# -----------------------------
-# Per-thread unlocks (PERMANENT)
-# -----------------------------
 class ThreadUnlock(Base):
     __tablename__ = "thread_unlocks"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     thread_id: Mapped[str] = mapped_column(String(60), index=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    # ✅ FIX: ensure updated_at always has a default for inserts
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
     __table_args__ = (UniqueConstraint("thread_id", "user_id", name="uq_thread_user_unlock"),)
 
 
-# -----------------------------
-# ✅ NEW: ThreadRead support (model requested)
-# -----------------------------
 class ThreadRead(Base):
     __tablename__ = "thread_reads"
-
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     thread_id: Mapped[str] = mapped_column(String(60), index=True)
-
     last_read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-
-    __table_args__ = (
-        UniqueConstraint("user_id", "thread_id", name="uq_thread_reads_user_thread"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "thread_id", name="uq_thread_reads_user_thread"),)
 
 
-# -----------------------------
-# ✅ NEW: Admin Auth (real roles)
-# -----------------------------
 class AdminUser(Base):
     __tablename__ = "admin_users"
-
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-
-    role: Mapped[str] = mapped_column(String(30), default="admin", index=True)  # admin | moderator
+    role: Mapped[str] = mapped_column(String(30), default="admin", index=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
 class AdminSession(Base):
     __tablename__ = "admin_sessions"
-
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     admin_user_id: Mapped[str] = mapped_column(String(40), index=True)
-
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
-# -----------------------------
-# ✅ NEW: Reports
-# -----------------------------
 class UserReport(Base):
     __tablename__ = "user_reports"
-
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
-
     reporter_user_id: Mapped[str] = mapped_column(String(40), index=True)
     reported_user_id: Mapped[str] = mapped_column(String(40), index=True)
     reported_profile_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
-
     thread_id: Mapped[Optional[str]] = mapped_column(String(60), nullable=True, index=True)
-
     reason: Mapped[str] = mapped_column(String(160), index=True)
     details: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
-
-    status: Mapped[str] = mapped_column(String(30), default="open", index=True)  # open|reviewing|resolved|dismissed
-
+    status: Mapped[str] = mapped_column(String(30), default="open", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
-# -----------------------------
-# ✅ NEW: Claim tokens (admin can add users free)
-# -----------------------------
 class UserClaimToken(Base):
     __tablename__ = "user_claim_tokens"
-
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-
     user_id: Mapped[str] = mapped_column(String(40), index=True)
     profile_id: Mapped[str] = mapped_column(String(40), index=True)
-
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
 # -----------------------------
-# MVP auto-migration helpers
+# Migrations
 # -----------------------------
 def _auto_migrate_threads_messages_tables():
-    """
-    Create threads/messages/messaging_entitlements/thread_unlocks tables (if missing).
-    (thread_reads is migrated by _auto_migrate_thread_reads_table()).
-    """
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -425,8 +340,8 @@ def _auto_migrate_threads_messages_tables():
         """
             )
         )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_low ON threads(user_low);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_threads_user_high ON threads(user_high);"""))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_threads_user_low ON threads(user_low);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_threads_user_high ON threads(user_high);"))
 
         conn.execute(
             text(
@@ -441,9 +356,9 @@ def _auto_migrate_threads_messages_tables():
         """
             )
         )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_thread_id ON messages(thread_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_sender_user_id ON messages(sender_user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages(created_at);"""))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_thread_id ON messages(thread_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_sender_user_id ON messages(sender_user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages(created_at);"))
 
         conn.execute(
             text(
@@ -457,9 +372,8 @@ def _auto_migrate_threads_messages_tables():
         """
             )
         )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"""))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"))
 
-        # ✅ include updated_at in table definition
         conn.execute(
             text(
                 """
@@ -474,26 +388,13 @@ def _auto_migrate_threads_messages_tables():
         """
             )
         )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_thread_id ON thread_unlocks(thread_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_unlocks_user_id ON thread_unlocks(user_id);"""))
-
-        # ✅ backfill/migrate for existing databases
-        conn.execute(text("""ALTER TABLE thread_unlocks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_thread_unlocks_thread_id ON thread_unlocks(thread_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_thread_unlocks_user_id ON thread_unlocks(user_id);"))
+        conn.execute(text("ALTER TABLE thread_unlocks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"))
 
 
-# ✅ NEW: thread_reads migration helper (requested)
 def _auto_migrate_thread_reads_table():
-    """
-    Creates the desired thread_reads schema.
-
-    If an older thread_reads exists with SERIAL id, we replace it with the new schema:
-      - create thread_reads__new
-      - copy data
-      - drop old table
-      - rename
-    """
     with engine.begin() as conn:
-        # Ensure table exists (happy path)
         conn.execute(
             text(
                 """
@@ -509,13 +410,12 @@ def _auto_migrate_thread_reads_table():
         """
             )
         )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);"""))
-        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP NULL;"""))
-        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"""))
-        conn.execute(text("""ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);"))
+        conn.execute(text("ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS last_read_at TIMESTAMP NULL;"))
+        conn.execute(text("ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"))
+        conn.execute(text("ALTER TABLE thread_reads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"))
 
-        # If the table already existed with an incompatible id type, rebuild it.
         conn.execute(
             text(
                 """
@@ -534,7 +434,6 @@ def _auto_migrate_thread_reads_table():
               END IF;
 
               IF has_old_serial THEN
-                -- Create new table in desired shape
                 EXECUTE '
                   CREATE TABLE IF NOT EXISTS thread_reads__new (
                     id VARCHAR(40) PRIMARY KEY,
@@ -547,7 +446,6 @@ def _auto_migrate_thread_reads_table():
                   );
                 ';
 
-                -- Copy forward best-effort (generate new string ids)
                 EXECUTE '
                   INSERT INTO thread_reads__new (id, user_id, thread_id, last_read_at, created_at, updated_at)
                   SELECT
@@ -564,11 +462,8 @@ def _auto_migrate_thread_reads_table():
                     updated_at = EXCLUDED.updated_at;
                 ';
 
-                -- Swap tables
                 EXECUTE 'DROP TABLE thread_reads;';
                 EXECUTE 'ALTER TABLE thread_reads__new RENAME TO thread_reads;';
-
-                -- Recreate indexes
                 EXECUTE 'CREATE INDEX IF NOT EXISTS ix_thread_reads_user_id ON thread_reads(user_id);';
                 EXECUTE 'CREATE INDEX IF NOT EXISTS ix_thread_reads_thread_id ON thread_reads(thread_id);';
               END IF;
@@ -579,25 +474,15 @@ def _auto_migrate_thread_reads_table():
 
 
 def _auto_migrate_profiles_table():
-    """
-    create_all() does NOT modify existing tables.
-    This safely adds any missing columns to profiles so /profiles won't 500.
-    Also ensures photo + photo2 are TEXT (per request).
-    """
     with engine.begin() as conn:
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(40);"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_name VARCHAR(80);"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS age INTEGER;"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS city VARCHAR(80);"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS state_us VARCHAR(80);"""))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(40);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_name VARCHAR(80);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS age INTEGER;"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS city VARCHAR(80);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS state_us VARCHAR(80);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo TEXT;"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo2 TEXT;"))
 
-        # ✅ Ensure photo exists (use TEXT going forward)
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo TEXT;"""))
-
-        # ✅ ensure photo2 exists
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo2 TEXT;"""))
-
-        # ✅ If photo previously existed as VARCHAR(500), widen it to TEXT (safe)
         conn.execute(
             text(
                 """
@@ -610,7 +495,6 @@ def _auto_migrate_profiles_table():
                 BEGIN
                   ALTER TABLE profiles ALTER COLUMN photo TYPE TEXT;
                 EXCEPTION WHEN others THEN
-                  -- ignore if it can't be altered (shouldn't happen on Postgres, but stay safe)
                 END;
               END IF;
 
@@ -621,7 +505,6 @@ def _auto_migrate_profiles_table():
                 BEGIN
                   ALTER TABLE profiles ALTER COLUMN photo2 TYPE TEXT;
                 EXCEPTION WHEN others THEN
-                  -- ignore
                 END;
               END IF;
             END $$;
@@ -629,11 +512,10 @@ def _auto_migrate_profiles_table():
             )
         )
 
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS identity_preview VARCHAR(500);"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS intention VARCHAR(120);"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tags_csv TEXT DEFAULT '[]';"""))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS identity_preview VARCHAR(500);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS intention VARCHAR(120);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tags_csv TEXT DEFAULT '[]';"))
 
-        # Back-compat: if older column tags_json exists, copy into tags_csv when empty
         conn.execute(
             text(
                 """
@@ -653,34 +535,25 @@ def _auto_migrate_profiles_table():
             )
         )
 
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS cultural_identity_csv TEXT DEFAULT '[]';"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spiritual_framework_csv TEXT DEFAULT '[]';"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS relationship_intent VARCHAR(120);"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS dating_challenge_text TEXT;"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS personal_truth_text TEXT;"""))
-
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE;"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"""))
-        conn.execute(text("""ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"""))
-
-        # ✅ backfill NULLs so older rows behave as available by default
-        conn.execute(text("""UPDATE profiles SET is_available = TRUE WHERE is_available IS NULL;"""))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS cultural_identity_csv TEXT DEFAULT '[]';"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spiritual_framework_csv TEXT DEFAULT '[]';"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS relationship_intent VARCHAR(120);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS dating_challenge_text TEXT;"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS personal_truth_text TEXT;"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE;"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"))
+        conn.execute(text("UPDATE profiles SET is_available = TRUE WHERE is_available IS NULL;"))
 
 
 def _auto_migrate_notifications_table():
-    """
-    Add actor_user_id/profile_id/actor_profile_id columns if missing (for richer notifications).
-    """
     with engine.begin() as conn:
-        conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_user_id VARCHAR(40);"""))
-        conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS profile_id VARCHAR(60);"""))
-        conn.execute(text("""ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_profile_id VARCHAR(60);"""))
+        conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_user_id VARCHAR(40);"))
+        conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS profile_id VARCHAR(60);"))
+        conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_profile_id VARCHAR(60);"))
 
 
 def _auto_migrate_auth_accounts_table():
-    """
-    Create auth_accounts table if missing (email + password auth).
-    """
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -694,14 +567,10 @@ def _auto_migrate_auth_accounts_table():
         """
             )
         )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_auth_accounts_email ON auth_accounts(email);"""))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_accounts_email ON auth_accounts(email);"))
 
 
 def _auto_migrate_daily_like_counts_table():
-    """
-    Create daily_like_counts if missing (for free likes/day limit),
-    and add window_started_at if missing (for test reset mode).
-    """
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -718,10 +587,9 @@ def _auto_migrate_daily_like_counts_table():
         """
             )
         )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_user_id ON daily_like_counts(user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_daily_like_counts_day ON daily_like_counts(day);"""))
-
-        conn.execute(text("""ALTER TABLE daily_like_counts ADD COLUMN IF NOT EXISTS window_started_at TIMESTAMP NULL;"""))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_daily_like_counts_user_id ON daily_like_counts(user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_daily_like_counts_day ON daily_like_counts(day);"))
+        conn.execute(text("ALTER TABLE daily_like_counts ADD COLUMN IF NOT EXISTS window_started_at TIMESTAMP NULL;"))
 
 
 def _auto_migrate_password_reset_tokens_table():
@@ -741,18 +609,17 @@ def _auto_migrate_password_reset_tokens_table():
         """
             )
         )
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_token_hash ON password_reset_tokens(token_hash);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_user_id ON password_reset_tokens(user_id);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_email ON password_reset_tokens(email);"""))
-        conn.execute(text("""CREATE INDEX IF NOT EXISTS ix_prt_expires_at ON password_reset_tokens(expires_at);"""))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_prt_token_hash ON password_reset_tokens(token_hash);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_prt_user_id ON password_reset_tokens(user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_prt_email ON password_reset_tokens(email);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_prt_expires_at ON password_reset_tokens(expires_at);"))
 
 
-# -----------------------------
-# ✅ NEW: Admin/Reports migrations
-# -----------------------------
 def _auto_migrate_admin_tables():
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS admin_users (
               id VARCHAR(40) PRIMARY KEY,
               email VARCHAR(255) UNIQUE,
@@ -762,8 +629,12 @@ def _auto_migrate_admin_tables():
               created_at TIMESTAMP,
               updated_at TIMESTAMP
             );
-        """))
-        conn.execute(text("""
+        """
+            )
+        )
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS admin_sessions (
               id VARCHAR(40) PRIMARY KEY,
               admin_user_id VARCHAR(40),
@@ -771,8 +642,12 @@ def _auto_migrate_admin_tables():
               expires_at TIMESTAMP,
               created_at TIMESTAMP
             );
-        """))
-        conn.execute(text("""
+        """
+            )
+        )
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS user_reports (
               id VARCHAR(40) PRIMARY KEY,
               reporter_user_id VARCHAR(40),
@@ -785,8 +660,12 @@ def _auto_migrate_admin_tables():
               created_at TIMESTAMP,
               updated_at TIMESTAMP
             );
-        """))
-        conn.execute(text("""
+        """
+            )
+        )
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS user_claim_tokens (
               id VARCHAR(40) PRIMARY KEY,
               token_hash VARCHAR(128) UNIQUE,
@@ -796,11 +675,12 @@ def _auto_migrate_admin_tables():
               claimed_at TIMESTAMP,
               created_at TIMESTAMP
             );
-        """))
+        """
+            )
+        )
 
 
 def _auto_migrate_profiles_ban_fields():
-    # Add ban columns if missing (Postgres-friendly)
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;"))
         conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS banned_reason VARCHAR(300);"))
@@ -808,58 +688,23 @@ def _auto_migrate_profiles_ban_fields():
         conn.execute(text("UPDATE profiles SET is_banned = FALSE WHERE is_banned IS NULL;"))
 
 
-# -----------------------------
-# Create tables + run migrations
-# -----------------------------
 Base.metadata.create_all(engine)
 
-try:
-    _auto_migrate_threads_messages_tables()
-except Exception as e:
-    print("AUTO_MIGRATE_THREADS_MESSAGES failed:", str(e))
-
-# ✅ NEW (requested): migrate thread_reads
-try:
-    _auto_migrate_thread_reads_table()
-except Exception as e:
-    print("AUTO_MIGRATE_THREAD_READS failed:", str(e))
-
-try:
-    _auto_migrate_profiles_table()
-except Exception as e:
-    print("AUTO_MIGRATE_PROFILES failed:", str(e))
-
-# ✅ NEW: ban columns
-try:
-    _auto_migrate_profiles_ban_fields()
-except Exception as e:
-    print("AUTO_MIGRATE_PROFILES_BAN failed:", str(e))
-
-try:
-    _auto_migrate_notifications_table()
-except Exception as e:
-    print("AUTO_MIGRATE_NOTIFICATIONS failed:", str(e))
-
-try:
-    _auto_migrate_auth_accounts_table()
-except Exception as e:
-    print("AUTO_MIGRATE_AUTH_ACCOUNTS failed:", str(e))
-
-try:
-    _auto_migrate_daily_like_counts_table()
-except Exception as e:
-    print("AUTO_MIGRATE_DAILY_LIKES failed:", str(e))
-
-try:
-    _auto_migrate_password_reset_tokens_table()
-except Exception as e:
-    print("AUTO_MIGRATE_PASSWORD_RESET failed:", str(e))
-
-# ✅ NEW: admin tables
-try:
-    _auto_migrate_admin_tables()
-except Exception as e:
-    print("AUTO_MIGRATE_ADMIN_TABLES failed:", str(e))
+for fn, label in [
+    (_auto_migrate_threads_messages_tables, "AUTO_MIGRATE_THREADS_MESSAGES"),
+    (_auto_migrate_thread_reads_table, "AUTO_MIGRATE_THREAD_READS"),
+    (_auto_migrate_profiles_table, "AUTO_MIGRATE_PROFILES"),
+    (_auto_migrate_profiles_ban_fields, "AUTO_MIGRATE_PROFILES_BAN"),
+    (_auto_migrate_notifications_table, "AUTO_MIGRATE_NOTIFICATIONS"),
+    (_auto_migrate_auth_accounts_table, "AUTO_MIGRATE_AUTH_ACCOUNTS"),
+    (_auto_migrate_daily_like_counts_table, "AUTO_MIGRATE_DAILY_LIKES"),
+    (_auto_migrate_password_reset_tokens_table, "AUTO_MIGRATE_PASSWORD_RESET"),
+    (_auto_migrate_admin_tables, "AUTO_MIGRATE_ADMIN_TABLES"),
+]:
+    try:
+        fn()
+    except Exception as e:
+        print(f"{label} failed:", str(e))
 
 
 # -----------------------------
@@ -874,7 +719,6 @@ class ProfileAction(BaseModel):
     profile_id: str
 
 
-# ✅ 1) NEW: Delete photo request model (requested)
 class DeletePhotoRequest(BaseModel):
     user_id: str
     photo_url: str
@@ -918,12 +762,10 @@ class NotificationItem(BaseModel):
     type: str
     message: str
     created_at: str
-
     actor_user_id: Optional[str] = None
     actor_profile_id: Optional[str] = None
     actor_display_name: Optional[str] = None
     actor_photo: Optional[str] = None
-
     profile_id: Optional[str] = None
 
 
@@ -934,19 +776,16 @@ class NotificationsResponse(BaseModel):
 class ProfileItem(BaseModel):
     id: str
     owner_user_id: str
-
     displayName: str
     age: int
     city: str
     stateUS: str
     photo: Optional[str] = None
     photo2: Optional[str] = None
-
     identityPreview: str
     intention: str
     tags: List[str]
     isAvailable: bool
-
     culturalIdentity: List[str] = []
     spiritualFramework: List[str] = []
     relationshipIntent: Optional[str] = None
@@ -965,13 +804,13 @@ class ProfilesListResponse(BaseModel):
 class LikesStatusResponse(BaseModel):
     likesLeft: int
     limit: int
-    windowType: str  # "daily_utc" or "test_seconds"
+    windowType: str
     resetsAtUTC: str
 
 
 class ThreadGetOrCreatePayload(BaseModel):
     user_id: str
-    with_profile_id: str  # the profile you want to message
+    with_profile_id: str
 
 
 class ThreadItem(BaseModel):
@@ -990,27 +829,19 @@ class ProfileLiteResponse(BaseModel):
     photo: Optional[str] = None
 
 
-# (renamed internally to avoid clashing with new ThreadsResponse below)
 class ThreadsInboxResponse(BaseModel):
     items: List[ThreadItem]
 
 
-# ✅ NEW: GET /threads response models (as requested)
 class ThreadListItem(BaseModel):
     thread_id: str
     other_user_id: str
-
-    # Enrichment for inbox UI:
     other_profile_id: Optional[str] = None
     other_display_name: Optional[str] = None
     other_photo: Optional[str] = None
-
     last_message_text: Optional[str] = None
     last_message_at: Optional[str] = None
-
     updated_at: Optional[str] = None
-
-    # ✅ NEW: unread count
     unread_count: int = 0
 
 
@@ -1032,7 +863,6 @@ class MessageItem(BaseModel):
     created_at: str
 
 
-# ✅ include otherLastReadAt for "Seen"
 class MessagesResponse(BaseModel):
     items: List[MessageItem]
     otherLastReadAt: Optional[str] = None
@@ -1046,11 +876,10 @@ class MessagingAccessResponse(BaseModel):
 
 
 class MessagingUnlockPayload(BaseModel):
-    # ADMIN/TESTING helper (until Stripe is wired)
     user_id: str
-    thread_id: Optional[str] = None  # unlock a specific thread for this user
-    minutes: int = 1440  # kept for backward-compat; thread unlock is permanent now
-    make_premium: bool = False  # premium unlock everywhere
+    thread_id: Optional[str] = None
+    minutes: int = 1440
+    make_premium: bool = False
 
 
 class ThreadUnlockCheckoutPayload(BaseModel):
@@ -1066,17 +895,14 @@ class CheckoutSessionResponse(BaseModel):
     url: str
 
 
-# NEW: Create Stripe Checkout Session (Unlock Conversation – $1.99)
 class CreateUnlockSessionPayload(BaseModel):
     user_id: str
     target_profile_id: str
     thread_id: str
 
 
-# Accept BOTH camelCase and snake_case (frontend may send either)
 class UpsertMyProfilePayload(BaseModel):
-    owner_user_id: str  # keep this key name for your frontend
-
+    owner_user_id: str
     displayName: Optional[str] = None
     stateUS: Optional[str] = None
     identityPreview: Optional[str] = None
@@ -1090,7 +916,7 @@ class UpsertMyProfilePayload(BaseModel):
     age: int
     city: str
     photo: Optional[str] = None
-    photo2: Optional[str] = None  # ✅ required for 2nd photo persistence
+    photo2: Optional[str] = None
 
     intention: str
     tags: List[str] = []
@@ -1108,9 +934,6 @@ class UpsertMyProfilePayload(BaseModel):
     personal_truth_text: Optional[str] = None
 
 
-# -----------------------------
-# ✅ NEW: Admin schemas + Reports schemas
-# -----------------------------
 class AdminLoginIn(BaseModel):
     email: str
     password: str
@@ -1139,7 +962,6 @@ class AdminProfileRow(BaseModel):
     isAvailable: bool
     is_banned: bool = False
     banned_reason: Optional[str] = None
-
     likes_count: int = 0
     saved_count: int = 0
 
@@ -1155,7 +977,7 @@ class AdminPatchProfileIn(BaseModel):
 
 
 class AdminClearPhotoIn(BaseModel):
-    slot: int  # 1 or 2
+    slot: int
 
 
 class ReportIn(BaseModel):
@@ -1189,7 +1011,7 @@ class AdminReportsOut(BaseModel):
 
 
 class AdminPatchReportIn(BaseModel):
-    status: str  # open|reviewing|resolved|dismissed
+    status: str
 
 
 class AdminCreateUserIn(BaseModel):
@@ -1217,7 +1039,6 @@ class ClaimOut(BaseModel):
 # App
 # -----------------------------
 app = FastAPI(title="Black Within API", version="1.1.5")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -1249,17 +1070,16 @@ def _ensure_user(user_id: str) -> str:
     user_id = (user_id or "").strip()
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
-
     with Session(engine) as session:
         user = session.get(User, user_id)
         if not user:
             session.add(User(id=user_id))
             session.commit()
-
     return user_id
 
 
-def _send_email_sendgrid(to_email: str, subject: str, html: str) -> None:
+# ✅ renamed to avoid collision with new list-based SendGrid helper below
+def _send_email_sendgrid_one(to_email: str, subject: str, html: str) -> None:
     if not SENDGRID_API_KEY:
         raise RuntimeError("SENDGRID_API_KEY is not set")
     if not SENDGRID_FROM_EMAIL:
@@ -1308,12 +1128,107 @@ def _coerce_str_list(v: Any) -> List[str]:
 
 
 # -----------------------------
+# ✅ NEW: Email alerts for reports (SendGrid HTTP API + BackgroundTasks)
+# -----------------------------
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = (os.getenv(name) or "").strip().lower()
+    if v in ("1", "true", "yes", "y", "on"):
+        return True
+    if v in ("0", "false", "no", "n", "off"):
+        return False
+    return default
+
+
+def _send_email_sendgrid(to_emails: List[str], subject: str, html: str) -> None:
+    api_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
+    from_email = (os.getenv("ALERT_FROM_EMAIL") or "").strip()
+
+    if not api_key or not from_email or not to_emails:
+        return
+
+    payload = {
+        "personalizations": [{"to": [{"email": e} for e in to_emails]}],
+        "from": {"email": from_email},
+        "subject": subject,
+        "content": [{"type": "text/html", "value": html}],
+    }
+
+    req = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            _ = resp.read()
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", errors="ignore")
+        except Exception:
+            body = ""
+        print("SendGrid email failed:", e.code, body)
+    except Exception as e:
+        print("SendGrid email error:", str(e))
+
+
+def _parse_alert_to_emails() -> List[str]:
+    raw = (os.getenv("ALERT_TO_EMAILS") or "").strip()
+    if not raw:
+        return []
+    parts = [p.strip() for p in raw.split(",")]
+    return [p for p in parts if p]
+
+
+def _notify_admins_new_report(report_row: Any) -> None:
+    if not _env_bool("ALERT_REPORTS_ENABLED", True):
+        return
+
+    to_emails = _parse_alert_to_emails()
+    if not to_emails:
+        return
+
+    rid = getattr(report_row, "id", "")
+    reporter = getattr(report_row, "reporter_user_id", "") or getattr(report_row, "user_id", "")
+    reported_profile_id = getattr(report_row, "reported_profile_id", "") or getattr(report_row, "profile_id", "")
+    reported_user_id = getattr(report_row, "reported_user_id", "")
+
+    reason = getattr(report_row, "reason", "") or ""
+    details = getattr(report_row, "details", "") or getattr(report_row, "message", "") or ""
+
+    subject = f"[Black Within] New user report ({reason or 'reported'})"
+    admin_url = "https://meetblackwithin.com/admin"
+
+    html = f"""
+    <div style="font-family: Arial, sans-serif; line-height: 1.4;">
+      <h2 style="margin: 0 0 8px;">New Report Submitted</h2>
+      <p style="margin: 0 0 12px;">A user has submitted a report in Black Within.</p>
+
+      <table cellpadding="6" cellspacing="0" border="0" style="border-collapse: collapse;">
+        <tr><td><b>Report ID</b></td><td>{rid}</td></tr>
+        <tr><td><b>Reporter user_id</b></td><td>{reporter}</td></tr>
+        <tr><td><b>Reported profile_id</b></td><td>{reported_profile_id}</td></tr>
+        <tr><td><b>Reported user_id</b></td><td>{reported_user_id}</td></tr>
+        <tr><td><b>Reason</b></td><td>{reason}</td></tr>
+      </table>
+
+      <p style="margin: 12px 0 0;"><b>Details</b></p>
+      <pre style="background:#f7f7f7; padding:10px; border-radius:8px; white-space:pre-wrap;">{details}</pre>
+
+      <p style="margin-top: 14px;">
+        Open Admin Dashboard: <a href="{admin_url}">{admin_url}</a>
+      </p>
+    </div>
+    """
+
+    _send_email_sendgrid(to_emails, subject, html)
+
+
+# -----------------------------
 # Password hashing (USER AUTH)
 # -----------------------------
 def _hash_password(password: str) -> str:
-    """
-    PBKDF2 hash: pbkdf2$iters$salt$derived_key
-    """
     password = (password or "").strip()
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
@@ -1348,9 +1263,7 @@ def _sha256_hex(s: str) -> str:
 
 
 def _make_reset_token() -> str:
-    # URL-safe token; we store only its sha256 hash in DB
-    raw = secrets.token_urlsafe(32)
-    return raw
+    return secrets.token_urlsafe(32)
 
 
 def _utc_midnight_of_day(d: date) -> datetime:
@@ -1382,17 +1295,8 @@ def _get_or_create_daily_like_counter(session: Session, user_id: str, day: date)
 
 
 def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, int, datetime, str]:
-    """
-    Returns:
-      (counter_row, likes_left, resets_at_utc, window_type)
-
-    Window types:
-      - daily_utc: resets at next UTC midnight
-      - test_seconds: resets every LIKES_RESET_TEST_SECONDS seconds (rolling window)
-    """
     now = datetime.utcnow()
 
-    # TEST MODE (for you while building)
     if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
         today = now.date()
         counter = _get_or_create_daily_like_counter(session, user_id, today)
@@ -1414,7 +1318,6 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
         likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
         return counter, likes_left, reset_at, "test_seconds"
 
-    # NORMAL MODE
     today = now.date()
     counter = _get_or_create_daily_like_counter(session, user_id, today)
     reset_at = _next_utc_midnight(now)
@@ -1423,7 +1326,7 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
 
 
 # -----------------------------
-# ✅ NEW: Admin security helpers (renamed to avoid clashing with user auth)
+# Admin security helpers
 # -----------------------------
 ADMIN_SECRET = (os.getenv("ADMIN_SECRET") or os.getenv("SECRET_KEY") or "dev-admin-secret").encode("utf-8")
 
@@ -1437,7 +1340,6 @@ def _hash_token(token: str) -> str:
 
 
 def _admin_hash_password(password: str, salt_hex: Optional[str] = None) -> str:
-    # pbkdf2_hmac: strong, no extra dependency
     salt = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
     return f"pbkdf2_sha256${salt.hex()}${dk.hex()}"
@@ -1455,11 +1357,6 @@ def _admin_verify_password(password: str, stored: str) -> bool:
 
 
 def _admin_bootstrap_if_needed():
-    """
-    One-time admin creation via env vars:
-      ADMIN_BOOTSTRAP_EMAIL=you@domain.com
-      ADMIN_BOOTSTRAP_PASSWORD=StrongPass123!
-    """
     email = _norm_email(os.getenv("ADMIN_BOOTSTRAP_EMAIL") or "")
     pw = os.getenv("ADMIN_BOOTSTRAP_PASSWORD") or ""
     if not email or not pw:
@@ -1508,7 +1405,6 @@ def require_admin(authorization: Optional[str], allowed_roles: Optional[List[str
         return au
 
 
-# Bootstrap admin (safe no-op if env vars not set)
 try:
     _admin_bootstrap_if_needed()
 except Exception as e:
@@ -1539,18 +1435,12 @@ def health():
     }
 
 
-# -----------------------------
-# ME
-# -----------------------------
 @app.get("/me", response_model=MeResponse)
 def me(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     return MeResponse(user_id=user_id)
 
 
-# -----------------------------
-# AUTH (Password-based)
-# -----------------------------
 @app.post("/auth/signup")
 def signup(payload: SignupPayload):
     email = _normalize_email(payload.email)
@@ -1580,7 +1470,6 @@ def login(payload: LoginPayload):
         acct = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
         if not acct:
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
-
         if not _verify_password(password, acct.password_hash):
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
@@ -1592,21 +1481,17 @@ def login(payload: LoginPayload):
 def forgot_password(payload: ForgotPasswordPayload):
     email = _normalize_email(payload.email)
 
-    # IMPORTANT: always return ok, even if email doesn't exist
     with Session(engine) as session:
         acct = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
         if not acct:
             return {"ok": True}
 
-        # Create token
         token = _make_reset_token()
         token_hash = _sha256_hex(token)
         now = datetime.utcnow()
         expires_at = now + timedelta(minutes=RESET_TOKEN_TTL_MINUTES)
 
-        # Optional cleanup: remove old tokens for this user (keeps table tidy)
         session.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == acct.user_id))
-
         session.add(
             PasswordResetToken(
                 token_hash=token_hash,
@@ -1635,7 +1520,7 @@ def forgot_password(payload: ForgotPasswordPayload):
     """
 
     try:
-        _send_email_sendgrid(email, "Reset your Black Within password", html)
+        _send_email_sendgrid_one(email, "Reset your Black Within password", html)
     except Exception as e:
         print("Forgot password send error:", str(e))
 
@@ -1656,16 +1541,11 @@ def reset_password(payload: ResetPasswordPayload):
     now = datetime.utcnow()
 
     with Session(engine) as session:
-        row = session.execute(
-            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
-        ).scalar_one_or_none()
-
+        row = session.execute(select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)).scalar_one_or_none()
         if not row:
             raise HTTPException(status_code=400, detail="This reset link is invalid or expired.")
-
         if row.used_at is not None:
             raise HTTPException(status_code=400, detail="This reset link has already been used.")
-
         if now > row.expires_at:
             raise HTTPException(status_code=400, detail="This reset link has expired. Please request a new one.")
 
@@ -1680,9 +1560,6 @@ def reset_password(payload: ResetPasswordPayload):
     return {"ok": True}
 
 
-# -----------------------------
-# AUTH (Email-code; still supported)
-# -----------------------------
 @app.post("/auth/request-code")
 def request_code(payload: RequestCodePayload):
     email = _normalize_email(payload.email)
@@ -1700,7 +1577,7 @@ def request_code(payload: RequestCodePayload):
         return {"ok": True, "devCode": code, "sent": False, "previewMode": True}
 
     try:
-        _send_email_sendgrid(
+        _send_email_sendgrid_one(
             to_email=email,
             subject="Your Black Within verification code",
             html=f"""
@@ -1727,7 +1604,6 @@ def verify_code(payload: VerifyCodePayload):
 
     with Session(engine) as session:
         row = session.execute(select(LoginCode).where(LoginCode.email == email)).scalar_one_or_none()
-
         if not row:
             raise HTTPException(status_code=401, detail="Invalid or expired code")
 
@@ -1747,9 +1623,6 @@ def verify_code(payload: VerifyCodePayload):
     return {"ok": True, "userId": user_id}
 
 
-# -----------------------------
-# ✅ NEW: Auth claim (admin-created users)
-# -----------------------------
 @app.post("/auth/claim", response_model=ClaimOut)
 def claim_user(body: ClaimIn):
     tok = (body.token or "").strip()
@@ -1772,7 +1645,6 @@ def claim_user(body: ClaimIn):
         session.add(ct)
         session.commit()
 
-        # Ensure user row exists (optional but keeps DB consistent)
         try:
             _ensure_user(ct.user_id)
         except Exception:
@@ -1781,25 +1653,14 @@ def claim_user(body: ClaimIn):
         return ClaimOut(user_id=ct.user_id, profile_id=ct.profile_id)
 
 
-# -----------------------------
-# Likes status
-# -----------------------------
 @app.get("/likes/status", response_model=LikesStatusResponse)
 def likes_status(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     with Session(engine) as session:
         counter, likes_left, reset_at, window_type = _get_likes_window(session, user_id)
-        return LikesStatusResponse(
-            likesLeft=likes_left,
-            limit=FREE_LIKES_PER_DAY,
-            windowType=window_type,
-            resetsAtUTC=reset_at.isoformat(),
-        )
+        return LikesStatusResponse(likesLeft=likes_left, limit=FREE_LIKES_PER_DAY, windowType=window_type, resetsAtUTC=reset_at.isoformat())
 
 
-# -----------------------------
-# PROFILES
-# -----------------------------
 @app.get("/profiles/{profile_id}", response_model=ProfileItem)
 def get_profile(profile_id: str):
     profile_id = (profile_id or "").strip()
@@ -1874,12 +1735,8 @@ def _coerce_alignment_fields(payload: UpsertMyProfilePayload):
 
 
 @app.get("/profiles", response_model=ProfilesResponse)
-def list_profiles(
-    exclude_owner_user_id: Optional[str] = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
-):
+def list_profiles(exclude_owner_user_id: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=200)):
     with Session(engine) as session:
-        # ✅ hide banned users from Discover
         q = (
             select(Profile)
             .where(Profile.is_available == True)
@@ -1887,7 +1744,6 @@ def list_profiles(
             .order_by(Profile.updated_at.desc())
             .limit(limit)
         )
-
         if exclude_owner_user_id:
             q = q.where(Profile.owner_user_id != exclude_owner_user_id)
 
@@ -1928,7 +1784,6 @@ def list_profiles(
 def upsert_my_profile(payload: UpsertMyProfilePayload):
     owner_user_id = _ensure_user(payload.owner_user_id)
     display, state, preview, is_avail = _coerce_upsert_fields(payload)
-
     cultural_list, spiritual_list, rel_intent, dating_challenge, personal_truth = _coerce_alignment_fields(payload)
 
     now = datetime.utcnow()
@@ -1947,22 +1802,17 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             existing.age = int(payload.age)
             existing.city = payload.city.strip()
             existing.state_us = state
-
-            # ✅ MUST assign both, or UI “uploads” won’t persist
             existing.photo = photo1
             existing.photo2 = photo2
-
             existing.identity_preview = preview
             existing.intention = payload.intention.strip()
             existing.tags_csv = tags_csv
-
             existing.cultural_identity_csv = cultural_csv
             existing.spiritual_framework_csv = spiritual_csv
             existing.relationship_intent = rel_intent
             existing.dating_challenge_text = dating_challenge
             existing.personal_truth_text = personal_truth
 
-            # ✅ if banned, force hidden regardless of isAvailable input
             if getattr(existing, "is_banned", False):
                 existing.is_available = False
             else:
@@ -2035,7 +1885,6 @@ def get_profile_by_id(profile_id: str = Query(...)):
         p = session.get(Profile, pid)
         if not p:
             raise HTTPException(status_code=404, detail="Profile not found")
-
         return ProfileLiteResponse(profile_id=p.id, display_name=p.display_name, photo=p.photo)
 
 
@@ -2044,9 +1893,6 @@ def upsert_profile_alias(payload: UpsertMyProfilePayload):
     return upsert_my_profile(payload)
 
 
-# -----------------------------
-# ✅ Photo upload route ✅ FIXED: saves to /var/data/uploads and serves via /photos/{filename}
-# -----------------------------
 @app.post("/upload/photo")
 async def upload_photo(file: UploadFile = File(...)):
     ext = (file.filename or "").split(".")[-1].lower()
@@ -2059,7 +1905,6 @@ async def upload_photo(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
 
-    # Return a URL the frontend can use
     return {"url": f"{BASE_URL}/photos/{filename}"}
 
 
@@ -2086,18 +1931,14 @@ def delete_photo(req: DeletePhotoRequest):
     file_path = os.path.join(UPLOAD_DIR, filename)
 
     with Session(engine) as session:
-        # Find the user's profile
         prof = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
         if not prof:
             raise HTTPException(status_code=404, detail="Profile not found for this user")
 
-        # Remove from profile fields (supports 2-photo model)
         changed = False
-
         if getattr(prof, "photo", None) == photo_url:
             prof.photo = None
             changed = True
-
         if getattr(prof, "photo2", None) == photo_url:
             prof.photo2 = None
             changed = True
@@ -2106,7 +1947,6 @@ def delete_photo(req: DeletePhotoRequest):
             session.add(prof)
             session.commit()
 
-    # Delete the file (best-effort)
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -2116,9 +1956,6 @@ def delete_photo(req: DeletePhotoRequest):
     return {"ok": True}
 
 
-# -----------------------------
-# Discover gate: require profile photo
-# -----------------------------
 class ProfileGateResponse(BaseModel):
     hasProfile: bool
     hasPhoto: bool
@@ -2134,14 +1971,10 @@ def profiles_gate(user_id: str = Query(...)):
         if not p:
             return ProfileGateResponse(hasProfile=False, hasPhoto=False, profileId=None)
 
-        # ✅ Treat either photo or photo2 as satisfying the gate
         has_photo = bool((p.photo or "").strip() or (getattr(p, "photo2", "") or "").strip())
         return ProfileGateResponse(hasProfile=True, hasPhoto=has_photo, profileId=p.id)
 
 
-# -----------------------------
-# Saved profiles
-# -----------------------------
 @app.get("/saved", response_model=IdListResponse)
 def get_saved(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
@@ -2188,21 +2021,13 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
     return {"ok": True}
 
 
-# -----------------------------
-# Notifications
-# -----------------------------
 @app.get("/notifications", response_model=NotificationsResponse)
 def get_notifications(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
         rows = (
-            session.execute(
-                select(Notification)
-                .where(Notification.user_id == user_id)
-                .order_by(Notification.created_at.desc())
-                .limit(NOTIFICATIONS_LIMIT)
-            )
+            session.execute(select(Notification).where(Notification.user_id == user_id).order_by(Notification.created_at.desc()).limit(NOTIFICATIONS_LIMIT))
             .scalars()
             .all()
         )
@@ -2212,13 +2037,8 @@ def get_notifications(user_id: str = Query(...)):
 
         if actor_ids:
             prof_rows = session.execute(select(Profile).where(Profile.owner_user_id.in_(actor_ids))).scalars().all()
-
             for p in prof_rows:
-                actor_map[p.owner_user_id] = {
-                    "actor_display_name": p.display_name,
-                    "actor_profile_id": p.id,
-                    "actor_photo": p.photo,
-                }
+                actor_map[p.owner_user_id] = {"actor_display_name": p.display_name, "actor_profile_id": p.id, "actor_photo": p.photo}
 
         items: List[NotificationItem] = []
         for n in rows:
@@ -2257,9 +2077,6 @@ def clear_notifications(user_id: str = Query(...)):
     return {"ok": True}
 
 
-# -----------------------------
-# Likes (with daily reset + test reset)
-# -----------------------------
 @app.get("/likes", response_model=IdListResponse)
 def get_likes(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
@@ -2282,12 +2099,7 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
         if not my_profile:
             return ProfilesListResponse(items=[])
 
-        liker_rows = (
-            session.execute(
-                select(Like.user_id).where(Like.profile_id == my_profile.id).order_by(Like.created_at.desc()).limit(limit)
-            )
-            .all()
-        )
+        liker_rows = session.execute(select(Like.user_id).where(Like.profile_id == my_profile.id).order_by(Like.created_at.desc()).limit(limit)).all()
         liker_user_ids = [r[0] for r in liker_rows]
 
         if not liker_user_ids:
@@ -2354,20 +2166,14 @@ def like(payload: ProfileAction):
 
         if int(counter.count) >= FREE_LIKES_PER_DAY:
             if window_type == "test_seconds":
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.",
-                )
+                raise HTTPException(status_code=429, detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.")
             raise HTTPException(status_code=429, detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.")
 
         prof = session.get(Profile, profile_id)
-        if not prof:
-            raise HTTPException(status_code=404, detail="Profile not found")
-        if getattr(prof, "is_banned", False):
+        if not prof or getattr(prof, "is_banned", False):
             raise HTTPException(status_code=404, detail="Profile not found")
 
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
-
         counter.count = int(counter.count) + 1
         counter.updated_at = datetime.utcnow()
 
@@ -2402,9 +2208,6 @@ def like(payload: ProfileAction):
         return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
 
 
-# -----------------------------
-# Messaging helpers
-# -----------------------------
 def _sorted_pair(a: str, b: str) -> Tuple[str, str]:
     a = (a or "").strip()
     b = (b or "").strip()
@@ -2428,9 +2231,6 @@ def _get_entitlement(session: Session, user_id: str) -> Entitlement:
 
 
 def _can_message_thread(session: Session, user_id: str, thread_id: str) -> Tuple[bool, bool, str]:
-    """
-    Returns: (can_message, is_premium, reason)
-    """
     user_id = (user_id or "").strip()
     thread_id = (thread_id or "").strip()
     if not user_id:
@@ -2456,9 +2256,6 @@ def _ensure_thread_participant(thread: Thread, user_id: str) -> str:
     return other
 
 
-# -----------------------------
-# Threads
-# -----------------------------
 class MarkReadPayload(BaseModel):
     user_id: str
     thread_id: str
@@ -2488,16 +2285,7 @@ def mark_thread_read(payload: MarkReadPayload):
                 tr.last_read_at = read_at
             tr.updated_at = now
         else:
-            session.add(
-                ThreadRead(
-                    id=secrets.token_hex(20)[:40],
-                    user_id=user_id,
-                    thread_id=thread_id,
-                    last_read_at=read_at,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+            session.add(ThreadRead(id=secrets.token_hex(20)[:40], user_id=user_id, thread_id=thread_id, last_read_at=read_at, created_at=now, updated_at=now))
 
         session.commit()
         return {"ok": True, "lastReadAt": read_at.isoformat()}
@@ -2515,14 +2303,11 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
         other_user_id = (prof.owner_user_id or "").strip()
         if not other_user_id:
             raise HTTPException(status_code=400, detail="That profile is missing an owner_user_id.")
-
         if other_user_id == user_id:
             raise HTTPException(status_code=400, detail="You cannot message yourself.")
 
         low, high = _sorted_pair(user_id, other_user_id)
-
         existing = session.execute(select(Thread).where(Thread.user_low == low, Thread.user_high == high)).scalar_one_or_none()
-
         now = datetime.utcnow()
 
         if existing:
@@ -2532,15 +2317,7 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
             session.add(thread)
             session.commit()
 
-        return ThreadItem(
-            threadId=thread.id,
-            with_user_id=other_user_id,
-            with_profile_id=prof.id,
-            with_display_name=prof.display_name,
-            with_photo=prof.photo,
-            last_message=None,
-            last_message_at=None,
-        )
+        return ThreadItem(threadId=thread.id, with_user_id=other_user_id, with_profile_id=prof.id, with_display_name=prof.display_name, with_photo=prof.photo, last_message=None, last_message_at=None)
 
 
 @app.get("/threads/inbox", response_model=ThreadsInboxResponse)
@@ -2548,25 +2325,13 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        rows = (
-            session.execute(
-                select(Thread).where((Thread.user_low == user_id) | (Thread.user_high == user_id)).order_by(Thread.updated_at.desc()).limit(limit)
-            )
-            .scalars()
-            .all()
-        )
+        rows = session.execute(select(Thread).where((Thread.user_low == user_id) | (Thread.user_high == user_id)).order_by(Thread.updated_at.desc()).limit(limit)).scalars().all()
 
         items: List[ThreadItem] = []
-
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
-
             other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
-
-            last_msg = (
-                session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1))
-                .scalar_one_or_none()
-            )
+            last_msg = session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1)).scalar_one_or_none()
 
             items.append(
                 ThreadItem(
@@ -2588,33 +2353,18 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        rows = (
-            session.execute(
-                select(Thread).where((Thread.user_low == user_id) | (Thread.user_high == user_id)).order_by(Thread.updated_at.desc()).limit(limit)
-            )
-            .scalars()
-            .all()
-        )
-
+        rows = session.execute(select(Thread).where((Thread.user_low == user_id) | (Thread.user_high == user_id)).order_by(Thread.updated_at.desc()).limit(limit)).scalars().all()
         items: List[ThreadListItem] = []
 
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
-
             other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
-
-            last_msg = (
-                session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1))
-                .scalar_one_or_none()
-            )
+            last_msg = session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1)).scalar_one_or_none()
 
             my_read = session.execute(select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == t.id)).scalar_one_or_none()
             my_last_read_at = my_read.last_read_at if my_read else None
 
-            unread_count_q = select(func.count()).select_from(Message).where(
-                Message.thread_id == t.id,
-                Message.sender_user_id != user_id,
-            )
+            unread_count_q = select(func.count()).select_from(Message).where(Message.thread_id == t.id, Message.sender_user_id != user_id)
             if my_last_read_at:
                 unread_count_q = unread_count_q.where(Message.created_at > my_last_read_at)
 
@@ -2637,9 +2387,6 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
         return ThreadsResponse(items=items)
 
 
-# -----------------------------
-# Messaging access / paywall
-# -----------------------------
 @app.get("/messaging/access", response_model=MessagingAccessResponse)
 def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
     user_id = _ensure_user(user_id)
@@ -2653,23 +2400,17 @@ def messaging_access(user_id: str = Query(...), thread_id: str = Query(...)):
             raise HTTPException(status_code=404, detail="Thread not found")
 
         _ensure_thread_participant(thread, user_id)
-
         can_msg, is_premium, reason = _can_message_thread(session, user_id, thread_id)
         return MessagingAccessResponse(canMessage=can_msg, isPremium=is_premium, unlockedUntilUTC=None, reason=reason)
 
 
 def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None:
-    """
-    Enforce: user must have a profile photo before sending messages.
-    Returns nothing if OK; raises HTTPException if not.
-    """
     if AUTH_PREVIEW_MODE:
         return
 
     p = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=403, detail="photo_required")
-
     if getattr(p, "is_banned", False):
         raise HTTPException(status_code=403, detail="banned")
 
@@ -2679,15 +2420,8 @@ def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None
         raise HTTPException(status_code=403, detail="photo_required")
 
 
-# -----------------------------
-# Messages
-# -----------------------------
 @app.get("/messages", response_model=MessagesResponse)
-def list_messages(
-    thread_id: str = Query(...),
-    user_id: str = Query(...),
-    limit: int = Query(default=200, ge=1, le=500),
-):
+def list_messages(thread_id: str = Query(...), user_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)):
     user_id = _ensure_user(user_id)
     thread_id = (thread_id or "").strip()
     if not thread_id:
@@ -2699,27 +2433,12 @@ def list_messages(
             raise HTTPException(status_code=404, detail="Thread not found")
 
         other_user_id = _ensure_thread_participant(thread, user_id)
-
         other_read = session.execute(select(ThreadRead).where(ThreadRead.thread_id == thread_id, ThreadRead.user_id == other_user_id)).scalar_one_or_none()
         other_last_read_at = other_read.last_read_at.isoformat() if (other_read and other_read.last_read_at) else None
 
-        rows = (
-            session.execute(select(Message).where(Message.thread_id == thread_id).order_by(Message.created_at.desc()).limit(limit))
-            .scalars()
-            .all()
-        )
-
+        rows = session.execute(select(Message).where(Message.thread_id == thread_id).order_by(Message.created_at.desc()).limit(limit)).scalars().all()
         rows = list(reversed(rows))
-        items = [
-            MessageItem(
-                id=m.id,
-                thread_id=m.thread_id,
-                sender_user_id=m.sender_user_id,
-                body=m.body,
-                created_at=m.created_at.isoformat(),
-            )
-            for m in rows
-        ]
+        items = [MessageItem(id=m.id, thread_id=m.thread_id, sender_user_id=m.sender_user_id, body=m.body, created_at=m.created_at.isoformat()) for m in rows]
         return MessagesResponse(items=items, otherLastReadAt=other_last_read_at)
 
 
@@ -2740,37 +2459,24 @@ def send_message(payload: MessageCreatePayload):
             raise HTTPException(status_code=404, detail="Thread not found")
 
         _ensure_thread_participant(thread, user_id)
-
         _require_profile_photo_for_messaging(session, user_id)
 
         can_msg, is_premium, reason = _can_message_thread(session, user_id, thread_id)
-
         if not can_msg and not AUTH_PREVIEW_MODE:
             raise HTTPException(status_code=402, detail=reason or "Messaging locked.")
 
         now = datetime.utcnow()
         m = Message(thread_id=thread_id, sender_user_id=user_id, body=body, created_at=now)
         session.add(m)
-
         thread.updated_at = now
-
         session.commit()
         session.refresh(m)
 
         return MessageItem(id=m.id, thread_id=m.thread_id, sender_user_id=m.sender_user_id, body=m.body, created_at=m.created_at.isoformat())
 
 
-# -----------------------------
-# ADMIN / TEST Unlock (optional)
-# -----------------------------
 @app.post("/messaging/unlock")
 def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default="")):
-    """
-    ADMIN helper:
-      - If make_premium=True => set entitlement premium
-      - Else if thread_id provided => create ThreadUnlock (permanent)
-    Safety: requires ADMIN_UNLOCK_KEY match (set in Render env vars).
-    """
     if not ADMIN_UNLOCK_KEY:
         raise HTTPException(status_code=500, detail="Admin unlock is not configured (ADMIN_UNLOCK_KEY missing).")
     if (admin_key or "").strip() != ADMIN_UNLOCK_KEY:
@@ -2803,9 +2509,6 @@ def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default
         return {"ok": True, "userId": user_id, "threadId": thread_id, "unlocked": True}
 
 
-# -----------------------------
-# ✅ NEW: ADMIN AUTH + MODERATION + REPORTS
-# -----------------------------
 @app.post("/admin/auth/login", response_model=AdminLoginOut)
 def admin_login(body: AdminLoginIn):
     email = _norm_email(body.email)
@@ -2848,11 +2551,7 @@ def _safe_count(conn, sql: str, params: Dict[str, Any]) -> int:
 
 
 @app.get("/admin/profiles", response_model=AdminProfilesOut)
-def admin_list_profiles(
-    q: Optional[str] = None,
-    limit: int = 200,
-    authorization: Optional[str] = Header(default=None),
-):
+def admin_list_profiles(q: Optional[str] = None, limit: int = 200, authorization: Optional[str] = Header(default=None)):
     require_admin(authorization, allowed_roles=["admin", "moderator"])
 
     qn = (q or "").strip().lower()
@@ -2920,11 +2619,7 @@ def admin_list_profiles(
 
 
 @app.patch("/admin/profiles/{profile_id}")
-def admin_patch_profile(
-    profile_id: str,
-    body: AdminPatchProfileIn,
-    authorization: Optional[str] = Header(default=None),
-):
+def admin_patch_profile(profile_id: str, body: AdminPatchProfileIn, authorization: Optional[str] = Header(default=None)):
     require_admin(authorization, allowed_roles=["admin", "moderator"])
 
     with Session(engine) as session:
@@ -2933,7 +2628,6 @@ def admin_patch_profile(
             raise HTTPException(status_code=404, detail="Profile not found.")
 
         if body.isAvailable is not None:
-            # if banned, still force false
             if getattr(p, "is_banned", False):
                 p.is_available = False
             else:
@@ -2956,11 +2650,7 @@ def admin_patch_profile(
 
 
 @app.post("/admin/profiles/{profile_id}/clear-photo")
-def admin_clear_photo(
-    profile_id: str,
-    body: AdminClearPhotoIn,
-    authorization: Optional[str] = Header(default=None),
-):
+def admin_clear_photo(profile_id: str, body: AdminClearPhotoIn, authorization: Optional[str] = Header(default=None)):
     require_admin(authorization, allowed_roles=["admin", "moderator"])
     slot = int(body.slot or 0)
     if slot not in (1, 2):
@@ -2983,30 +2673,8 @@ def admin_clear_photo(
     return {"ok": True}
 
 
-# Reports: user submits + admin views + admin updates status + email notify
-ADMIN_REPORT_EMAIL = (os.getenv("ADMIN_REPORT_EMAIL") or "").strip()
-
-
-def _send_admin_report_email(subject: str, content: str):
-    # If not configured, no-op.
-    if not ADMIN_REPORT_EMAIL:
-        return
-    try:
-        sg = SendGridAPIClient(os.environ.get("SENDGRID_API_KEY"))
-        from_email = os.getenv("SENDGRID_FROM_EMAIL") or "noreply@blackwithin.app"
-        msg = Mail(
-            from_email=from_email,
-            to_emails=ADMIN_REPORT_EMAIL,
-            subject=subject[:120],
-            plain_text_content=content[:6000],
-        )
-        sg.send(msg)
-    except Exception:
-        return
-
-
 @app.post("/reports", response_model=ReportOut)
-def create_report(body: ReportIn):
+def create_report(body: ReportIn, background_tasks: BackgroundTasks):
     if not body.reporter_user_id or not body.reported_user_id or not (body.reason or "").strip():
         raise HTTPException(status_code=400, detail="reporter_user_id, reported_user_id, and reason are required.")
 
@@ -3028,30 +2696,15 @@ def create_report(body: ReportIn):
         )
         session.add(r)
         session.commit()
+        session.refresh(r)
 
-    _send_admin_report_email(
-        subject="Black Within — New user report",
-        content=(
-            f"Report ID: {rid}\n"
-            f"Reporter user_id: {body.reporter_user_id}\n"
-            f"Reported user_id: {body.reported_user_id}\n"
-            f"Reported profile_id: {body.reported_profile_id or ''}\n"
-            f"Thread ID: {body.thread_id or ''}\n"
-            f"Reason: {body.reason}\n"
-            f"Details: {body.details or ''}\n"
-            f"Time (UTC): {now.isoformat()}Z\n"
-        ),
-    )
+        background_tasks.add_task(_notify_admins_new_report, r)
 
     return ReportOut(id=rid, status="open")
 
 
 @app.get("/admin/reports", response_model=AdminReportsOut)
-def admin_list_reports(
-    status: Optional[str] = None,
-    limit: int = 200,
-    authorization: Optional[str] = Header(default=None),
-):
+def admin_list_reports(status: Optional[str] = None, limit: int = 200, authorization: Optional[str] = Header(default=None)):
     require_admin(authorization, allowed_roles=["admin", "moderator"])
     limit = max(1, min(int(limit or 200), 500))
 
@@ -3082,11 +2735,7 @@ def admin_list_reports(
 
 
 @app.patch("/admin/reports/{report_id}")
-def admin_patch_report(
-    report_id: str,
-    body: AdminPatchReportIn,
-    authorization: Optional[str] = Header(default=None),
-):
+def admin_patch_report(report_id: str, body: AdminPatchReportIn, authorization: Optional[str] = Header(default=None)):
     require_admin(authorization, allowed_roles=["admin", "moderator"])
     st = (body.status or "").strip().lower()
     if st not in ("open", "reviewing", "resolved", "dismissed"):
@@ -3105,11 +2754,8 @@ def admin_patch_report(
 
 
 @app.post("/admin/users/create", response_model=AdminCreateUserOut)
-def admin_create_user_free(
-    body: AdminCreateUserIn,
-    authorization: Optional[str] = Header(default=None),
-):
-    require_admin(authorization, allowed_roles=["admin"])  # only full admin creates users
+def admin_create_user_free(body: AdminCreateUserIn, authorization: Optional[str] = Header(default=None)):
+    require_admin(authorization, allowed_roles=["admin"])
 
     user_id = secrets.token_hex(20)
     profile_id = secrets.token_hex(20)
@@ -3131,7 +2777,7 @@ def admin_create_user_free(
             relationship_intent=None,
             dating_challenge_text=None,
             personal_truth_text=None,
-            is_available=False,  # start hidden until they finish
+            is_available=False,
             is_banned=False,
             banned_reason=None,
             banned_at=None,
@@ -3157,9 +2803,6 @@ def admin_create_user_free(
     return AdminCreateUserOut(user_id=user_id, profile_id=profile_id, claim_token=token)
 
 
-# -----------------------------
-# Stripe Checkout
-# -----------------------------
 @app.post("/stripe/checkout/thread-unlock", response_model=CheckoutSessionResponse)
 def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
     if not STRIPE_SECRET_KEY:
@@ -3176,12 +2819,7 @@ def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             mode="payment",
-            line_items=[
-                {
-                    "price_data": {"currency": "usd", "unit_amount": 199, "product_data": {"name": "Unlock Chat Conversation"}},
-                    "quantity": 1,
-                }
-            ],
+            line_items=[{"price_data": {"currency": "usd", "unit_amount": 199, "product_data": {"name": "Unlock Chat Conversation"}}, "quantity": 1}],
             success_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=success",
             cancel_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=cancel",
             metadata={"kind": "thread_unlock", "user_id": user_id, "thread_id": thread_id},
@@ -3198,18 +2836,14 @@ def stripe_checkout_premium(payload: PremiumCheckoutPayload):
         raise HTTPException(status_code=500, detail="Stripe is not configured for premium.")
 
     user_id = _ensure_user(payload.user_id)
-
     WEB_BASE_URL = os.getenv("WEB_BASE_URL") or APP_WEB_BASE_URL
-
-    success_url = f"{WEB_BASE_URL}/discover?premium=success"
-    cancel_url = f"{WEB_BASE_URL}/discover?premium=cancel"
 
     try:
         session_obj = stripe.checkout.Session.create(
             mode="subscription",
             line_items=[{"price": STRIPE_PREMIUM_PRICE_ID, "quantity": 1}],
-            success_url=success_url,
-            cancel_url=cancel_url,
+            success_url=f"{WEB_BASE_URL}/discover?premium=success",
+            cancel_url=f"{WEB_BASE_URL}/discover?premium=cancel",
             client_reference_id=user_id,
             metadata={"kind": "premium", "user_id": user_id},
         )
@@ -3234,33 +2868,21 @@ def create_unlock_session(payload: CreateUnlockSessionPayload):
                 {
                     "price_data": {
                         "currency": "usd",
-                        "product_data": {
-                            "name": "Black Within — Conversation Unlock",
-                            "description": "Unlock messaging with this person forever",
-                        },
+                        "product_data": {"name": "Black Within — Conversation Unlock", "description": "Unlock messaging with this person forever"},
                         "unit_amount": 199,
                     },
                     "quantity": 1,
                 }
             ],
-            metadata={
-                "kind": "thread_unlock",
-                "user_id": user_id,
-                "target_profile_id": payload.target_profile_id,
-                "thread_id": payload.thread_id,
-            },
+            metadata={"kind": "thread_unlock", "user_id": user_id, "target_profile_id": payload.target_profile_id, "thread_id": payload.thread_id},
             success_url="https://meetblackwithin.com/messages?success=true",
             cancel_url="https://meetblackwithin.com/messages?canceled=true",
         )
-
         return {"checkout_url": session_obj.url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# -----------------------------
-# Stripe Webhook ✅ FIXED INDENTATION
-# -----------------------------
 @app.post("/stripe/webhook")
 async def stripe_webhook(request: Request):
     payload = await request.body()
@@ -3287,7 +2909,6 @@ async def stripe_webhook(request: Request):
         if kind == "thread_unlock":
             user_id = (metadata.get("user_id") or "").strip()
             thread_id = (metadata.get("thread_id") or "").strip()
-
             if not user_id or not thread_id:
                 raise HTTPException(status_code=400, detail="Missing user_id or thread_id")
 
