@@ -1,0 +1,691 @@
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+  process.env.NEXT_PUBLIC_API_URL?.trim() ||
+  "https://black-within-api.onrender.com";
+
+type AdminProfileRow = {
+  profile_id: string;
+  owner_user_id: string;
+
+  displayName: string;
+  age: number;
+  city: string;
+  stateUS: string;
+
+  photo?: string | null;
+  photo2?: string | null;
+
+  isAvailable: boolean;
+
+  is_banned?: boolean;
+  banned_reason?: string | null;
+
+  likes_count?: number;
+  saved_count?: number;
+  threads_count?: number;
+};
+
+type AdminProfilesResponse = {
+  items: AdminProfileRow[];
+};
+
+async function safeReadErrorDetail(res: Response): Promise<string> {
+  try {
+    const j = await res.json();
+    if (j?.detail) return String(j.detail);
+    if (j?.message) return String(j.message);
+  } catch {}
+  try {
+    const t = await res.text();
+    if (t) return t;
+  } catch {}
+  return `Request failed (${res.status}).`;
+}
+
+function getAdminToken(): string {
+  if (typeof window === "undefined") return "";
+  const keys = ["bw_admin_token", "admin_token", "bw_admin_session", "bw_admin_key"];
+  for (const k of keys) {
+    const v = window.localStorage.getItem(k);
+    if (v && v.trim()) return v.trim();
+  }
+  return "";
+}
+
+function setAdminToken(token: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem("bw_admin_token", token);
+}
+
+function clearAdminToken() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("bw_admin_token");
+  window.localStorage.removeItem("admin_token");
+  window.localStorage.removeItem("bw_admin_session");
+  window.localStorage.removeItem("bw_admin_key");
+}
+
+function buildAdminHeaders(token: string): Record<string, string> {
+  const t = (token || "").trim();
+  return {
+    "Content-Type": "application/json",
+    "X-Admin-Token": t,
+    Authorization: `Bearer ${t}`,
+  };
+}
+
+// ---- Admin API helpers (match your FastAPI routes) ----
+// If your backend path names differ, update ONLY these URLs.
+
+async function apiAdminListProfiles(token: string): Promise<AdminProfileRow[]> {
+  const res = await fetch(`${API_BASE}/admin/profiles?limit=200`, {
+    method: "GET",
+    headers: buildAdminHeaders(token),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  const json = (await res.json()) as AdminProfilesResponse;
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
+async function apiAdminSetAvailable(
+  token: string,
+  profile_id: string,
+  isAvailable: boolean
+) {
+  const res = await fetch(`${API_BASE}/admin/profiles/set-available`, {
+    method: "POST",
+    headers: buildAdminHeaders(token),
+    body: JSON.stringify({ profile_id, isAvailable }),
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return res.json().catch(() => ({}));
+}
+
+async function apiAdminRemovePhoto(
+  token: string,
+  profile_id: string,
+  slot: 1 | 2
+) {
+  const res = await fetch(`${API_BASE}/admin/profiles/remove-photo`, {
+    method: "POST",
+    headers: buildAdminHeaders(token),
+    body: JSON.stringify({ profile_id, slot }),
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return res.json().catch(() => ({}));
+}
+
+async function apiAdminBan(
+  token: string,
+  owner_user_id: string,
+  banned: boolean,
+  reason?: string
+) {
+  const res = await fetch(`${API_BASE}/admin/users/ban`, {
+    method: "POST",
+    headers: buildAdminHeaders(token),
+    body: JSON.stringify({
+      owner_user_id,
+      banned,
+      reason: (reason || "").trim() || null,
+    }),
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return res.json().catch(() => ({}));
+}
+
+// Optional: add a free user (seed) without charge (admin-side)
+async function apiAdminCreateFreeUser(
+  token: string,
+  email: string,
+  displayName: string
+) {
+  const res = await fetch(`${API_BASE}/admin/users/create-free`, {
+    method: "POST",
+    headers: buildAdminHeaders(token),
+    body: JSON.stringify({
+      email: email.trim(),
+      displayName: displayName.trim(),
+    }),
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return res.json();
+}
+
+export default function AdminDashboardPage() {
+  const router = useRouter();
+
+  const [token, setToken] = useState<string>("");
+  const [tokenInput, setTokenInput] = useState<string>("");
+
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<AdminProfileRow[]>([]);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const [query, setQuery] = useState("");
+  const [workingId, setWorkingId] = useState<string | null>(null);
+
+  // “Free user” form (optional)
+  const [freeEmail, setFreeEmail] = useState("");
+  const [freeName, setFreeName] = useState("");
+
+  function showToast(msg: string) {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 2200);
+  }
+
+  // On load: use stored token; if missing, send to /admin/login
+  useEffect(() => {
+    const t = getAdminToken();
+    if (!t) {
+      router.replace("/admin/login");
+      return;
+    }
+    setToken(t);
+    setTokenInput(t);
+  }, [router]);
+
+  async function refresh(tOverride?: string) {
+    const t = (tOverride ?? token).trim();
+    if (!t) return;
+
+    setLoading(true);
+    setApiError(null);
+
+    try {
+      const rows = await apiAdminListProfiles(t);
+      setItems(rows);
+    } catch (e: any) {
+      setApiError(e?.message || "Failed to load admin data.");
+
+      // If token invalid, send back to login
+      const msg = String(e?.message || "");
+      if (msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("forbidden")) {
+        clearAdminToken();
+        router.replace("/admin/login");
+        return;
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!token) return;
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+
+    return items.filter((p) => {
+      return (
+        (p.displayName || "").toLowerCase().includes(q) ||
+        (p.city || "").toLowerCase().includes(q) ||
+        (p.stateUS || "").toLowerCase().includes(q) ||
+        (p.owner_user_id || "").toLowerCase().includes(q) ||
+        (p.profile_id || "").toLowerCase().includes(q)
+      );
+    });
+  }, [items, query]);
+
+  const stats = useMemo(() => {
+    const total = items.length;
+    const available = items.filter((x) => x.isAvailable).length;
+    const banned = items.filter((x) => x.is_banned).length;
+    return { total, available, banned };
+  }, [items]);
+
+  const card: React.CSSProperties = {
+    border: "1px solid #eee",
+    borderRadius: 14,
+    padding: "1.1rem",
+    background: "white",
+  };
+
+  const btn: React.CSSProperties = {
+    padding: "0.5rem 0.75rem",
+    borderRadius: 10,
+    border: "1px solid #ccc",
+    background: "white",
+    cursor: "pointer",
+    fontWeight: 700,
+  };
+
+  const dangerBtn: React.CSSProperties = {
+    ...btn,
+    border: "1px solid #f0c9c9",
+    background: "#fff7f7",
+  };
+
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "2rem",
+        background: "#fff",
+        display: "grid",
+        placeItems: "start center",
+      }}
+    >
+      <div style={{ width: "100%", maxWidth: 1100 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "1rem",
+            flexWrap: "wrap",
+            alignItems: "flex-start",
+          }}
+        >
+          <div>
+            <h1 style={{ fontSize: "2.2rem", marginBottom: 6 }}>Admin Dashboard</h1>
+            <div style={{ color: "#666" }}>
+              Profiles: <b>{stats.total}</b> • Visible: <b>{stats.available}</b> • Banned:{" "}
+              <b>{stats.banned}</b>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Link href="/discover" style={{ ...btn, textDecoration: "none", color: "inherit" }}>
+              Discover
+            </Link>
+            <Link href="/profile" style={{ ...btn, textDecoration: "none", color: "inherit" }}>
+              My Profile
+            </Link>
+
+            <button
+              type="button"
+              style={btn}
+              onClick={() => refresh()}
+              disabled={loading}
+            >
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+
+            <button
+              type="button"
+              style={dangerBtn}
+              onClick={() => {
+                clearAdminToken();
+                showToast("Signed out.");
+                router.replace("/admin/login");
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+
+        {apiError && (
+          <div
+            style={{
+              marginTop: "0.9rem",
+              padding: "0.85rem",
+              borderRadius: 12,
+              border: "1px solid #f0c9c9",
+              background: "#fff7f7",
+              color: "#7a2d2d",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            <b>Admin API notice:</b> {apiError}
+          </div>
+        )}
+
+        {toast && (
+          <div
+            style={{
+              marginTop: "0.9rem",
+              padding: "0.75rem",
+              borderRadius: 10,
+              border: "1px solid #cfe7cf",
+              background: "#f6fff6",
+            }}
+          >
+            {toast}
+          </div>
+        )}
+
+        {/* Token debug box (helpful while stabilizing) */}
+        <div style={{ ...card, marginTop: "1.25rem" }}>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>Admin Token (stored locally)</div>
+          <div style={{ color: "#666", fontSize: 13, marginBottom: 10 }}>
+            This page sends your token as <code>X-Admin-Token</code> and <code>Authorization</code>.
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <input
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              placeholder="Admin token…"
+              style={{
+                flex: 1,
+                minWidth: 280,
+                padding: "0.65rem 0.75rem",
+                borderRadius: 10,
+                border: "1px solid #ccc",
+              }}
+            />
+            <button
+              type="button"
+              style={btn}
+              onClick={() => {
+                const t = tokenInput.trim();
+                if (!t) return;
+                setAdminToken(t);
+                setToken(t);
+                showToast("Token updated.");
+              }}
+            >
+              Save token
+            </button>
+          </div>
+        </div>
+
+        {/* Optional: Create free user */}
+        <div style={{ ...card, marginTop: "1.25rem" }}>
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>Add a user free of charge (optional)</div>
+          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr auto" }}>
+            <input
+              value={freeEmail}
+              onChange={(e) => setFreeEmail(e.target.value)}
+              placeholder="email"
+              style={{
+                padding: "0.65rem 0.75rem",
+                borderRadius: 10,
+                border: "1px solid #ccc",
+              }}
+            />
+            <input
+              value={freeName}
+              onChange={(e) => setFreeName(e.target.value)}
+              placeholder="display name"
+              style={{
+                padding: "0.65rem 0.75rem",
+                borderRadius: 10,
+                border: "1px solid #ccc",
+              }}
+            />
+            <button
+              type="button"
+              style={btn}
+              disabled={!token || !freeEmail.trim() || !freeName.trim()}
+              onClick={async () => {
+                try {
+                  setApiError(null);
+                  setWorkingId("create-free");
+                  await apiAdminCreateFreeUser(token, freeEmail, freeName);
+                  setFreeEmail("");
+                  setFreeName("");
+                  showToast("Free user created.");
+                  await refresh();
+                } catch (e: any) {
+                  setApiError(e?.message || "Could not create free user.");
+                } finally {
+                  setWorkingId(null);
+                }
+              }}
+            >
+              {workingId === "create-free" ? "Creating..." : "Create"}
+            </button>
+          </div>
+          <div style={{ color: "#777", fontSize: 12, marginTop: 8 }}>
+            If your backend doesn’t have <code>/admin/users/create-free</code> yet, we’ll add it next.
+          </div>
+        </div>
+
+        {/* Search + list */}
+        <div style={{ ...card, marginTop: "1.25rem" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ fontWeight: 800 }}>Profiles</div>
+            <div style={{ flex: 1 }} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, city, state, user_id, profile_id…"
+              style={{
+                width: 420,
+                maxWidth: "100%",
+                padding: "0.65rem 0.75rem",
+                borderRadius: 10,
+                border: "1px solid #ccc",
+              }}
+            />
+          </div>
+
+          <div style={{ marginTop: 12, overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <thead>
+                <tr style={{ textAlign: "left" }}>
+                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>User</th>
+                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Profile</th>
+                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Visible</th>
+                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Photos</th>
+                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Activity</th>
+                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Ban</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {filtered.map((p) => {
+                  const busy = workingId === p.profile_id;
+                  const likes = p.likes_count ?? 0;
+                  const saved = p.saved_count ?? 0;
+                  const threads = p.threads_count ?? 0;
+
+                  return (
+                    <tr key={p.profile_id}>
+                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                        <div style={{ fontWeight: 800 }}>{p.displayName}</div>
+                        <div style={{ color: "#666", fontSize: 12 }}>
+                          {p.owner_user_id}
+                        </div>
+                      </td>
+
+                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                        <div>
+                          {p.age}, {p.city}, {p.stateUS}
+                        </div>
+                        <div style={{ color: "#666", fontSize: 12 }}>
+                          {p.profile_id}
+                        </div>
+                        {p.is_banned ? (
+                          <div style={{ color: "#7a2d2d", fontSize: 12, marginTop: 4 }}>
+                            <b>BANNED</b>
+                            {p.banned_reason ? ` — ${p.banned_reason}` : ""}
+                          </div>
+                        ) : null}
+                      </td>
+
+                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                        <button
+                          type="button"
+                          style={{
+                            ...btn,
+                            border: "1px solid #111",
+                            background: p.isAvailable ? "#111" : "white",
+                            color: p.isAvailable ? "white" : "#111",
+                            opacity: busy ? 0.7 : 1,
+                            cursor: busy ? "not-allowed" : "pointer",
+                          }}
+                          disabled={busy}
+                          onClick={async () => {
+                            try {
+                              setApiError(null);
+                              setWorkingId(p.profile_id);
+                              await apiAdminSetAvailable(token, p.profile_id, !p.isAvailable);
+                              showToast(p.isAvailable ? "Hidden in Discover." : "Shown in Discover.");
+                              await refresh();
+                            } catch (e: any) {
+                              setApiError(e?.message || "Could not update availability.");
+                            } finally {
+                              setWorkingId(null);
+                            }
+                          }}
+                        >
+                          {p.isAvailable ? "Visible" : "Hidden"}
+                        </button>
+                      </td>
+
+                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                          {p.photo ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={p.photo}
+                              alt="p1"
+                              style={{ width: 42, height: 42, borderRadius: 10, objectFit: "cover", border: "1px solid #eee" }}
+                            />
+                          ) : (
+                            <div style={{ width: 42, height: 42, borderRadius: 10, border: "1px dashed #ccc" }} />
+                          )}
+
+                          {p.photo2 ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={p.photo2}
+                              alt="p2"
+                              style={{ width: 42, height: 42, borderRadius: 10, objectFit: "cover", border: "1px solid #eee" }}
+                            />
+                          ) : (
+                            <div style={{ width: 42, height: 42, borderRadius: 10, border: "1px dashed #ccc" }} />
+                          )}
+                        </div>
+
+                        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            style={dangerBtn}
+                            disabled={busy || !p.photo}
+                            onClick={async () => {
+                              const ok = window.confirm("Remove Photo 1 from this profile?");
+                              if (!ok) return;
+
+                              try {
+                                setApiError(null);
+                                setWorkingId(p.profile_id);
+                                await apiAdminRemovePhoto(token, p.profile_id, 1);
+                                showToast("Photo 1 removed.");
+                                await refresh();
+                              } catch (e: any) {
+                                setApiError(e?.message || "Could not remove photo 1.");
+                              } finally {
+                                setWorkingId(null);
+                              }
+                            }}
+                          >
+                            Remove P1
+                          </button>
+
+                          <button
+                            type="button"
+                            style={dangerBtn}
+                            disabled={busy || !p.photo2}
+                            onClick={async () => {
+                              const ok = window.confirm("Remove Photo 2 from this profile?");
+                              if (!ok) return;
+
+                              try {
+                                setApiError(null);
+                                setWorkingId(p.profile_id);
+                                await apiAdminRemovePhoto(token, p.profile_id, 2);
+                                showToast("Photo 2 removed.");
+                                await refresh();
+                              } catch (e: any) {
+                                setApiError(e?.message || "Could not remove photo 2.");
+                              } finally {
+                                setWorkingId(null);
+                              }
+                            }}
+                          >
+                            Remove P2
+                          </button>
+                        </div>
+                      </td>
+
+                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                        <div style={{ color: "#333" }}>
+                          Likes: <b>{likes}</b>
+                        </div>
+                        <div style={{ color: "#333" }}>
+                          Saved: <b>{saved}</b>
+                        </div>
+                        <div style={{ color: "#333" }}>
+                          Threads: <b>{threads}</b>
+                        </div>
+                        <div style={{ color: "#777", fontSize: 12, marginTop: 4 }}>
+                          (threads count can be wired later)
+                        </div>
+                      </td>
+
+                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                        <button
+                          type="button"
+                          style={p.is_banned ? btn : dangerBtn}
+                          disabled={busy}
+                          onClick={async () => {
+                            try {
+                              setApiError(null);
+                              setWorkingId(p.profile_id);
+
+                              if (!p.is_banned) {
+                                const reason =
+                                  window.prompt("Ban reason (optional):", "Violation of community guidelines") || "";
+                                await apiAdminBan(token, p.owner_user_id, true, reason);
+                                showToast("User banned.");
+                              } else {
+                                const ok = window.confirm("Unban this user?");
+                                if (!ok) return;
+                                await apiAdminBan(token, p.owner_user_id, false, "");
+                                showToast("User unbanned.");
+                              }
+
+                              await refresh();
+                            } catch (e: any) {
+                              setApiError(e?.message || "Could not update ban.");
+                            } finally {
+                              setWorkingId(null);
+                            }
+                          }}
+                        >
+                          {p.is_banned ? "Unban" : "Ban"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {!loading && filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: "14px 8px", color: "#666" }}>
+                      No results.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+
+          {loading ? (
+            <div style={{ marginTop: 12, color: "#666" }}>Loading…</div>
+          ) : null}
+        </div>
+
+        <div style={{ marginTop: "1rem", color: "#777", fontSize: 12 }}>
+          If any button errors, tell me the exact endpoint error message and we’ll align the
+          dashboard URLs with your FastAPI route names.
+        </div>
+      </div>
+    </main>
+  );
+}
