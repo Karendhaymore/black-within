@@ -1111,6 +1111,12 @@ class ClaimOut(BaseModel):
     user_id: str
     profile_id: str
 
+    
+class AdminDeleteResponse(BaseModel):
+    ok: bool
+    deleted_messages: int = 0
+    deleted_threads: int = 0
+    deleted_unlocks: int = 0
 
 # -----------------------------
 # App
