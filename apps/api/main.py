@@ -2823,8 +2823,14 @@ def create_report(body: ReportIn, background_tasks: BackgroundTasks):
 
 
 @app.get("/admin/reports", response_model=AdminReportsOut)
-def admin_list_reports(status: Optional[str] = None, limit: int = 200, authorization: Optional[str] = Header(default=None)):
-    require_admin(authorization, allowed_roles=["admin", "moderator"])
+def admin_list_reports(
+    status: Optional[str] = None,
+    limit: int = 200,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
     limit = max(1, min(int(limit or 200), 500))
 
     with Session(engine) as session:
