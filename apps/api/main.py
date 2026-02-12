@@ -1395,10 +1395,42 @@ def _admin_bootstrap_if_needed():
         session.commit()
 
 
-def require_admin(authorization: Optional[str], allowed_roles: Optional[List[str]] = None) -> AdminUser:
-    if not authorization or not authorization.startswith("Bearer "):
+def _get_admin_token(x_admin_token: Optional[str], authorization: Optional[str]) -> str:
+    t = (x_admin_token or "").strip()
+    if t:
+        return t
+    a = (authorization or "").strip()
+    if a.lower().startswith("bearer "):
+        return a.split(" ", 1)[1].strip()
+    return ""
+
+
+def require_admin(
+    authorization: Optional[str],
+    x_admin_token: Optional[str] = None,
+    allowed_roles: Optional[List[str]] = None
+) -> AdminUser:
+    token = _get_admin_token(x_admin_token, authorization)
+    if not token:
         raise HTTPException(status_code=401, detail="Missing admin auth token.")
-    token = authorization.replace("Bearer ", "", 1).strip()
+
+    th = _hash_token(token)
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        s = session.execute(select(AdminSession).where(AdminSession.token_hash == th)).scalar_one_or_none()
+        if not s or s.expires_at <= now:
+            raise HTTPException(status_code=401, detail="Admin session expired.")
+
+        au = session.execute(select(AdminUser).where(AdminUser.id == s.admin_user_id)).scalar_one_or_none()
+        if not au or not au.is_enabled:
+            raise HTTPException(status_code=403, detail="Admin disabled.")
+
+        if allowed_roles and au.role not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Insufficient admin role.")
+
+        return au
+
     if not token:
         raise HTTPException(status_code=401, detail="Missing admin auth token.")
 
