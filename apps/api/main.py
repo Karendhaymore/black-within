@@ -2868,6 +2868,123 @@ def admin_create_user_free(body: AdminCreateUserIn, authorization: Optional[str]
 
     return AdminCreateUserOut(user_id=user_id, profile_id=profile_id, claim_token=token)
 
+@app.post("/admin/users/create-free")
+def admin_create_free_user(
+    payload: AdminCreateFreeUserRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    # Use your EXISTING admin session auth
+    require_admin(authorization, allowed_roles=["admin", "moderator"])
+
+    email = (payload.email or "").strip().lower()
+    display_name = (payload.displayName or "").strip()
+
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Valid email is required.")
+    if not display_name:
+        raise HTTPException(status_code=400, detail="displayName is required.")
+
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        # Your "users" table does NOT have an email column.
+        # Email lives in auth_accounts, so we check there.
+        existing_acct = session.execute(
+            select(AuthAccount).where(AuthAccount.email == email)
+        ).scalar_one_or_none()
+
+        if existing_acct:
+            # Ensure user row exists (usually already does)
+            try:
+                _ensure_user(existing_acct.user_id)
+            except Exception:
+                pass
+
+            # Ensure a profile exists (create if missing)
+            existing_profile = session.execute(
+                select(Profile).where(Profile.owner_user_id == existing_acct.user_id)
+            ).scalar_one_or_none()
+
+            if not existing_profile:
+                session.add(
+                    Profile(
+                        id=_new_id(),
+                        owner_user_id=existing_acct.user_id,
+                        display_name=display_name,
+                        age=18,
+                        city="",
+                        state_us="",
+                        photo=None,
+                        photo2=None,
+                        identity_preview="",
+                        intention="Intentional partnership",
+                        tags_csv="[]",
+                        cultural_identity_csv="[]",
+                        spiritual_framework_csv="[]",
+                        relationship_intent=None,
+                        dating_challenge_text=None,
+                        personal_truth_text=None,
+                        is_available=False,
+                        is_banned=False,
+                        banned_reason=None,
+                        banned_at=None,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                session.commit()
+
+            return {
+                "ok": True,
+                "user_id": existing_acct.user_id,
+                "email": existing_acct.email,
+                "created": False,
+            }
+
+        # Create a brand-new user id
+        user_id = _make_user_id_from_email(email)
+
+        # Create AuthAccount with a random password (so the account is valid).
+        # The user can use "Forgot password" later to set their own password.
+        temp_password = secrets.token_urlsafe(24)
+        pwd_hash = _hash_password(temp_password)
+
+        session.add(User(id=user_id, created_at=now))
+        session.add(AuthAccount(user_id=user_id, email=email, password_hash=pwd_hash, created_at=now))
+
+        # Create starter profile (your Profile model has required fields)
+        session.add(
+            Profile(
+                id=_new_id(),
+                owner_user_id=user_id,
+                display_name=display_name,
+                age=18,
+                city="",
+                state_us="",
+                photo=None,
+                photo2=None,
+                identity_preview="",
+                intention="Intentional partnership",
+                tags_csv="[]",
+                cultural_identity_csv="[]",
+                spiritual_framework_csv="[]",
+                relationship_intent=None,
+                dating_challenge_text=None,
+                personal_truth_text=None,
+                is_available=False,
+                is_banned=False,
+                banned_reason=None,
+                banned_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+        session.commit()
+
+    # IMPORTANT: we do NOT return temp_password here for security reasons.
+    return {"ok": True, "user_id": user_id, "email": email, "created": True}
+
 
 @app.post("/stripe/checkout/thread-unlock", response_model=CheckoutSessionResponse)
 def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
