@@ -269,6 +269,19 @@ export default function AdminDashboardPage() {
               My Profile
             </Link>
 
+           <Link
+  href="/admin/users/create-free"
+  style={{
+    padding: "8px 12px",
+    border: "1px solid #ddd",
+    borderRadius: 10,
+    fontWeight: 700,
+    textDecoration: "none",
+  }}
+>
+  Create Free User
+</Link>
+ 
             <button type="button" style={btn} onClick={() => refresh()} disabled={loading}>
               {loading ? "Loading..." : "Refresh"}
             </button>
