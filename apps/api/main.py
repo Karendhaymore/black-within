@@ -2727,8 +2727,13 @@ def admin_list_profiles(
 
 
 @app.patch("/admin/profiles/{profile_id}")
-def admin_patch_profile(profile_id: str, body: AdminPatchProfileIn, authorization: Optional[str] = Header(default=None)):
-    require_admin(authorization, allowed_roles=["admin", "moderator"])
+def admin_patch_profile(
+    profile_id: str,
+    body: AdminPatchProfileIn,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
     with Session(engine) as session:
         p = session.execute(select(Profile).where(Profile.id == profile_id)).scalar_one_or_none()
