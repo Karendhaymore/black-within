@@ -82,7 +82,7 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
 
-         <ReportButton userId={null} />
+         <ReportButton />
       </body>
     </html>
   );
