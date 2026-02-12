@@ -80,8 +80,7 @@ function buildAdminHeaders(token: string): Record<string, string> {
   };
 }
 
-// ---- Admin API helpers (match your FastAPI routes) ----
-// If your backend path names differ, update ONLY these URLs.
+// ---- Admin API helpers (aligned to backend routes) ----
 
 async function apiAdminListProfiles(token: string): Promise<AdminProfileRow[]> {
   const res = await fetch(`${API_BASE}/admin/profiles?limit=200`, {
@@ -94,69 +93,42 @@ async function apiAdminListProfiles(token: string): Promise<AdminProfileRow[]> {
   return Array.isArray(json?.items) ? json.items : [];
 }
 
-async function apiAdminSetAvailable(
+async function apiAdminPatchProfile(
   token: string,
   profile_id: string,
-  isAvailable: boolean
+  body: { isAvailable?: boolean; is_banned?: boolean; banned_reason?: string | null }
 ) {
-  const res = await fetch(`${API_BASE}/admin/profiles/set-available`, {
-    method: "POST",
+  const res = await fetch(`${API_BASE}/admin/profiles/${encodeURIComponent(profile_id)}`, {
+    method: "PATCH",
     headers: buildAdminHeaders(token),
-    body: JSON.stringify({ profile_id, isAvailable }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   return res.json().catch(() => ({}));
 }
 
-async function apiAdminRemovePhoto(
-  token: string,
-  profile_id: string,
-  slot: 1 | 2
-) {
-  const res = await fetch(`${API_BASE}/admin/profiles/remove-photo`, {
-    method: "POST",
-    headers: buildAdminHeaders(token),
-    body: JSON.stringify({ profile_id, slot }),
-  });
+async function apiAdminSetAvailable(token: string, profile_id: string, isAvailable: boolean) {
+  return apiAdminPatchProfile(token, profile_id, { isAvailable });
+}
+
+async function apiAdminRemovePhoto(token: string, profile_id: string, slot: 1 | 2) {
+  const res = await fetch(
+    `${API_BASE}/admin/profiles/${encodeURIComponent(profile_id)}/clear-photo`,
+    {
+      method: "POST",
+      headers: buildAdminHeaders(token),
+      body: JSON.stringify({ slot }),
+    }
+  );
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   return res.json().catch(() => ({}));
 }
 
-async function apiAdminBan(
-  token: string,
-  owner_user_id: string,
-  banned: boolean,
-  reason?: string
-) {
-  const res = await fetch(`${API_BASE}/admin/users/ban`, {
-    method: "POST",
-    headers: buildAdminHeaders(token),
-    body: JSON.stringify({
-      owner_user_id,
-      banned,
-      reason: (reason || "").trim() || null,
-    }),
+async function apiAdminBan(token: string, profile_id: string, banned: boolean, reason?: string) {
+  return apiAdminPatchProfile(token, profile_id, {
+    is_banned: banned,
+    banned_reason: banned ? (reason || "").trim() || null : null,
   });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-  return res.json().catch(() => ({}));
-}
-
-// Optional: add a free user (seed) without charge (admin-side)
-async function apiAdminCreateFreeUser(
-  token: string,
-  email: string,
-  displayName: string
-) {
-  const res = await fetch(`${API_BASE}/admin/users/create-free`, {
-    method: "POST",
-    headers: buildAdminHeaders(token),
-    body: JSON.stringify({
-      email: email.trim(),
-      displayName: displayName.trim(),
-    }),
-  });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-  return res.json();
 }
 
 export default function AdminDashboardPage() {
@@ -173,16 +145,11 @@ export default function AdminDashboardPage() {
   const [query, setQuery] = useState("");
   const [workingId, setWorkingId] = useState<string | null>(null);
 
-  // “Free user” form (optional)
-  const [freeEmail, setFreeEmail] = useState("");
-  const [freeName, setFreeName] = useState("");
-
   function showToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2200);
   }
 
-  // On load: use stored token; if missing, send to /admin/login
   useEffect(() => {
     const t = getAdminToken();
     if (!t) {
@@ -206,7 +173,6 @@ export default function AdminDashboardPage() {
     } catch (e: any) {
       setApiError(e?.message || "Failed to load admin data.");
 
-      // If token invalid, send back to login
       const msg = String(e?.message || "");
       if (msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("forbidden")) {
         clearAdminToken();
@@ -227,7 +193,6 @@ export default function AdminDashboardPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items;
-
     return items.filter((p) => {
       return (
         (p.displayName || "").toLowerCase().includes(q) ||
@@ -304,12 +269,7 @@ export default function AdminDashboardPage() {
               My Profile
             </Link>
 
-            <button
-              type="button"
-              style={btn}
-              onClick={() => refresh()}
-              disabled={loading}
-            >
+            <button type="button" style={btn} onClick={() => refresh()} disabled={loading}>
               {loading ? "Loading..." : "Refresh"}
             </button>
 
@@ -357,7 +317,6 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {/* Token debug box (helpful while stabilizing) */}
         <div style={{ ...card, marginTop: "1.25rem" }}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>Admin Token (stored locally)</div>
           <div style={{ color: "#666", fontSize: 13, marginBottom: 10 }}>
@@ -392,59 +351,6 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Optional: Create free user */}
-        <div style={{ ...card, marginTop: "1.25rem" }}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Add a user free of charge (optional)</div>
-          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr auto" }}>
-            <input
-              value={freeEmail}
-              onChange={(e) => setFreeEmail(e.target.value)}
-              placeholder="email"
-              style={{
-                padding: "0.65rem 0.75rem",
-                borderRadius: 10,
-                border: "1px solid #ccc",
-              }}
-            />
-            <input
-              value={freeName}
-              onChange={(e) => setFreeName(e.target.value)}
-              placeholder="display name"
-              style={{
-                padding: "0.65rem 0.75rem",
-                borderRadius: 10,
-                border: "1px solid #ccc",
-              }}
-            />
-            <button
-              type="button"
-              style={btn}
-              disabled={!token || !freeEmail.trim() || !freeName.trim()}
-              onClick={async () => {
-                try {
-                  setApiError(null);
-                  setWorkingId("create-free");
-                  await apiAdminCreateFreeUser(token, freeEmail, freeName);
-                  setFreeEmail("");
-                  setFreeName("");
-                  showToast("Free user created.");
-                  await refresh();
-                } catch (e: any) {
-                  setApiError(e?.message || "Could not create free user.");
-                } finally {
-                  setWorkingId(null);
-                }
-              }}
-            >
-              {workingId === "create-free" ? "Creating..." : "Create"}
-            </button>
-          </div>
-          <div style={{ color: "#777", fontSize: 12, marginTop: 8 }}>
-            If your backend doesn’t have <code>/admin/users/create-free</code> yet, we’ll add it next.
-          </div>
-        </div>
-
-        {/* Search + list */}
         <div style={{ ...card, marginTop: "1.25rem" }}>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ fontWeight: 800 }}>Profiles</div>
@@ -487,18 +393,14 @@ export default function AdminDashboardPage() {
                     <tr key={p.profile_id}>
                       <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
                         <div style={{ fontWeight: 800 }}>{p.displayName}</div>
-                        <div style={{ color: "#666", fontSize: 12 }}>
-                          {p.owner_user_id}
-                        </div>
+                        <div style={{ color: "#666", fontSize: 12 }}>{p.owner_user_id}</div>
                       </td>
 
                       <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
                         <div>
                           {p.age}, {p.city}, {p.stateUS}
                         </div>
-                        <div style={{ color: "#666", fontSize: 12 }}>
-                          {p.profile_id}
-                        </div>
+                        <div style={{ color: "#666", fontSize: 12 }}>{p.profile_id}</div>
                         {p.is_banned ? (
                           <div style={{ color: "#7a2d2d", fontSize: 12, marginTop: 4 }}>
                             <b>BANNED</b>
@@ -544,7 +446,13 @@ export default function AdminDashboardPage() {
                             <img
                               src={p.photo}
                               alt="p1"
-                              style={{ width: 42, height: 42, borderRadius: 10, objectFit: "cover", border: "1px solid #eee" }}
+                              style={{
+                                width: 42,
+                                height: 42,
+                                borderRadius: 10,
+                                objectFit: "cover",
+                                border: "1px solid #eee",
+                              }}
                             />
                           ) : (
                             <div style={{ width: 42, height: 42, borderRadius: 10, border: "1px dashed #ccc" }} />
@@ -555,7 +463,13 @@ export default function AdminDashboardPage() {
                             <img
                               src={p.photo2}
                               alt="p2"
-                              style={{ width: 42, height: 42, borderRadius: 10, objectFit: "cover", border: "1px solid #eee" }}
+                              style={{
+                                width: 42,
+                                height: 42,
+                                borderRadius: 10,
+                                objectFit: "cover",
+                                border: "1px solid #eee",
+                              }}
                             />
                           ) : (
                             <div style={{ width: 42, height: 42, borderRadius: 10, border: "1px dashed #ccc" }} />
@@ -623,9 +537,6 @@ export default function AdminDashboardPage() {
                         <div style={{ color: "#333" }}>
                           Threads: <b>{threads}</b>
                         </div>
-                        <div style={{ color: "#777", fontSize: 12, marginTop: 4 }}>
-                          (threads count can be wired later)
-                        </div>
                       </td>
 
                       <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
@@ -640,13 +551,16 @@ export default function AdminDashboardPage() {
 
                               if (!p.is_banned) {
                                 const reason =
-                                  window.prompt("Ban reason (optional):", "Violation of community guidelines") || "";
-                                await apiAdminBan(token, p.owner_user_id, true, reason);
+                                  window.prompt(
+                                    "Ban reason (optional):",
+                                    "Violation of community guidelines"
+                                  ) || "";
+                                await apiAdminBan(token, p.profile_id, true, reason);
                                 showToast("User banned.");
                               } else {
                                 const ok = window.confirm("Unban this user?");
                                 if (!ok) return;
-                                await apiAdminBan(token, p.owner_user_id, false, "");
+                                await apiAdminBan(token, p.profile_id, false, "");
                                 showToast("User unbanned.");
                               }
 
@@ -676,14 +590,11 @@ export default function AdminDashboardPage() {
             </table>
           </div>
 
-          {loading ? (
-            <div style={{ marginTop: 12, color: "#666" }}>Loading…</div>
-          ) : null}
+          {loading ? <div style={{ marginTop: 12, color: "#666" }}>Loading…</div> : null}
         </div>
 
         <div style={{ marginTop: "1rem", color: "#777", fontSize: 12 }}>
-          If any button errors, tell me the exact endpoint error message and we’ll align the
-          dashboard URLs with your FastAPI route names.
+          If any button errors, paste the exact endpoint error message and we’ll align instantly.
         </div>
       </div>
     </main>
