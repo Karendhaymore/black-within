@@ -2941,7 +2941,9 @@ def admin_create_user_free(
 def admin_create_free_user(
     payload: AdminCreateFreeUserRequest,
     authorization: Optional[str] = Header(default=None),
-    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=[...])
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
 ):
     # Use your EXISTING admin session auth
