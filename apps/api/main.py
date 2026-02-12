@@ -710,45 +710,30 @@ def _auto_migrate_admin_tables():
         )
 def _auto_migrate_reports_table():
     with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS reports (
-                id VARCHAR(40) PRIMARY KEY,
-                created_at TIMESTAMP,
-                reporter_user_id VARCHAR(80),
+              id SERIAL PRIMARY KEY,
+              reporter_user_id VARCHAR(40) NOT NULL,
+              category VARCHAR(30) NOT NULL,
+              reason VARCHAR(120) NOT NULL,
+              details TEXT NOT NULL,
 
-                reported_user_id VARCHAR(80),
-                profile_id VARCHAR(80),
-                thread_id VARCHAR(80),
-                message_id VARCHAR(80),
+              target_user_id VARCHAR(40),
+              target_profile_id VARCHAR(60),
+              target_thread_id VARCHAR(60),
+              target_message_id INTEGER,
 
-                category VARCHAR(40),
-                reason VARCHAR(80),
-                details VARCHAR(2000),
-
-                status VARCHAR(20),
-                resolved_by_admin_id VARCHAR(40),
-                resolved_at TIMESTAMP,
-                resolution_note VARCHAR(2000)
+              page_url TEXT,
+              status VARCHAR(20) DEFAULT 'open',
+              created_at TIMESTAMP DEFAULT NOW(),
+              resolved_at TIMESTAMP
             );
-            """
-            )
-        )
-
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reports_reported_user_id ON reports(reported_user_id);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reports_profile_id ON reports(profile_id);"))
-
-        
-        # Ensure status exists + has a usable default
-        conn.execute(text("ALTER TABLE user_reports ADD COLUMN IF NOT EXISTS status VARCHAR(30);"))
-        conn.execute(text("UPDATE user_reports SET status = 'open' WHERE status IS NULL OR status = '';"))
-
-        # Optional: index if not present (helps alerts query)
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_user_reports_status ON user_reports(status);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_user_reports_created_at ON user_reports(created_at);"))
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_status ON reports(status);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_created_at ON reports(created_at);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_target_user_id ON reports(target_user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_target_profile_id ON reports(target_profile_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_target_thread_id ON reports(target_thread_id);"))
 
 
 def _auto_migrate_profiles_ban_fields():
