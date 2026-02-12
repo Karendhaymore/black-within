@@ -16,7 +16,7 @@ type Props = {};
   target_message_id?: number | null;
 };
 
-export default function ReportButton(props: Props) {
+export default function ReportButton() {
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState("other");
   const [reason, setReason] = useState("General issue");
