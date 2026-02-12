@@ -8,10 +8,34 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
+function getAdminToken(): string {
+  if (typeof window === "undefined") return "";
+  const keys = ["bw_admin_token", "admin_token", "bw_admin_session", "bw_admin_key"];
+  for (const k of keys) {
+    const v = window.localStorage.getItem(k);
+    if (v && v.trim()) return v.trim();
+  }
+  return "";
+}
+
+function setAdminToken(token: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem("bw_admin_token", token);
+}
+
+function clearAdminToken() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("bw_admin_token");
+  window.localStorage.removeItem("admin_token");
+  window.localStorage.removeItem("bw_admin_session");
+  window.localStorage.removeItem("bw_admin_key");
+}
+
 async function safeReadErrorDetail(res: Response): Promise<string> {
   try {
     const j = await res.json();
     if (j?.detail) return String(j.detail);
+    if (j?.message) return String(j.message);
   } catch {}
   try {
     const t = await res.text();
@@ -22,84 +46,132 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
 
 export default function AdminLoginPage() {
   const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = window.localStorage.getItem("bw_admin_token") || "";
-    if (token) router.replace("/admin");
+    // If already logged in, go straight to dashboard
+    const t = getAdminToken();
+    if (t) router.replace("/admin");
   }, [router]);
 
-  async function onLogin() {
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setErr(null);
     setLoading(true);
+
     try {
-      const res = await fetch(`${API_BASE}/admin/auth/login`, {
+      // Backend route we added earlier:
+      // POST /admin/login  { email, password } -> { token }
+      const res = await fetch(`${API_BASE}/admin/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
+
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-      const json = await res.json();
-      window.localStorage.setItem("bw_admin_token", json.token);
-      window.localStorage.setItem("bw_admin_role", json.role || "");
-      window.localStorage.setItem("bw_admin_email", json.email || "");
+      const json = await res.json().catch(() => ({}));
+
+      const token = String(json?.token || "").trim();
+      if (!token) throw new Error("Login succeeded but no token returned.");
+
+      setAdminToken(token);
       router.replace("/admin");
     } catch (e: any) {
       setErr(e?.message || "Login failed.");
+      clearAdminToken();
     } finally {
       setLoading(false);
     }
   }
 
+  const card: React.CSSProperties = {
+    border: "1px solid #eee",
+    borderRadius: 16,
+    padding: "1.25rem",
+    background: "white",
+  };
+
+  const input: React.CSSProperties = {
+    padding: "0.75rem 0.85rem",
+    borderRadius: 12,
+    border: "1px solid #ccc",
+    width: "100%",
+  };
+
+  const btn: React.CSSProperties = {
+    padding: "0.75rem 0.95rem",
+    borderRadius: 12,
+    border: "1px solid #111",
+    background: "#111",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 800,
+  };
+
   return (
-    <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "center" }}>
-      <div style={{ width: "100%", maxWidth: 520, border: "1px solid #eee", borderRadius: 16, padding: "1.25rem" }}>
-        <h1 style={{ marginTop: 0 }}>Admin Login</h1>
-        <p style={{ color: "#666", marginTop: 6 }}>Secure admin access for Black Within.</p>
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "2rem",
+        display: "grid",
+        placeItems: "center",
+        background: "#fff",
+      }}
+    >
+      <div style={{ width: "100%", maxWidth: 520 }}>
+        <h1 style={{ fontSize: "2rem", marginBottom: 10 }}>Admin Login</h1>
+        <div style={{ color: "#666", marginBottom: 18 }}>
+          Sign in with your admin email + password.
+        </div>
 
-        {err ? (
-          <div style={{ marginTop: 12, padding: 10, borderRadius: 12, border: "1px solid #f0c9c9", background: "#fff7f7", color: "#7a2d2d" }}>
-            <b>Error:</b> {err}
-          </div>
-        ) : null}
+        <div style={card}>
+          <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Admin email"
+              style={input}
+              autoComplete="email"
+            />
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              style={input}
+              type="password"
+              autoComplete="current-password"
+            />
 
-        <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="admin email"
-            style={{ padding: "0.75rem", borderRadius: 12, border: "1px solid #ccc" }}
-          />
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="password"
-            type="password"
-            style={{ padding: "0.75rem", borderRadius: 12, border: "1px solid #ccc" }}
-          />
+            <button type="submit" style={btn} disabled={loading || !email.trim() || !password}>
+              {loading ? "Signing in..." : "Sign in"}
+            </button>
 
-          <button
-            onClick={onLogin}
-            disabled={loading}
-            style={{
-              padding: "0.85rem 1rem",
-              borderRadius: 12,
-              border: "1px solid #111",
-              background: "#111",
-              color: "white",
-              fontWeight: 900,
-              cursor: loading ? "not-allowed" : "pointer",
-              opacity: loading ? 0.7 : 1,
-            }}
-          >
-            {loading ? "Signing in..." : "Sign in"}
-          </button>
+            {err ? (
+              <div
+                style={{
+                  marginTop: 6,
+                  padding: "0.75rem",
+                  borderRadius: 12,
+                  border: "1px solid #f0c9c9",
+                  background: "#fff7f7",
+                  color: "#7a2d2d",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                <b>Error:</b> {err}
+              </div>
+            ) : null}
+          </form>
+        </div>
 
-          <div style={{ color: "#777", fontSize: 12 }}>API: {API_BASE}</div>
+        <div style={{ marginTop: 14, color: "#777", fontSize: 12 }}>
+          If login fails, the backend must have <code>/admin/login</code> enabled and at least one
+          admin user created.
         </div>
       </div>
     </main>
