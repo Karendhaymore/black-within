@@ -1052,18 +1052,22 @@ class AdminClearPhotoIn(BaseModel):
     slot: int
 
 
+# -----------------------------
+# Reports
+# -----------------------------
 class CreateReportRequest(BaseModel):
     reporter_user_id: str
+    category: str  # "profile" | "message" | "thread" | "bug" | "payment" | "safety" | "other"
+    reason: str    # short label chosen by user
+    details: str   # free text
 
-    # at least one of these should be provided
-    reported_user_id: Optional[str] = None
-    profile_id: Optional[str] = None
-    thread_id: Optional[str] = None
-    message_id: Optional[str] = None
+    # Optional context (so one button can report anything)
+    target_user_id: Optional[str] = None
+    target_profile_id: Optional[str] = None
+    target_thread_id: Optional[str] = None
+    target_message_id: Optional[int] = None
 
-    category: str = "user"   # user | profile | message | thread | app | payment | other
-    reason: str = "other"    # harassment | scam | nudity | hate | spam | fake_profile | etc
-    details: Optional[str] = None
+    page_url: Optional[str] = None
 
 
 class ReportItem(BaseModel):
