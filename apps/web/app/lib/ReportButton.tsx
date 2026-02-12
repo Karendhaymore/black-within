@@ -83,7 +83,7 @@ export default function ReportButton(props: Props) {
         style={{
           position: "fixed",
           right: 18,
-          bottom: 18,
+          bottom: 18, // 👈 CHANGE bottom → top
           zIndex: 1000,
           padding: "10px 14px",
           borderRadius: 999,
