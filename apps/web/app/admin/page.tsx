@@ -35,6 +35,20 @@ type AdminProfilesResponse = {
   items: AdminProfileRow[];
 };
 
+type ReportItem = {
+  id: string;
+  created_at: string;
+  reporter_user_id: string;
+  reported_user_id?: string | null;
+  profile_id?: string | null;
+  thread_id?: string | null;
+  message_id?: string | null;
+  category: string;
+  reason: string;
+  details?: string | null;
+  status: string;
+};
+
 async function safeReadErrorDetail(res: Response): Promise<string> {
   try {
     const j = await res.json();
@@ -112,14 +126,11 @@ async function apiAdminSetAvailable(token: string, profile_id: string, isAvailab
 }
 
 async function apiAdminRemovePhoto(token: string, profile_id: string, slot: 1 | 2) {
-  const res = await fetch(
-    `${API_BASE}/admin/profiles/${encodeURIComponent(profile_id)}/clear-photo`,
-    {
-      method: "POST",
-      headers: buildAdminHeaders(token),
-      body: JSON.stringify({ slot }),
-    }
-  );
+  const res = await fetch(`${API_BASE}/admin/profiles/${encodeURIComponent(profile_id)}/clear-photo`, {
+    method: "POST",
+    headers: buildAdminHeaders(token),
+    body: JSON.stringify({ slot }),
+  });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   return res.json().catch(() => ({}));
 }
@@ -129,6 +140,45 @@ async function apiAdminBan(token: string, profile_id: string, banned: boolean, r
     is_banned: banned,
     banned_reason: banned ? (reason || "").trim() || null : null,
   });
+}
+
+// ---- Reports API helpers ----
+
+async function apiAdminReportsCount(adminToken: string) {
+  const res = await fetch(`${API_BASE}/admin/reports/counts`, {
+    headers: {
+      "X-Admin-Token": adminToken,
+      Authorization: `Bearer ${adminToken}`,
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return res.json() as Promise<{ open: number; resolved: number }>;
+}
+
+async function apiAdminListReports(adminToken: string, status: "open" | "resolved" = "open") {
+  const res = await fetch(`${API_BASE}/admin/reports?status=${status}&limit=200`, {
+    headers: {
+      "X-Admin-Token": adminToken,
+      Authorization: `Bearer ${adminToken}`,
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return res.json() as Promise<ReportItem[]>;
+}
+
+async function apiAdminResolveReport(adminToken: string, reportId: string, note?: string) {
+  const res = await fetch(`${API_BASE}/admin/reports/${reportId}/resolve`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Admin-Token": adminToken,
+      Authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({ note: note || "" }),
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 }
 
 export default function AdminDashboardPage() {
@@ -144,6 +194,16 @@ export default function AdminDashboardPage() {
 
   const [query, setQuery] = useState("");
   const [workingId, setWorkingId] = useState<string | null>(null);
+
+  // ---- Reports state + polling ----
+  const [reportCounts, setReportCounts] = useState<{ open: number; resolved: number }>({
+    open: 0,
+    resolved: 0,
+  });
+  const [openReports, setOpenReports] = useState<ReportItem[]>([]);
+  const [reportsError, setReportsError] = useState<string | null>(null);
+
+  const adminToken = token;
 
   function showToast(msg: string) {
     setToast(msg);
@@ -184,11 +244,36 @@ export default function AdminDashboardPage() {
     }
   }
 
+  async function refreshReports() {
+    if (!adminToken) return;
+    try {
+      setReportsError(null);
+      const counts = await apiAdminReportsCount(adminToken);
+      setReportCounts(counts);
+
+      if (counts.open > 0) {
+        const list = await apiAdminListReports(adminToken, "open");
+        setOpenReports(list);
+      } else {
+        setOpenReports([]);
+      }
+    } catch (e: any) {
+      setReportsError(e?.message || "Failed to load reports.");
+    }
+  }
+
   useEffect(() => {
     if (!token) return;
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  useEffect(() => {
+    refreshReports();
+    const t = window.setInterval(refreshReports, 10000); // every 10s
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -269,19 +354,19 @@ export default function AdminDashboardPage() {
               My Profile
             </Link>
 
-           <Link
-  href="/admin/users/create-free"
-  style={{
-    padding: "8px 12px",
-    border: "1px solid #ddd",
-    borderRadius: 10,
-    fontWeight: 700,
-    textDecoration: "none",
-  }}
->
-  Create Free User
-</Link>
- 
+            <Link
+              href="/admin/users/create-free"
+              style={{
+                padding: "8px 12px",
+                border: "1px solid #ddd",
+                borderRadius: 10,
+                fontWeight: 700,
+                textDecoration: "none",
+              }}
+            >
+              Create Free User
+            </Link>
+
             <button type="button" style={btn} onClick={() => refresh()} disabled={loading}>
               {loading ? "Loading..." : "Refresh"}
             </button>
@@ -329,6 +414,112 @@ export default function AdminDashboardPage() {
             {toast}
           </div>
         )}
+
+        {/* -------- Reports card -------- */}
+        <div style={{ border: "1px solid #eee", borderRadius: 16, padding: "1rem", marginTop: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 900, fontSize: 18 }}>Reports</div>
+              <div style={{ color: "#666", marginTop: 4 }}>
+                Open: <b>{reportCounts.open}</b> • Resolved: <b>{reportCounts.resolved}</b>
+              </div>
+              {reportsError ? <div style={{ color: "crimson", marginTop: 8 }}>{reportsError}</div> : null}
+            </div>
+
+            <button
+              onClick={refreshReports}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid #ddd",
+                background: "white",
+                fontWeight: 700,
+              }}
+            >
+              Refresh reports
+            </button>
+          </div>
+
+          {openReports.length > 0 ? (
+            <div style={{ marginTop: 12, overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", color: "#666", fontSize: 12 }}>
+                    <th style={{ padding: "10px 8px" }}>When</th>
+                    <th style={{ padding: "10px 8px" }}>Category</th>
+                    <th style={{ padding: "10px 8px" }}>Reason</th>
+                    <th style={{ padding: "10px 8px" }}>Target</th>
+                    <th style={{ padding: "10px 8px" }}>Details</th>
+                    <th style={{ padding: "10px 8px" }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {openReports.map((r) => (
+                    <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
+                      <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                        {new Date(r.created_at).toLocaleString()}
+                      </td>
+                      <td style={{ padding: "10px 8px" }}>{r.category}</td>
+                      <td style={{ padding: "10px 8px" }}>{r.reason}</td>
+                      <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
+                        {r.reported_user_id ? (
+                          <>
+                            user: <b>{r.reported_user_id}</b>
+                          </>
+                        ) : null}
+                        {r.profile_id ? (
+                          <div>
+                            profile: <b>{r.profile_id}</b>
+                          </div>
+                        ) : null}
+                        {r.thread_id ? (
+                          <div>
+                            thread: <b>{r.thread_id}</b>
+                          </div>
+                        ) : null}
+                        {r.message_id ? (
+                          <div>
+                            msg: <b>{r.message_id}</b>
+                          </div>
+                        ) : null}
+                      </td>
+                      <td style={{ padding: "10px 8px", maxWidth: 420 }}>
+                        <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>
+                          {r.details || "—"}
+                        </div>
+                      </td>
+                      <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                        <button
+                          onClick={async () => {
+                            const note = window.prompt("Resolve note (optional):", "");
+                            try {
+                              await apiAdminResolveReport(adminToken, r.id, note || "");
+                              await refreshReports();
+                            } catch (e: any) {
+                              alert(e?.message || "Resolve failed");
+                            }
+                          }}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 10,
+                            border: "1px solid #ddd",
+                            background: "white",
+                            fontWeight: 800,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Resolve
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ marginTop: 12, color: "#666" }}>No open reports 🎉</div>
+          )}
+        </div>
 
         <div style={{ ...card, marginTop: "1.25rem" }}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>Admin Token (stored locally)</div>
