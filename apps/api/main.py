@@ -321,35 +321,6 @@ class UserClaimToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
-# -----------------------------
-# Reports / Moderation queue (NEW)
-# -----------------------------
-class Report(Base):
-    __tablename__ = "reports"
-
-    id: Mapped[str] = mapped_column(String(40), primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-
-    # Who filed the report
-    reporter_user_id: Mapped[str] = mapped_column(String(80), index=True)
-
-    # What is being reported (some may be null depending on type)
-    reported_user_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
-    profile_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
-    thread_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
-    message_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
-
-    # Category + details
-    category: Mapped[str] = mapped_column(String(40), default="user", index=True)
-    reason: Mapped[str] = mapped_column(String(80), default="other", index=True)
-    details: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
-
-    # Status workflow
-    status: Mapped[str] = mapped_column(String(20), default="open", index=True)  # open | resolved
-    resolved_by_admin_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    resolution_note: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
-
 
 # -----------------------------
 # Migrations
