@@ -35,7 +35,7 @@ export default function ReportButton() {
   }, []);
 
   async function submit() {
-    if (!props.userId) {
+    if (!userId) {
       setMsg("Please sign in first.");
       return;
     }
