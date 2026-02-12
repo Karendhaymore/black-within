@@ -2914,7 +2914,7 @@ def admin_delete_message(
     authorization: Optional[str] = Header(default=None),
 ):
     # auth gate
-    require_admin(x_admin_token, authorization)
+    def require_admin(authorization: Optional[str], x_admin_token: Optional[str] = None, ...)
 
     with engine.begin() as conn:
         # delete message
@@ -2937,7 +2937,7 @@ def admin_delete_thread(
     authorization: Optional[str] = Header(default=None),
 ):
     # auth gate
-    require_admin(x_admin_token, authorization)
+    def require_admin(authorization: Optional[str], x_admin_token: Optional[str] = None, ...)
 
     tid = (thread_id or "").strip()
     if not tid:
