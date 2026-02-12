@@ -679,32 +679,40 @@ def _auto_migrate_admin_tables():
         """
             )
         )
+# -----------------------------
+# Migrations
+# -----------------------------
 def _auto_migrate_reports_table():
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text(
+                """
             CREATE TABLE IF NOT EXISTS reports (
               id SERIAL PRIMARY KEY,
-              reporter_user_id VARCHAR(40) NOT NULL,
-              category VARCHAR(30) NOT NULL,
-              reason VARCHAR(120) NOT NULL,
-              details TEXT NOT NULL,
+              reporter_user_id VARCHAR(40),
+              category VARCHAR(80),
+              reason VARCHAR(80),
+              details TEXT,
 
               target_user_id VARCHAR(40),
               target_profile_id VARCHAR(60),
               target_thread_id VARCHAR(60),
               target_message_id INTEGER,
 
-              page_url TEXT,
-              status VARCHAR(20) DEFAULT 'open',
+              status VARCHAR(20) DEFAULT 'open',   -- open | resolved
+              admin_note TEXT,
+
               created_at TIMESTAMP DEFAULT NOW(),
-              resolved_at TIMESTAMP
+              resolved_at TIMESTAMP NULL
             );
-        """))
+            """
+            )
+        )
+
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_status ON reports(status);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_created_at ON reports(created_at);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_target_user_id ON reports(target_user_id);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_target_profile_id ON reports(target_profile_id);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_target_thread_id ON reports(target_thread_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_reporter ON reports(reporter_user_id);"))
+
 
 
 def _auto_migrate_profiles_ban_fields():
