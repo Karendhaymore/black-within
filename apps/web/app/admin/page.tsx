@@ -156,18 +156,6 @@ async function apiAdminReportsCount(adminToken: string) {
   return res.json() as Promise<{ open: number; resolved: number }>;
 }
 
-async function apiAdminListReports(adminToken: string, status: "open" | "resolved" = "open") {
-  const res = await fetch(`${API_BASE}/admin/reports?status=${status}&limit=200`, {
-    headers: {
-      "X-Admin-Token": adminToken,
-      Authorization: `Bearer ${adminToken}`,
-    },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-  return res.json() as Promise<ReportItem[]>;
-}
-
 async function apiAdminResolveReport(adminToken: string, reportId: string, note?: string) {
   const res = await fetch(`${API_BASE}/admin/reports/${reportId}/resolve`, {
     method: "POST",
@@ -201,10 +189,11 @@ export default function AdminDashboardPage() {
     resolved: 0,
   });
   const [openReports, setOpenReports] = useState<ReportItem[]>([]);
-  const [reportsError, setReportsError] = useState<string | null>(null);
+
+  // ✅ REQUIRED STATES (added)
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportsError, setReportsError] = useState<string | null>(null);
-  
+
   const adminToken = token;
 
   function showToast(msg: string) {
@@ -246,42 +235,56 @@ export default function AdminDashboardPage() {
     }
   }
 
+  // ✅ REPLACE refreshReports WITH THIS (updated to setOpenReports)
   async function refreshReports() {
-  if (reportsLoading) return; // prevents double-click spam
-  setReportsLoading(true);
-  setReportsError(null);
+    if (reportsLoading) return; // prevents double-click spam
+    setReportsLoading(true);
+    setReportsError(null);
 
-  try {
-    const token = (adminToken || "").trim();
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+    try {
+      const token = (adminToken || "").trim();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
 
-    if (token) {
-      headers["X-Admin-Token"] = token;
-      headers["Authorization"] = `Bearer ${token}`;
+      if (token) {
+        headers["X-Admin-Token"] = token;
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${API_BASE}/admin/reports?limit=50`, {
+        method: "GET",
+        headers,
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || `Failed to refresh reports (${res.status})`);
+      }
+
+      const data = await res.json();
+      // Adjust field name depending on your API response
+      const list = Array.isArray(data?.reports) ? data.reports : Array.isArray(data) ? data : [];
+      setOpenReports(list);
+    } catch (e: any) {
+      setReportsError(e?.message || "Failed to refresh reports.");
+    } finally {
+      setReportsLoading(false); // ✅ fixes the “unclickable” button
     }
-
-    const res = await fetch(`${API_BASE}/admin/reports?limit=50`, {
-      method: "GET",
-      headers,
-      cache: "no-store",
-    });
-
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(txt || `Failed to refresh reports (${res.status})`);
-    }
-
-    const data = await res.json();
-    // Adjust field name depending on your API response
-    setReports(Array.isArray(data?.reports) ? data.reports : []);
-  } catch (e: any) {
-    setReportsError(e?.message || "Failed to refresh reports.");
-  } finally {
-    setReportsLoading(false); // ✅ THIS is what usually fixes the “unclickable” button
   }
-}
+
+  // keep counts updating (so "Open/Resolved" stays accurate)
+  async function refreshReportCountsOnly() {
+    const t = (adminToken || "").trim();
+    if (!t) return;
+    try {
+      const counts = await apiAdminReportsCount(t);
+      setReportCounts(counts);
+    } catch (e: any) {
+      // don't clobber reportsError here; keep it tied to refreshReports
+    }
+  }
 
   useEffect(() => {
     if (!token) return;
@@ -290,8 +293,18 @@ export default function AdminDashboardPage() {
   }, [token]);
 
   useEffect(() => {
+    if (!adminToken) return;
+
+    // initial
+    refreshReportCountsOnly();
     refreshReports();
-    const t = window.setInterval(refreshReports, 10000); // every 10s
+
+    // polling
+    const t = window.setInterval(() => {
+      refreshReportCountsOnly();
+      refreshReports();
+    }, 10000);
+
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
@@ -444,20 +457,30 @@ export default function AdminDashboardPage() {
               <div style={{ color: "#666", marginTop: 4 }}>
                 Open: <b>{reportCounts.open}</b> • Resolved: <b>{reportCounts.resolved}</b>
               </div>
-              {reportsError ? <div style={{ color: "crimson", marginTop: 8 }}>{reportsError}</div> : null}
+
+              {/* ✅ error display (updated) */}
+              {reportsError ? (
+                <div style={{ marginTop: 8, color: "#b00020", fontWeight: 700 }}>{reportsError}</div>
+              ) : null}
             </div>
 
+            {/* ✅ clickable + visible loading (updated) */}
             <button
-              onClick={refreshReports}
+              onClick={(e) => {
+                e.preventDefault();
+                refreshReports();
+              }}
+              disabled={reportsLoading}
               style={{
-                padding: "10px 12px",
-                borderRadius: 12,
+                padding: "10px 14px",
+                borderRadius: 10,
                 border: "1px solid #ddd",
-                background: "white",
+                background: reportsLoading ? "#f3f3f3" : "white",
+                cursor: reportsLoading ? "not-allowed" : "pointer",
                 fontWeight: 700,
               }}
             >
-              Refresh reports
+              {reportsLoading ? "Refreshing..." : "Refresh reports"}
             </button>
           </div>
 
@@ -516,6 +539,7 @@ export default function AdminDashboardPage() {
                             try {
                               await apiAdminResolveReport(adminToken, r.id, note || "");
                               await refreshReports();
+                              await refreshReportCountsOnly();
                             } catch (e: any) {
                               alert(e?.message || "Resolve failed");
                             }
