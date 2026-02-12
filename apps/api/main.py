@@ -2936,6 +2936,13 @@ def admin_create_user_free(
         session.commit()
 
     return AdminCreateUserOut(user_id=user_id, profile_id=profile_id, claim_token=token)
+@app.get("/admin/users/create-free")
+def admin_create_free_user_probe(
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+    return {"ok": True}
 
 @app.post("/admin/users/create-free")
 def admin_create_free_user(
