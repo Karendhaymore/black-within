@@ -2898,94 +2898,123 @@ def admin_clear_photo(
     return {"ok": True}
 
 
-@app.post("/reports", response_model=ReportOut)
-def create_report(body: ReportIn, background_tasks: BackgroundTasks):
-    if not body.reporter_user_id or not body.reported_user_id or not (body.reason or "").strip():
-        raise HTTPException(status_code=400, detail="reporter_user_id, reported_user_id, and reason are required.")
+# -----------------------------
+# Reports (NEW) — public submit + admin queue
+# -----------------------------
+
+@app.post("/reports")
+def create_report(req: CreateReportRequest, background_tasks: BackgroundTasks):
+    # lightweight validation
+    if not (req.reported_user_id or req.profile_id or req.thread_id or req.message_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Must include reported_user_id, profile_id, thread_id, or message_id.",
+        )
 
     rid = secrets.token_hex(20)
     now = datetime.utcnow()
 
-    with Session(engine) as session:
-        r = UserReport(
+    with Session(engine) as db:
+        r = Report(
             id=rid,
-            reporter_user_id=body.reporter_user_id.strip(),
-            reported_user_id=body.reported_user_id.strip(),
-            reported_profile_id=(body.reported_profile_id.strip() if body.reported_profile_id else None),
-            thread_id=(body.thread_id.strip() if body.thread_id else None),
-            reason=body.reason.strip()[:160],
-            details=(body.details.strip()[:2000] if body.details else None),
-            status="open",
             created_at=now,
-            updated_at=now,
+            reporter_user_id=req.reporter_user_id.strip(),
+            reported_user_id=(req.reported_user_id or None),
+            profile_id=(req.profile_id or None),
+            thread_id=(req.thread_id or None),
+            message_id=(req.message_id or None),
+            category=(req.category or "user").strip(),
+            reason=(req.reason or "other").strip(),
+            details=(req.details or None),
+            status="open",
         )
-        session.add(r)
-        session.commit()
-        session.refresh(r)
+        db.add(r)
+        db.commit()
 
-        background_tasks.add_task(_notify_admins_new_report, r)
+        # optional: re-use your existing email alert helper
+        try:
+            background_tasks.add_task(_notify_admins_new_report, r)
+        except Exception:
+            pass
 
-    return ReportOut(id=rid, status="open")
+    return {"ok": True, "id": rid}
 
 
-@app.get("/admin/reports", response_model=AdminReportsOut)
+@app.get("/admin/reports")
 def admin_list_reports(
-    status: Optional[str] = None,
+    status: str = "open",
     limit: int = 200,
     authorization: Optional[str] = Header(default=None),
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ):
-    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+    admin = require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
-    limit = max(1, min(int(limit or 200), 500))
-
-    with Session(engine) as session:
-        q = select(UserReport).order_by(UserReport.created_at.desc())
+    with Session(engine) as db:
+        q = db.query(Report).order_by(Report.created_at.desc())
         if status:
-            q = q.where(UserReport.status == status)
-        q = q.limit(limit)
+            q = q.filter(Report.status == status)
 
-        rows = session.execute(q).scalars().all()
+        rows = q.limit(max(1, min(int(limit or 200), 500))).all()
 
-        return AdminReportsOut(
-            items=[
-                AdminReportRow(
-                    id=r.id,
-                    reporter_user_id=r.reporter_user_id,
-                    reported_user_id=r.reported_user_id,
-                    reported_profile_id=r.reported_profile_id,
-                    thread_id=r.thread_id,
-                    reason=r.reason,
-                    details=r.details,
-                    status=r.status,
-                    created_at=r.created_at.isoformat() + "Z",
-                )
-                for r in rows
-            ]
-        )
+    def _iso(dt: Optional[datetime]) -> Optional[str]:
+        return dt.isoformat() if dt else None
+
+    return [
+        ReportItem(
+            id=r.id,
+            created_at=_iso(r.created_at) or "",
+            reporter_user_id=r.reporter_user_id,
+            reported_user_id=r.reported_user_id,
+            profile_id=r.profile_id,
+            thread_id=r.thread_id,
+            message_id=r.message_id,
+            category=r.category,
+            reason=r.reason,
+            details=r.details,
+            status=r.status,
+            resolved_by_admin_id=r.resolved_by_admin_id,
+            resolved_at=_iso(r.resolved_at),
+            resolution_note=r.resolution_note,
+        ).model_dump()
+        for r in rows
+    ]
 
 
-@app.patch("/admin/reports/{report_id}")
-def admin_patch_report(
-    report_id: str,
-    body: AdminPatchReportIn,
+@app.get("/admin/reports/counts")
+def admin_report_counts(
     authorization: Optional[str] = Header(default=None),
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ):
     require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
-    st = (body.status or "").strip().lower()
-    if st not in ("open", "reviewing", "resolved", "dismissed"):
-        raise HTTPException(status_code=400, detail="Invalid status.")
+    with Session(engine) as db:
+        open_count = db.query(Report).filter(Report.status == "open").count()
+        resolved_count = db.query(Report).filter(Report.status == "resolved").count()
 
-    with Session(engine) as session:
-        r = session.execute(select(UserReport).where(UserReport.id == report_id)).scalar_one_or_none()
+    return {"open": int(open_count), "resolved": int(resolved_count)}
+
+
+@app.post("/admin/reports/{report_id}/resolve")
+def admin_resolve_report(
+    report_id: str,
+    req: ResolveReportRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    admin = require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
+    with Session(engine) as db:
+        r = db.query(Report).filter(Report.id == report_id).first()
         if not r:
             raise HTTPException(status_code=404, detail="Report not found.")
-        r.status = st
-        r.updated_at = datetime.utcnow()
-        session.add(r)
-        session.commit()
+
+        r.status = "resolved"
+        r.resolved_by_admin_id = getattr(admin, "id", None) or "admin"
+        r.resolved_at = datetime.utcnow()
+        r.resolution_note = (req.note or "").strip() or None
+
+        db.add(r)
+        db.commit()
 
     return {"ok": True}
 
