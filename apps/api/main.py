@@ -1053,40 +1053,40 @@ class AdminClearPhotoIn(BaseModel):
 # -----------------------------
 # Reports
 # -----------------------------
-class CreateReportRequest(BaseModel):
+class ReportCreateRequest(BaseModel):
     reporter_user_id: str
-    category: str  # "profile" | "message" | "thread" | "bug" | "payment" | "safety" | "other"
-    reason: str    # short label chosen by user
-    details: str   # free text
+    category: str
+    reason: str
+    details: str
 
-    # Optional context (so one button can report anything)
     target_user_id: Optional[str] = None
     target_profile_id: Optional[str] = None
     target_thread_id: Optional[str] = None
     target_message_id: Optional[int] = None
 
-    page_url: Optional[str] = None
 
-
-class ReportItem(BaseModel):
-    id: str
-    created_at: str
+class ReportRow(BaseModel):
+    id: int
     reporter_user_id: str
-    reported_user_id: Optional[str] = None
-    profile_id: Optional[str] = None
-    thread_id: Optional[str] = None
-    message_id: Optional[str] = None
     category: str
     reason: str
-    details: Optional[str] = None
+    details: str
+
+    target_user_id: Optional[str] = None
+    target_profile_id: Optional[str] = None
+    target_thread_id: Optional[str] = None
+    target_message_id: Optional[int] = None
+
     status: str
-    resolved_by_admin_id: Optional[str] = None
+    admin_note: Optional[str] = None
+    created_at: str
     resolved_at: Optional[str] = None
-    resolution_note: Optional[str] = None
 
 
-class ResolveReportRequest(BaseModel):
-    note: Optional[str] = None
+class ReportResolveRequest(BaseModel):
+    admin_note: Optional[str] = None
+    status: str = "resolved"  # resolved | open
+
 
 
 class AdminCreateFreeUserRequest(BaseModel):
