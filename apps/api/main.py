@@ -1052,38 +1052,40 @@ class AdminClearPhotoIn(BaseModel):
     slot: int
 
 
-class ReportIn(BaseModel):
+class CreateReportRequest(BaseModel):
     reporter_user_id: str
-    reported_user_id: str
-    reported_profile_id: Optional[str] = None
+
+    # at least one of these should be provided
+    reported_user_id: Optional[str] = None
+    profile_id: Optional[str] = None
     thread_id: Optional[str] = None
-    reason: str
+    message_id: Optional[str] = None
+
+    category: str = "user"   # user | profile | message | thread | app | payment | other
+    reason: str = "other"    # harassment | scam | nudity | hate | spam | fake_profile | etc
     details: Optional[str] = None
 
 
-class ReportOut(BaseModel):
+class ReportItem(BaseModel):
     id: str
-    status: str
-
-
-class AdminReportRow(BaseModel):
-    id: str
-    reporter_user_id: str
-    reported_user_id: str
-    reported_profile_id: Optional[str] = None
-    thread_id: Optional[str] = None
-    reason: str
-    details: Optional[str] = None
-    status: str
     created_at: str
-
-
-class AdminReportsOut(BaseModel):
-    items: List[AdminReportRow]
-
-
-class AdminPatchReportIn(BaseModel):
+    reporter_user_id: str
+    reported_user_id: Optional[str] = None
+    profile_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    message_id: Optional[str] = None
+    category: str
+    reason: str
+    details: Optional[str] = None
     status: str
+    resolved_by_admin_id: Optional[str] = None
+    resolved_at: Optional[str] = None
+    resolution_note: Optional[str] = None
+
+
+class ResolveReportRequest(BaseModel):
+    note: Optional[str] = None
+
 
 class AdminCreateFreeUserRequest(BaseModel):
     email: str
