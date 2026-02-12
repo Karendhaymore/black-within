@@ -708,7 +708,40 @@ def _auto_migrate_admin_tables():
         """
             )
         )
+           def _auto_migrate_reports_table():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+            CREATE TABLE IF NOT EXISTS reports (
+                id VARCHAR(40) PRIMARY KEY,
+                created_at TIMESTAMP,
+                reporter_user_id VARCHAR(80),
 
+                reported_user_id VARCHAR(80),
+                profile_id VARCHAR(80),
+                thread_id VARCHAR(80),
+                message_id VARCHAR(80),
+
+                category VARCHAR(40),
+                reason VARCHAR(80),
+                details VARCHAR(2000),
+
+                status VARCHAR(20),
+                resolved_by_admin_id VARCHAR(40),
+                resolved_at TIMESTAMP,
+                resolution_note VARCHAR(2000)
+            );
+            """
+            )
+        )
+
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reports_reported_user_id ON reports(reported_user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reports_profile_id ON reports(profile_id);"))
+
+        
         # Ensure status exists + has a usable default
         conn.execute(text("ALTER TABLE user_reports ADD COLUMN IF NOT EXISTS status VARCHAR(30);"))
         conn.execute(text("UPDATE user_reports SET status = 'open' WHERE status IS NULL OR status = '';"))
