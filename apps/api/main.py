@@ -2590,9 +2590,12 @@ x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
     return AdminMeOut(email=au.email, role=au.role)
 
 @app.get("/admin/report-alerts")
-def admin_report_alerts(authorization: Optional[str] = Header(default=None)):
-x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
-    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=[...])
+def admin_report_alerts(
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
     with engine.begin() as conn:
         open_count = conn.execute(
             text("""
