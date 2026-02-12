@@ -2910,7 +2910,7 @@ def admin_create_free_user(
 
 ):
     # Use your EXISTING admin session auth
-    require_admin(authorization, allowed_roles=["admin", "moderator"])
+   require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=[...]) 
 
     email = (payload.email or "").strip().lower()
     display_name = (payload.displayName or "").strip()
