@@ -247,22 +247,41 @@ export default function AdminDashboardPage() {
   }
 
   async function refreshReports() {
-    if (!adminToken) return;
-    try {
-      setReportsError(null);
-      const counts = await apiAdminReportsCount(adminToken);
-      setReportCounts(counts);
+  if (reportsLoading) return; // prevents double-click spam
+  setReportsLoading(true);
+  setReportsError(null);
 
-      if (counts.open > 0) {
-        const list = await apiAdminListReports(adminToken, "open");
-        setOpenReports(list);
-      } else {
-        setOpenReports([]);
-      }
-    } catch (e: any) {
-      setReportsError(e?.message || "Failed to load reports.");
+  try {
+    const token = (adminToken || "").trim();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (token) {
+      headers["X-Admin-Token"] = token;
+      headers["Authorization"] = `Bearer ${token}`;
     }
+
+    const res = await fetch(`${API_BASE}/admin/reports?limit=50`, {
+      method: "GET",
+      headers,
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(txt || `Failed to refresh reports (${res.status})`);
+    }
+
+    const data = await res.json();
+    // Adjust field name depending on your API response
+    setReports(Array.isArray(data?.reports) ? data.reports : []);
+  } catch (e: any) {
+    setReportsError(e?.message || "Failed to refresh reports.");
+  } finally {
+    setReportsLoading(false); // ✅ THIS is what usually fixes the “unclickable” button
   }
+}
 
   useEffect(() => {
     if (!token) return;
