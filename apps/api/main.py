@@ -2860,8 +2860,14 @@ def admin_list_reports(
 
 
 @app.patch("/admin/reports/{report_id}")
-def admin_patch_report(report_id: str, body: AdminPatchReportIn, authorization: Optional[str] = Header(default=None)):
-    require_admin(authorization, allowed_roles=["admin", "moderator"])
+def admin_patch_report(
+    report_id: str,
+    body: AdminPatchReportIn,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
     st = (body.status or "").strip().lower()
     if st not in ("open", "reviewing", "resolved", "dismissed"):
         raise HTTPException(status_code=400, detail="Invalid status.")
