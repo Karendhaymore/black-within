@@ -2,6 +2,11 @@
 
 import React, { useMemo, useState } from "react";
 
+const userId =
+  typeof window !== "undefined"
+    ? localStorage.getItem("bw_user_id")
+    : null;
+
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
