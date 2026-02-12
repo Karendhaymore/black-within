@@ -7,7 +7,7 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
-type Props = {
+type Props = {};
   userId: string | null;
   // Optional “context” so it can report a profile/message/thread when present
   target_user_id?: string | null;
