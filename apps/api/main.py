@@ -1405,7 +1405,7 @@ def _get_admin_token(x_admin_token: Optional[str], authorization: Optional[str])
     return ""
 
 
-def require_admin(
+require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=[...])
     authorization: Optional[str],
     x_admin_token: Optional[str] = None,
     allowed_roles: Optional[List[str]] = None
