@@ -202,7 +202,9 @@ export default function AdminDashboardPage() {
   });
   const [openReports, setOpenReports] = useState<ReportItem[]>([]);
   const [reportsError, setReportsError] = useState<string | null>(null);
-
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportsError, setReportsError] = useState<string | null>(null);
+  
   const adminToken = token;
 
   function showToast(msg: string) {
