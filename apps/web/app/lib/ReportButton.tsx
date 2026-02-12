@@ -2,79 +2,103 @@
 
 import React, { useMemo, useState } from "react";
 
-const userId =
-  typeof window !== "undefined"
-    ? localStorage.getItem("bw_user_id")
-    : null;
-
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
-type Props = {};
-  userId: string | null;
-  // Optional “context” so it can report a profile/message/thread when present
-  target_user_id?: string | null;
-  target_profile_id?: string | null;
-  target_thread_id?: string | null;
-  target_message_id?: number | null;
-};
+type ReportCategory =
+  | "Safety concern"
+  | "Harassment"
+  | "Scam / fraud"
+  | "Hate / discrimination"
+  | "Explicit content"
+  | "Bug / technical issue"
+  | "Other";
+
+type ReportReason =
+  | "General issue"
+  | "Threats"
+  | "Stalking"
+  | "Spam"
+  | "Impersonation"
+  | "Inappropriate message"
+  | "Inappropriate photo"
+  | "Underage concern"
+  | "Other";
+
+function getStoredUserId(): string | null {
+  if (typeof window === "undefined") return null;
+
+  // Try a few common keys (your app may store under one of these)
+  const keys = ["bw_user_id", "user_id", "userId", "bwUserId"];
+  for (const k of keys) {
+    const v = localStorage.getItem(k);
+    if (v && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+async function safeReadErrorDetail(res: Response): Promise<string> {
+  try {
+    const txt = await res.text();
+    return txt || `${res.status} ${res.statusText}`;
+  } catch {
+    return `${res.status} ${res.statusText}`;
+  }
+}
 
 export default function ReportButton() {
   const [open, setOpen] = useState(false);
-  const [category, setCategory] = useState("other");
-  const [reason, setReason] = useState("General issue");
-  const [details, setDetails] = useState("");
-  const [sending, setSending] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
 
-  const pageUrl = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return window.location.href;
-  }, []);
+  const [category, setCategory] = useState<ReportCategory>("Safety concern");
+  const [reason, setReason] = useState<ReportReason>("General issue");
+  const [details, setDetails] = useState("");
+
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  const userId = useMemo(() => getStoredUserId(), [open]); // refresh when opened
 
   async function submit() {
+    setErr(null);
+    setOk(null);
+
     if (!userId) {
-      setMsg("Please sign in first.");
+      setErr("Please sign in first.");
       return;
     }
     if (!details.trim()) {
-      setMsg("Please describe what happened.");
+      setErr("Please describe what happened.");
       return;
     }
 
     setSending(true);
-    setMsg(null);
-
     try {
-      const res = await fetch(`${API_BASE}/reports`, {
+      const res = await fetch(`${API_BASE}/reports/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           reporter_user_id: userId,
           category,
           reason,
-          details,
-          target_user_id: props.target_user_id || null,
-          target_profile_id: props.target_profile_id || null,
-          target_thread_id: props.target_thread_id || null,
-          target_message_id: props.target_message_id ?? null,
-          page_url: pageUrl,
+          details: details.trim(),
+
+          // Optional targets (global button = none)
+          target_user_id: null,
+          target_profile_id: null,
+          target_thread_id: null,
+          target_message_id: null,
         }),
       });
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Report failed (${res.status})`);
-      }
+      if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
+      setOk("Report sent. Thank you.");
       setDetails("");
-      setMsg("✅ Report sent. Thank you.");
-      // keep open for a second so they see confirmation
-      setTimeout(() => setOpen(false), 900);
     } catch (e: any) {
-      setMsg(e?.message || "Could not send report.");
+      setErr(e?.message || "Failed to send report.");
     } finally {
       setSending(false);
     }
@@ -82,124 +106,145 @@ export default function ReportButton() {
 
   return (
     <>
-      {/* Floating button */}
+      {/* Floating button (TOP RIGHT) */}
       <button
         onClick={() => setOpen(true)}
         style={{
           position: "fixed",
           right: 18,
-          bottom: 18, // 👈 CHANGE bottom → top
-          zIndex: 1000,
+          top: 18,
+          zIndex: 9999,
           padding: "10px 14px",
           borderRadius: 999,
           border: "1px solid #ddd",
-          background: "white",
-          fontWeight: 800,
+          background: "#fff",
+          boxShadow: "0 8px 20px rgba(0,0,0,0.08)",
+          fontWeight: 700,
           cursor: "pointer",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
         }}
       >
         Report a problem
       </button>
 
       {/* Modal */}
-      {open ? (
+      {open && (
         <div
-          onClick={() => setOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
-            zIndex: 1001,
+            zIndex: 10000,
             background: "rgba(0,0,0,0.35)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
           }}
+          onClick={() => setOpen(false)}
         >
           <div
-            onClick={(e) => e.stopPropagation()}
             style={{
-              width: "100%",
-              maxWidth: 520,
-              background: "white",
+              width: "min(680px, 96vw)",
+              background: "#fff",
               borderRadius: 16,
-              border: "1px solid #eee",
-              padding: 16,
+              boxShadow: "0 18px 50px rgba(0,0,0,0.25)",
+              padding: 18,
             }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 10 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 12 }}>
               Report a problem
             </div>
 
-            <label style={{ display: "block", fontWeight: 800, marginTop: 10 }}>
-              Category
-            </label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
-            >
-              <option value="profile">User/Profile</option>
-              <option value="message">Message</option>
-              <option value="thread">Conversation</option>
-              <option value="safety">Safety concern</option>
-              <option value="payment">Payment issue</option>
-              <option value="bug">Bug / app problem</option>
-              <option value="other">Other</option>
-            </select>
+            <div style={{ display: "grid", gap: 10 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 700 }}>Category</div>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value as ReportCategory)}
+                  style={{ padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
+                >
+                  <option>Safety concern</option>
+                  <option>Harassment</option>
+                  <option>Scam / fraud</option>
+                  <option>Hate / discrimination</option>
+                  <option>Explicit content</option>
+                  <option>Bug / technical issue</option>
+                  <option>Other</option>
+                </select>
+              </label>
 
-            <label style={{ display: "block", fontWeight: 800, marginTop: 10 }}>
-              Reason
-            </label>
-            <input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Example: Harassment, Spam, Impersonation, App crashing..."
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
-            />
+              <label style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 700 }}>Reason</div>
+                <select
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value as ReportReason)}
+                  style={{ padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
+                >
+                  <option>General issue</option>
+                  <option>Threats</option>
+                  <option>Stalking</option>
+                  <option>Spam</option>
+                  <option>Impersonation</option>
+                  <option>Inappropriate message</option>
+                  <option>Inappropriate photo</option>
+                  <option>Underage concern</option>
+                  <option>Other</option>
+                </select>
+              </label>
 
-            <label style={{ display: "block", fontWeight: 800, marginTop: 10 }}>
-              What happened?
-            </label>
-            <textarea
-              value={details}
-              onChange={(e) => setDetails(e.target.value)}
-              rows={5}
-              placeholder="Tell us what happened. Include names, what you saw, and what you want us to do."
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
-            />
+              <label style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 700 }}>What happened?</div>
+                <textarea
+                  value={details}
+                  onChange={(e) => setDetails(e.target.value)}
+                  rows={5}
+                  placeholder="Tell us what happened. Include usernames and what screen you were on."
+                  style={{
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px solid #ddd",
+                    resize: "vertical",
+                  }}
+                />
+              </label>
 
-            {msg ? (
-              <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>
-            ) : null}
+              {err && <div style={{ color: "#b00020", fontWeight: 700 }}>{err}</div>}
+              {ok && <div style={{ color: "#0a7a2f", fontWeight: 700 }}>{ok}</div>}
 
-            <div style={{ display: "flex", gap: 10, marginTop: 14, justifyContent: "flex-end" }}>
-              <button
-                onClick={() => setOpen(false)}
-                style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd", background: "white", fontWeight: 800 }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={submit}
-                disabled={sending}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #111",
-                  background: sending ? "#f3f3f3" : "#111",
-                  color: sending ? "#111" : "white",
-                  fontWeight: 900,
-                  cursor: sending ? "not-allowed" : "pointer",
-                }}
-              >
-                {sending ? "Sending..." : "Send report"}
-              </button>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => setOpen(false)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid #ddd",
+                    background: "#fff",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submit}
+                  disabled={sending}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid #111",
+                    background: sending ? "#333" : "#111",
+                    color: "#fff",
+                    fontWeight: 800,
+                    cursor: sending ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {sending ? "Sending..." : "Send report"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      ) : null}
+      )}
     </>
   );
 }
