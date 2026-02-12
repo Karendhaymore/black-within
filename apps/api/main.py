@@ -2903,6 +2903,80 @@ def admin_clear_photo(
 
     return {"ok": True}
 
+from fastapi import Header
+
+@app.post("/admin/messages/{message_id}/delete", response_model=AdminDeleteResponse)
+def admin_delete_message(
+    message_id: int,
+    x_admin_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    # auth gate
+    require_admin(x_admin_token, authorization)
+
+    with engine.begin() as conn:
+        # delete message
+        res = conn.execute(
+            text("DELETE FROM messages WHERE id = :mid"),
+            {"mid": int(message_id)},
+        )
+        deleted = int(res.rowcount or 0)
+
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    return AdminDeleteResponse(ok=True, deleted_messages=deleted)
+
+
+@app.post("/admin/threads/{thread_id}/delete", response_model=AdminDeleteResponse)
+def admin_delete_thread(
+    thread_id: str,
+    x_admin_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    # auth gate
+    require_admin(x_admin_token, authorization)
+
+    tid = (thread_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="Invalid thread_id")
+
+    with engine.begin() as conn:
+        # confirm thread exists (so we can return a clean 404)
+        exists = conn.execute(
+            text("SELECT 1 FROM threads WHERE id = :tid"),
+            {"tid": tid},
+        ).first()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        # delete dependent rows first
+        res_msg = conn.execute(
+            text("DELETE FROM messages WHERE thread_id = :tid"),
+            {"tid": tid},
+        )
+        deleted_messages = int(res_msg.rowcount or 0)
+
+        res_unlocks = conn.execute(
+            text("DELETE FROM thread_unlocks WHERE thread_id = :tid"),
+            {"tid": tid},
+        )
+        deleted_unlocks = int(res_unlocks.rowcount or 0)
+
+        # delete the thread row
+        res_thr = conn.execute(
+            text("DELETE FROM threads WHERE id = :tid"),
+            {"tid": tid},
+        )
+        deleted_threads = int(res_thr.rowcount or 0)
+
+    return AdminDeleteResponse(
+        ok=True,
+        deleted_messages=deleted_messages,
+        deleted_unlocks=deleted_unlocks,
+        deleted_threads=deleted_threads,
+    )
+
 
 # -----------------------------
 # Reports (NEW) — public submit + admin queue
