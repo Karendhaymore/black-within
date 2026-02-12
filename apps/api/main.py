@@ -2984,124 +2984,112 @@ def admin_delete_thread(
 # Reports (NEW) — public submit + admin queue
 # -----------------------------
 
-@app.post("/reports")
-def create_report(req: CreateReportRequest):
-    # basic sanity
-    if not (req.reporter_user_id or "").strip():
-        raise HTTPException(status_code=400, detail="reporter_user_id required")
-    if not (req.category or "").strip():
-        raise HTTPException(status_code=400, detail="category required")
-    if not (req.reason or "").strip():
-        raise HTTPException(status_code=400, detail="reason required")
-    if not (req.details or "").strip():
-        raise HTTPException(status_code=400, detail="details required")
+# -----------------------------
+# Reports — public submit + admin queue
+# -----------------------------
+
+@app.post("/reports/create")
+def create_report(req: ReportCreateRequest):
+    reporter = (req.reporter_user_id or "").strip()
+    if not reporter:
+        raise HTTPException(status_code=400, detail="reporter_user_id is required")
+
+    details = (req.details or "").strip()
+    if not details:
+        raise HTTPException(status_code=400, detail="details is required")
 
     with engine.begin() as conn:
-        row = conn.execute(
-            text("""
-                INSERT INTO reports (
-                  reporter_user_id, category, reason, details,
-                  target_user_id, target_profile_id, target_thread_id, target_message_id,
-                  page_url, status
-                )
-                VALUES (
-                  :reporter_user_id, :category, :reason, :details,
-                  :target_user_id, :target_profile_id, :target_thread_id, :target_message_id,
-                  :page_url, 'open'
-                )
-                RETURNING id;
-            """),
+        conn.execute(
+            text(
+                """
+                INSERT INTO reports
+                (reporter_user_id, category, reason, details,
+                 target_user_id, target_profile_id, target_thread_id, target_message_id,
+                 status, created_at)
+                VALUES
+                (:reporter_user_id, :category, :reason, :details,
+                 :target_user_id, :target_profile_id, :target_thread_id, :target_message_id,
+                 'open', NOW())
+                """
+            ),
             {
-                "reporter_user_id": req.reporter_user_id.strip(),
-                "category": req.category.strip(),
-                "reason": req.reason.strip(),
-                "details": req.details.strip(),
+                "reporter_user_id": reporter,
+                "category": (req.category or "").strip(),
+                "reason": (req.reason or "").strip(),
+                "details": details,
                 "target_user_id": (req.target_user_id or "").strip() or None,
                 "target_profile_id": (req.target_profile_id or "").strip() or None,
                 "target_thread_id": (req.target_thread_id or "").strip() or None,
                 "target_message_id": req.target_message_id,
-                "page_url": (req.page_url or "").strip() or None,
             },
-        ).fetchone()
+        )
 
-    return {"ok": True, "report_id": int(row[0])}
+    return {"ok": True}
 
 
-@app.get("/admin/reports")
+@app.get("/admin/reports", response_model=List[ReportRow])
 def admin_list_reports(
     status: str = "open",
-    limit: int = 200,
-    authorization: Optional[str] = Header(default=None),
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
-):
-    admin = require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
-
-    with Session(engine) as db:
-        q = db.query(Report).order_by(Report.created_at.desc())
-        if status:
-            q = q.filter(Report.status == status)
-
-        rows = q.limit(max(1, min(int(limit or 200), 500))).all()
-
-    def _iso(dt: Optional[datetime]) -> Optional[str]:
-        return dt.isoformat() if dt else None
-
-    return [
-        ReportItem(
-            id=r.id,
-            created_at=_iso(r.created_at) or "",
-            reporter_user_id=r.reporter_user_id,
-            reported_user_id=r.reported_user_id,
-            profile_id=r.profile_id,
-            thread_id=r.thread_id,
-            message_id=r.message_id,
-            category=r.category,
-            reason=r.reason,
-            details=r.details,
-            status=r.status,
-            resolved_by_admin_id=r.resolved_by_admin_id,
-            resolved_at=_iso(r.resolved_at),
-            resolution_note=r.resolution_note,
-        ).model_dump()
-        for r in rows
-    ]
-
-
-@app.get("/admin/reports/counts")
-def admin_report_counts(
     authorization: Optional[str] = Header(default=None),
-    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ):
     require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
-    with Session(engine) as db:
-        open_count = db.query(Report).filter(Report.status == "open").count()
-        resolved_count = db.query(Report).filter(Report.status == "resolved").count()
+    st = (status or "open").strip().lower()
+    if st not in ("open", "resolved"):
+        st = "open"
 
-    return {"open": int(open_count), "resolved": int(resolved_count)}
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT id, reporter_user_id, category, reason, details,
+                       target_user_id, target_profile_id, target_thread_id, target_message_id,
+                       status, admin_note,
+                       created_at::text AS created_at,
+                       resolved_at::text AS resolved_at
+                FROM reports
+                WHERE status = :st
+                ORDER BY created_at DESC
+                LIMIT 200
+                """
+            ),
+            {"st": st},
+        ).mappings().all()
+
+    return [dict(r) for r in rows]
 
 
 @app.post("/admin/reports/{report_id}/resolve")
 def admin_resolve_report(
-    report_id: str,
-    req: ResolveReportRequest,
-    authorization: Optional[str] = Header(default=None),
+    report_id: int,
+    req: ReportResolveRequest,
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+    authorization: Optional[str] = Header(default=None),
 ):
-    admin = require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
-    with Session(engine) as db:
-        r = db.query(Report).filter(Report.id == report_id).first()
-        if not r:
-            raise HTTPException(status_code=404, detail="Report not found.")
+    status = (req.status or "resolved").strip().lower()
+    if status not in ("open", "resolved"):
+        status = "resolved"
 
-        r.status = "resolved"
-        r.resolved_by_admin_id = getattr(admin, "id", None) or "admin"
-        r.resolved_at = datetime.utcnow()
-        r.resolution_note = (req.note or "").strip() or None
-
-        db.add(r)
-        db.commit()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE reports
+                SET status = :status,
+                    admin_note = :admin_note,
+                    resolved_at = CASE WHEN :status = 'resolved' THEN NOW() ELSE NULL END
+                WHERE id = :id
+                """
+            ),
+            {
+                "id": int(report_id),
+                "status": status,
+                "admin_note": (req.admin_note or "").strip() or None,
+            },
+        )
 
     return {"ok": True}
 
