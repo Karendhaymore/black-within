@@ -2972,41 +2972,46 @@ def admin_delete_thread(
 # -----------------------------
 
 @app.post("/reports")
-def create_report(req: CreateReportRequest, background_tasks: BackgroundTasks):
-    # lightweight validation
-    if not (req.reported_user_id or req.profile_id or req.thread_id or req.message_id):
-        raise HTTPException(
-            status_code=400,
-            detail="Must include reported_user_id, profile_id, thread_id, or message_id.",
-        )
+def create_report(req: CreateReportRequest):
+    # basic sanity
+    if not (req.reporter_user_id or "").strip():
+        raise HTTPException(status_code=400, detail="reporter_user_id required")
+    if not (req.category or "").strip():
+        raise HTTPException(status_code=400, detail="category required")
+    if not (req.reason or "").strip():
+        raise HTTPException(status_code=400, detail="reason required")
+    if not (req.details or "").strip():
+        raise HTTPException(status_code=400, detail="details required")
 
-    rid = secrets.token_hex(20)
-    now = datetime.utcnow()
+    with engine.begin() as conn:
+        row = conn.execute(
+            text("""
+                INSERT INTO reports (
+                  reporter_user_id, category, reason, details,
+                  target_user_id, target_profile_id, target_thread_id, target_message_id,
+                  page_url, status
+                )
+                VALUES (
+                  :reporter_user_id, :category, :reason, :details,
+                  :target_user_id, :target_profile_id, :target_thread_id, :target_message_id,
+                  :page_url, 'open'
+                )
+                RETURNING id;
+            """),
+            {
+                "reporter_user_id": req.reporter_user_id.strip(),
+                "category": req.category.strip(),
+                "reason": req.reason.strip(),
+                "details": req.details.strip(),
+                "target_user_id": (req.target_user_id or "").strip() or None,
+                "target_profile_id": (req.target_profile_id or "").strip() or None,
+                "target_thread_id": (req.target_thread_id or "").strip() or None,
+                "target_message_id": req.target_message_id,
+                "page_url": (req.page_url or "").strip() or None,
+            },
+        ).fetchone()
 
-    with Session(engine) as db:
-        r = Report(
-            id=rid,
-            created_at=now,
-            reporter_user_id=req.reporter_user_id.strip(),
-            reported_user_id=(req.reported_user_id or None),
-            profile_id=(req.profile_id or None),
-            thread_id=(req.thread_id or None),
-            message_id=(req.message_id or None),
-            category=(req.category or "user").strip(),
-            reason=(req.reason or "other").strip(),
-            details=(req.details or None),
-            status="open",
-        )
-        db.add(r)
-        db.commit()
-
-        # optional: re-use your existing email alert helper
-        try:
-            background_tasks.add_task(_notify_admins_new_report, r)
-        except Exception:
-            pass
-
-    return {"ok": True, "id": rid}
+    return {"ok": True, "report_id": int(row[0])}
 
 
 @app.get("/admin/reports")
