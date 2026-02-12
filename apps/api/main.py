@@ -2763,8 +2763,14 @@ def admin_patch_profile(
 
 
 @app.post("/admin/profiles/{profile_id}/clear-photo")
-def admin_clear_photo(profile_id: str, body: AdminClearPhotoIn, authorization: Optional[str] = Header(default=None)):
-    require_admin(authorization, allowed_roles=["admin", "moderator"])
+def admin_clear_photo(
+    profile_id: str,
+    body: AdminClearPhotoIn,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
     slot = int(body.slot or 0)
     if slot not in (1, 2):
         raise HTTPException(status_code=400, detail="slot must be 1 or 2")
