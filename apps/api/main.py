@@ -2592,8 +2592,7 @@ x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 @app.get("/admin/report-alerts")
 def admin_report_alerts(authorization: Optional[str] = Header(default=None)):
 x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
-    require_admin(authorization, allowed_roles=["admin", "moderator"])
-
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=[...])
     with engine.begin() as conn:
         open_count = conn.execute(
             text("""
