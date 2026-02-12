@@ -2620,9 +2620,11 @@ def admin_login(body: AdminLoginIn):
 
 
 @app.get("/admin/me", response_model=AdminMeOut)
-def admin_me(authorization: Optional[str] = Header(default=None)):
-x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
-    au = require_admin(authorization, allowed_roles=["admin", "moderator"])
+def admin_me(
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    au = require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
     return AdminMeOut(email=au.email, role=au.role)
 
 @app.get("/admin/report-alerts")
