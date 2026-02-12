@@ -2885,8 +2885,12 @@ def admin_patch_report(
 
 
 @app.post("/admin/users/create", response_model=AdminCreateUserOut)
-def admin_create_user_free(body: AdminCreateUserIn, authorization: Optional[str] = Header(default=None)):
-    require_admin(authorization, allowed_roles=["admin"])
+def admin_create_user_free(
+    body: AdminCreateUserIn,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin"])
 
     user_id = secrets.token_hex(20)
     profile_id = secrets.token_hex(20)
