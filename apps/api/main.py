@@ -2653,8 +2653,14 @@ def _safe_count(conn, sql: str, params: Dict[str, Any]) -> int:
 
 
 @app.get("/admin/profiles", response_model=AdminProfilesOut)
-def admin_list_profiles(q: Optional[str] = None, limit: int = 200, authorization: Optional[str] = Header(default=None)):
-    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=[...])
+def admin_list_profiles(
+    q: Optional[str] = None,
+    limit: int = 200,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
 
     qn = (q or "").strip().lower()
     limit = max(1, min(int(limit or 200), 500))
