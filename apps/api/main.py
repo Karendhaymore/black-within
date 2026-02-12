@@ -715,10 +715,6 @@ for fn, label in [
         print(f"{label} failed:", str(e))
 
 
-        conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'open';"))
-        conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS handled_at TEXT;"))
-
-
 # -----------------------------
 # Schemas
 # -----------------------------
