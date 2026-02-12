@@ -708,7 +708,7 @@ def _auto_migrate_admin_tables():
         """
             )
         )
-    def _auto_migrate_reports_table():
+def _auto_migrate_reports_table():
     with engine.begin() as conn:
         conn.execute(
             text(
