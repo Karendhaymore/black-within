@@ -1025,7 +1025,10 @@ class AdminReportsOut(BaseModel):
 class AdminPatchReportIn(BaseModel):
     status: str
 
-
+class AdminCreateFreeUserRequest(BaseModel):
+    email: str
+    displayName: str
+    
 class AdminCreateUserIn(BaseModel):
     displayName: Optional[str] = None
     city: Optional[str] = None
