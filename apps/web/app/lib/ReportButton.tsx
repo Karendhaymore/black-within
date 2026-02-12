@@ -52,7 +52,7 @@ export default function ReportButton() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reporter_user_id: props.userId,
+          reporter_user_id: userId,
           category,
           reason,
           details,
