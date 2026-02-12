@@ -1405,10 +1405,10 @@ def _get_admin_token(x_admin_token: Optional[str], authorization: Optional[str])
     return ""
 
 
-require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=[...])
+def require_admin(
     authorization: Optional[str],
     x_admin_token: Optional[str] = None,
-    allowed_roles: Optional[List[str]] = None
+    allowed_roles: Optional[List[str]] = None,
 ) -> AdminUser:
     token = _get_admin_token(x_admin_token, authorization)
     if not token:
@@ -1418,11 +1418,17 @@ require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=[...])
     now = datetime.utcnow()
 
     with Session(engine) as session:
-        s = session.execute(select(AdminSession).where(AdminSession.token_hash == th)).scalar_one_or_none()
+        s = session.execute(
+            select(AdminSession).where(AdminSession.token_hash == th)
+        ).scalar_one_or_none()
+
         if not s or s.expires_at <= now:
             raise HTTPException(status_code=401, detail="Admin session expired.")
 
-        au = session.execute(select(AdminUser).where(AdminUser.id == s.admin_user_id)).scalar_one_or_none()
+        au = session.execute(
+            select(AdminUser).where(AdminUser.id == s.admin_user_id)
+        ).scalar_one_or_none()
+
         if not au or not au.is_enabled:
             raise HTTPException(status_code=403, detail="Admin disabled.")
 
