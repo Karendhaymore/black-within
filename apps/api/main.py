@@ -2858,7 +2858,7 @@ def admin_delete_message(
     authorization: Optional[str] = Header(default=None),
 ):
     # auth gate
-    def require_admin(authorization: Optional[str], x_admin_token: Optional[str] = None, ...)
+        require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
     with engine.begin() as conn:
         # delete message
