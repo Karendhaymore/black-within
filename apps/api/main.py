@@ -1092,7 +1092,7 @@ class ReportResolveRequest(BaseModel):
     status: str = "resolved"  # allowed: "open" or "resolved"
 
     
-    class ReportCreateRequest(BaseModel):
+class ReportCreateRequest(BaseModel):
     reporter_user_id: str
     category: str
     reason: str
