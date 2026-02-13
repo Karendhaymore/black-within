@@ -2933,6 +2933,10 @@ def admin_delete_thread(
 # -----------------------------
 
 @app.post("/reports/create")
+def create_report_alias(req: CreateReportRequest):
+    return create_report(req)
+
+@app.post("/reports/create")
 def create_report(req: ReportCreateRequest):
     reporter = (req.reporter_user_id or "").strip()
     if not reporter:
