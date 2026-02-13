@@ -2927,35 +2927,26 @@ def admin_delete_thread(
         raise HTTPException(status_code=400, detail="Invalid thread_id")
 
     with engine.begin() as conn:
-        # confirm thread exists (so we can return a clean 404)
         exists = conn.execute(
             text("SELECT 1 FROM threads WHERE id = :tid"),
             {"tid": tid},
         ).first()
+
         if not exists:
             raise HTTPException(status_code=404, detail="Thread not found")
 
-        # delete dependent rows first
-        res_msg = conn.execute(
+        conn.execute(
             text("DELETE FROM messages WHERE thread_id = :tid"),
             {"tid": tid},
         )
-        deleted_messages = int(res_msg.rowcount or 0)
 
-        res_unlocks = conn.execute(
-            text("DELETE FROM thread_unlocks WHERE thread_id = :tid"),
-            {"tid": tid},
-        )
-        deleted_unlocks = int(res_unlocks.rowcount or 0)
-
-        # delete the thread row
-        res_thr = conn.execute(
+        conn.execute(
             text("DELETE FROM threads WHERE id = :tid"),
             {"tid": tid},
         )
-        deleted_threads = int(res_thr.rowcount or 0)
 
-    return AdminDeleteResponse(
+    return AdminDeleteResponse(ok=True, deleted_messages=0)
+
         ok=True,
         deleted_messages=deleted_messages,
         deleted_unlocks=deleted_unlocks,
