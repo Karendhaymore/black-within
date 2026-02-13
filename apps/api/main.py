@@ -2881,7 +2881,7 @@ def admin_delete_thread(
     authorization: Optional[str] = Header(default=None),
 ):
     # auth gate
-    def require_admin(authorization: Optional[str], x_admin_token: Optional[str] = None, ...)
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
     tid = (thread_id or "").strip()
     if not tid:
