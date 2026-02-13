@@ -2946,11 +2946,7 @@ def admin_delete_thread(
         )
 
     return AdminDeleteResponse(ok=True, deleted_messages=0)
-            ok=True,
-            deleted_messages=deleted_messages,
-            deleted_unlocks=deleted_unlocks,
-            deleted_threads=deleted_threads,
-    )
+        )
 
 
 # -----------------------------
