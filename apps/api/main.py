@@ -2897,18 +2897,18 @@ def admin_delete_message(
     authorization: Optional[str] = Header(default=None),
 ):
     # auth gate
-        require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
     with engine.begin() as conn:
-        # delete message
         res = conn.execute(
             text("DELETE FROM messages WHERE id = :mid"),
             {"mid": int(message_id)},
         )
+
         deleted = int(res.rowcount or 0)
 
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="Message not found")
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Message not found")
 
     return AdminDeleteResponse(ok=True, deleted_messages=deleted)
 
