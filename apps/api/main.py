@@ -716,6 +716,10 @@ def _auto_migrate_reports_table():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_status ON reports(status);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_created_at ON reports(created_at);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_reporter ON reports(reporter_user_id);"))
+        conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS target_user_id VARCHAR(40);"))
+        conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS target_profile_id VARCHAR(40);"))
+        conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS target_thread_id VARCHAR(60);"))
+        conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS target_message_id INTEGER;"))
 
 
 
