@@ -1162,7 +1162,7 @@ class AdminDeleteResponse(BaseModel):
 # App
 # -----------------------------
 app = FastAPI(title="Black Within API", version="1.1.5")
-    from fastapi.responses import Response
+from fastapi.responses import Response
 
 @app.middleware("http")
 async def allow_preflight(request: Request, call_next):
