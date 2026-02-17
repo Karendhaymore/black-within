@@ -54,7 +54,11 @@ if DATABASE_URL.startswith("postgres://"):
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://black-within.onrender.com")
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "https://meetblackwithin.com,https://www.meetblackwithin.com,http://localhost:3000",
+)
+
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 
 AUTH_CODE_TTL_MINUTES = int(os.getenv("AUTH_CODE_TTL_MINUTES", "15"))
