@@ -2757,6 +2757,19 @@ def _safe_count(conn, sql: str, params: Dict[str, Any]) -> int:
     except Exception:
         return 0
 
+@app.get("/admin/reports/counts")
+def admin_reports_counts(
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
+    with engine.begin() as conn:
+        open_count = conn.execute(text("SELECT COUNT(1) FROM reports WHERE status = 'open'")).scalar() or 0
+        resolved_count = conn.execute(text("SELECT COUNT(1) FROM reports WHERE status = 'resolved'")).scalar() or 0
+
+    return {"open": int(open_count), "resolved": int(resolved_count)}
+
 
 @app.get("/admin/profiles", response_model=AdminProfilesOut)
 def admin_list_profiles(
