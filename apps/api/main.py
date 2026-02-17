@@ -742,40 +742,6 @@ for fn, label in [
     except Exception as e:
         print(f"{label} failed:", str(e))
 
-
-   # -----------------------------
-# Migrations
-# -----------------------------
-def _auto_migrate_reports_table():
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-            CREATE TABLE IF NOT EXISTS reports (
-              id SERIAL PRIMARY KEY,
-              reporter_user_id VARCHAR(40),
-              category VARCHAR(80),
-              reason VARCHAR(80),
-              details TEXT,
-
-              target_user_id VARCHAR(40),
-              target_profile_id VARCHAR(60),
-              target_thread_id VARCHAR(60),
-              target_message_id INTEGER,
-
-              status VARCHAR(20) DEFAULT 'open',   -- open | resolved
-              admin_note TEXT,
-
-              created_at TIMESTAMP DEFAULT NOW(),
-              resolved_at TIMESTAMP NULL
-            );
-            """
-            )
-        )
-
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_status ON reports(status);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_created_at ON reports(created_at);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reports_reporter ON reports(reporter_user_id);"))
  
 # -----------------------------
 # Schemas
