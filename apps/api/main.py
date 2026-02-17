@@ -1162,6 +1162,16 @@ class AdminDeleteResponse(BaseModel):
 # App
 # -----------------------------
 app = FastAPI(title="Black Within API", version="1.1.5")
+    from fastapi.responses import Response
+
+@app.middleware("http")
+async def allow_preflight(request: Request, call_next):
+    # Browsers send an OPTIONS request first for cross-site calls.
+    # If we don't allow it, the browser shows "Failed to fetch".
+    if request.method == "OPTIONS":
+        return Response(status_code=200)
+    return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
