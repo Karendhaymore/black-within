@@ -1016,13 +1016,6 @@ class AdminClearPhotoIn(BaseModel):
     slot: int
 
 
-# -----------------------------
-# Reports
-# -----------------------------
-    # -----------------------------
-# Reports (New Admin-Compatible Models)
-# -----------------------------
-
 class ReportCreateRequest(BaseModel):
     reporter_user_id: str
     category: str
