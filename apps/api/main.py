@@ -1014,6 +1014,42 @@ class AdminPatchProfileIn(BaseModel):
 
 class AdminClearPhotoIn(BaseModel):
     slot: int
+# -----------------------------
+# Reports (public + admin)
+# -----------------------------
+class ReportCreateRequest(BaseModel):
+    reporter_user_id: str
+    category: str
+    reason: str
+    details: str
+
+    target_user_id: Optional[str] = None
+    target_profile_id: Optional[str] = None
+    target_thread_id: Optional[str] = None
+    target_message_id: Optional[int] = None
+
+
+class ReportRow(BaseModel):
+    id: int
+    reporter_user_id: str
+    category: str
+    reason: str
+    details: str
+
+    target_user_id: Optional[str] = None
+    target_profile_id: Optional[str] = None
+    target_thread_id: Optional[str] = None
+    target_message_id: Optional[int] = None
+
+    status: str
+    admin_note: Optional[str] = None
+    created_at: str
+    resolved_at: Optional[str] = None
+
+
+class ReportResolveRequest(BaseModel):
+    admin_note: Optional[str] = None
+    status: str = "resolved"  # "open" or "resolved"
 
 
 class ReportCreateRequest(BaseModel):
