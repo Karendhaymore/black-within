@@ -107,6 +107,17 @@ async function apiAdminListProfiles(token: string): Promise<AdminProfileRow[]> {
   return Array.isArray(json?.items) ? json.items : [];
 }
 
+async function apiAdminMe(token: string) {
+  const res = await fetch(`${API_BASE}/admin/me`, {
+    method: "GET",
+    headers: buildAdminHeaders(token),
+    cache: "no-store",
+  });
+
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return res.json() as Promise<{ email: string; role: "admin" | "moderator" }>;
+}
+
 async function apiAdminPatchProfile(
   token: string,
   profile_id: string,
