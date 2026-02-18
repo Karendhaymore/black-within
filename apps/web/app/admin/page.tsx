@@ -213,14 +213,25 @@ export default function AdminDashboardPage() {
   }
 
   useEffect(() => {
-    const t = getAdminToken();
-    if (!t) {
+  const t = getAdminToken();
+  if (!t) {
+    router.replace("/admin/login");
+    return;
+  }
+
+  (async () => {
+    try {
+      const me = await apiAdminMe(t);
+      setToken(t);
+      setTokenInput(t);
+      showToast(`Signed in as ${me.email} (${me.role})`);
+    } catch (e: any) {
+      clearAdminToken();
       router.replace("/admin/login");
-      return;
     }
-    setToken(t);
-    setTokenInput(t);
-  }, [router]);
+  })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [router]);
 
   async function refresh(tOverride?: string) {
     const t = (tOverride ?? token).trim();
