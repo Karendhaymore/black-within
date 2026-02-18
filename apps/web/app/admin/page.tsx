@@ -41,6 +41,7 @@ type ReportItem = {
   reporter_user_id: string;
   reported_user_id?: string | null;
   profile_id?: string | null;
+  reported_profile_id?: string | null;
   thread_id?: string | null;
   message_id?: string | null;
   category: string;
