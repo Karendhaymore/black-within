@@ -259,42 +259,35 @@ export default function AdminDashboardPage() {
 
   // ✅ REPLACE refreshReports WITH THIS (updated to setOpenReports)
   async function refreshReports() {
-    if (reportsLoading) return; // prevents double-click spam
-    setReportsLoading(true);
-    setReportsError(null);
+  if (reportsLoading) return;
+  setReportsLoading(true);
+  setReportsError(null);
 
-    try {
-      const token = (adminToken || "").trim();
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
+  try {
+    const t = (adminToken || "").trim();
+    if (!t) return;
 
-      if (token) {
-        headers["X-Admin-Token"] = token;
-        headers["Authorization"] = `Bearer ${token}`;
-      }
+    const res = await fetch(`${API_BASE}/admin/report-alerts`, {
+      method: "GET",
+      headers: buildAdminHeaders(t),
+      cache: "no-store",
+    });
 
-      const res = await fetch(`${API_BASE}/admin/reports?limit=50`, {
-        method: "GET",
-        headers,
-        cache: "no-store",
-      });
+    if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+    const data = await res.json();
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Failed to refresh reports (${res.status})`);
-      }
+    setReportCounts((prev) => ({
+      open: typeof data?.openCount === "number" ? data.openCount : prev.open,
+      resolved: prev.resolved,
+    }));
 
-      const data = await res.json();
-      // Adjust field name depending on your API response
-      const list = Array.isArray(data?.reports) ? data.reports : Array.isArray(data) ? data : [];
-      setOpenReports(list);
-    } catch (e: any) {
-      setReportsError(e?.message || "Failed to refresh reports.");
-    } finally {
-      setReportsLoading(false); // ✅ fixes the “unclickable” button
-    }
+    setOpenReports(Array.isArray(data?.recent) ? data.recent : []);
+  } catch (e: any) {
+    setReportsError(e?.message || "Failed to refresh reports.");
+  } finally {
+    setReportsLoading(false);
   }
+}
 
   // keep counts updating (so "Open/Resolved" stays accurate)
   async function refreshReportCountsOnly() {
