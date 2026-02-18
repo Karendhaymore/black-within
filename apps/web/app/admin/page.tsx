@@ -529,7 +529,7 @@ export default function AdminDashboardPage() {
                         ) : null}
                         {r.reported_profile_id ? (
                           <div>
-                            profile: <b>{r.profile_id}</b>
+                            profile: <b>{r.reported_profile_id}</b>
                           </div>
                         ) : null}
                         {r.thread_id ? (
