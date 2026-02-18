@@ -526,7 +526,7 @@ export default function AdminDashboardPage() {
                             user: <b>{r.reported_user_id}</b>
                           </>
                         ) : null}
-                        {r.profile_id ? (
+                        {r.reported_profile_id ? (
                           <div>
                             profile: <b>{r.profile_id}</b>
                           </div>
