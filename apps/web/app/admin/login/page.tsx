@@ -67,11 +67,12 @@ export default function AdminLoginPage() {
     try {
       // Backend route we added earlier:
       // POST /admin/login  { email, password } -> { token }
-      const res = await fetch(`${API_BASE}/admin/login`, {
+      const res = await fetch(`${API_BASE}/admin/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), password }),
-      });
+});
+
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
       const json = await res.json().catch(() => ({}));
