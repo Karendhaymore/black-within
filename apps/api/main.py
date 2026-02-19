@@ -3145,7 +3145,7 @@ def admin_delete_thread(
 # -----------------------------
 
 @app.post("/reports/create")
-def create_report(req: ReportCreateRequest):
+def create_report(req: ReportCreateRequest, background_tasks: BackgroundTasks):
     reporter = (req.reporter_user_id or "").strip()
     if not reporter:
         raise HTTPException(status_code=400, detail="reporter_user_id is required")
