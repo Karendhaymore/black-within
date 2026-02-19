@@ -109,10 +109,24 @@ async function apiGetMessages(userId: string, threadId: string): Promise<Message
 
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-  const json = (await res.json()) as MessagesResponse;
+  const json: any = await res.json();
+
+  const items = Array.isArray(json?.items)
+    ? json.items
+    : Array.isArray(json?.messages)
+    ? json.messages
+    : [];
+
+  // Support both camelCase + snake_case from backend
+  const otherLastReadAt =
+    json?.otherLastReadAt ??
+    json?.other_last_read_at ??
+    json?.other_last_read_at_utc ??
+    null;
+
   return {
-    items: Array.isArray(json?.items) ? json.items : [],
-    otherLastReadAt: json?.otherLastReadAt ?? null,
+    items,
+    otherLastReadAt,
   };
 }
 
@@ -211,6 +225,7 @@ function MessagesInner() {
   const [otherLastReadAt, setOtherLastReadAt] = useState<string | null>(null);
 
   const pollRef = useRef<number | null>(null);
+  const pollInFlightRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const [photoRequired, setPhotoRequired] = useState(false);
@@ -291,14 +306,22 @@ function MessagesInner() {
         // Poll only when canMessage (your current intent)
         if (a?.canMessage) {
           pollRef.current = window.setInterval(async () => {
+            if (pollInFlightRef.current) return;
+            pollInFlightRef.current = true;
+
             try {
               const latest = await apiGetMessages(userId, threadId);
               if (!cancelled) {
                 setMessages(latest.items || []);
                 setOtherLastReadAt(latest.otherLastReadAt || null);
               }
+
+              // while user is viewing the thread, keep it marked read (best effort)
+              apiMarkThreadRead(userId, threadId);
             } catch {
               // ignore polling errors
+            } finally {
+              pollInFlightRef.current = false;
             }
           }, 4000);
         }
@@ -364,6 +387,9 @@ function MessagesInner() {
       const saved = await apiSendMessage(userId, threadId, body);
       setMessages((prev) => prev.map((m) => (String(m.id) === tempId ? saved : m)));
 
+      // keep read state fresh
+      apiMarkThreadRead(userId, threadId);
+
       // success → clear photo-required state if it was showing
       setPhotoRequired(false);
     } catch (e: any) {
@@ -390,11 +416,19 @@ function MessagesInner() {
       stopPolling();
       if (a?.canMessage) {
         pollRef.current = window.setInterval(async () => {
+          if (pollInFlightRef.current) return;
+          pollInFlightRef.current = true;
+
           try {
             const latest = await apiGetMessages(userId, threadId);
             setMessages(latest.items || []);
             setOtherLastReadAt(latest.otherLastReadAt || null);
-          } catch {}
+
+            apiMarkThreadRead(userId, threadId);
+          } catch {
+          } finally {
+            pollInFlightRef.current = false;
+          }
         }, 4000);
       }
     } catch (e: any) {
