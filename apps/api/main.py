@@ -2719,6 +2719,40 @@ def admin_login(body: AdminLoginIn):
 
         return AdminLoginOut(token=token, role=au.role, email=au.email)
 
+@app.post("/admin/users/message")
+def admin_send_message_to_user(
+    req: AdminSendMessageRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    # Admin permission check
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
+    user_id = (req.user_id or "").strip()
+    subject = (req.subject or "").strip()
+    body = (req.body or "").strip()
+
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    if not subject:
+        raise HTTPException(status_code=400, detail="subject is required")
+    if not body:
+        raise HTTPException(status_code=400, detail="body is required")
+
+    # Make sure the user exists
+    _ensure_user(user_id)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO admin_messages (user_id, subject, body)
+                VALUES (:user_id, :subject, :body)
+            """),
+            {"user_id": user_id, "subject": subject, "body": body},
+        )
+
+    return {"ok": True}
+
 
 @app.get("/admin/me", response_model=AdminMeOut)
 def admin_me(
