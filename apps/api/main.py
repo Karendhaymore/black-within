@@ -1182,16 +1182,18 @@ async def allow_preflight(request: Request, call_next):
 
 from fastapi.middleware.cors import CORSMiddleware
 
-allow_origins=[
-    "http://localhost:3000",
-    "https://meetblackwithin.com",
-    "https://www.meetblackwithin.com",
-],
-
-allow_credentials=True,
-allow_methods=["*"],
-allow_headers=["*"],
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://meetblackwithin.com",
+        "https://www.meetblackwithin.com",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
