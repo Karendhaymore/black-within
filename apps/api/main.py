@@ -3136,7 +3136,7 @@ def admin_list_reports(
 
 @app.post("/admin/reports/{report_id}/resolve")
 def admin_resolve_report(
-    report_id: int,
+    report_id: str,
     req: ReportResolveRequest,
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
     authorization: Optional[str] = Header(default=None),
