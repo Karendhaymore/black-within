@@ -3154,8 +3154,8 @@ def create_report(req: ReportCreateRequest, background_tasks: BackgroundTasks):
     if not details:
         raise HTTPException(status_code=400, detail="details is required")
 
-    with engine.begin() as conn:
-        conn.execute(
+        with engine.begin() as conn:
+        row = conn.execute(
             text(
                 """
                 INSERT INTO reports
@@ -3166,6 +3166,10 @@ def create_report(req: ReportCreateRequest, background_tasks: BackgroundTasks):
                 (:reporter_user_id, :category, :reason, :details,
                  :target_user_id, :target_profile_id, :target_thread_id, :target_message_id,
                  'open', NOW())
+                RETURNING
+                  id, reporter_user_id, category, reason, details,
+                  target_user_id, target_profile_id, target_thread_id, target_message_id,
+                  status, created_at, resolved_at
                 """
             ),
             {
@@ -3177,6 +3181,9 @@ def create_report(req: ReportCreateRequest, background_tasks: BackgroundTasks):
                 "target_profile_id": (req.target_profile_id or "").strip() or None,
                 "target_thread_id": (req.target_thread_id or "").strip() or None,
                 "target_message_id": req.target_message_id,
+            },
+        ).mappings().first()
+
             },
         )
 
