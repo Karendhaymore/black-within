@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -12,12 +12,17 @@ const API_BASE =
 type ReportItem = {
   id: string;
   created_at: string;
+
   reporter_user_id?: string | null;
   reported_user_id?: string | null;
-  reported_profile_id?: string | null;
+
+  // some backends store profile in either field
   profile_id?: string | null;
+  reported_profile_id?: string | null;
+
   thread_id?: string | null;
   message_id?: string | null;
+
   category?: string | null;
   reason?: string | null;
   details?: string | null;
@@ -60,24 +65,34 @@ export default function AdminReportsPage() {
   const router = useRouter();
 
   const [token, setToken] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  const [openCount, setOpenCount] = useState<number>(0);
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<"open" | "resolved" | "all">("open");
 
-  async function loadReports(tOverride?: string) {
-    const t = (tOverride ?? token).trim();
+  // For nice UX when resolving
+  const [workingId, setWorkingId] = useState<string | null>(null);
+
+  // Derived open count from what we loaded (reliable)
+  const openCount = useMemo(() => {
+    return reports.filter((r) => (r.status || "open") === "open").length;
+  }, [reports]);
+
+  async function loadReports(nextStatus?: "open" | "resolved" | "all") {
+    const t = token.trim();
     if (!t) return;
+
+    const status = (nextStatus || statusFilter).trim();
 
     setLoading(true);
     setErr(null);
 
     try {
-      // Option A: uses your existing backend route
-      // GET /admin/report-alerts -> { openCount, recent: [...] }
-      fetch(${API_BASE}/admin/reports?status=${status}&limit=50
+      // ✅ Correct endpoint for Option A
+      // GET /admin/reports?status=open|resolved|all&limit=50 -> { items: [...] }
+      const res = await fetch(`${API_BASE}/admin/reports?status=${encodeURIComponent(status)}&limit=50`, {
         method: "GET",
         headers: buildAdminHeaders(t),
         cache: "no-store",
@@ -85,14 +100,41 @@ export default function AdminReportsPage() {
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
-      const data = await res.json();
-
-      setOpenCount(typeof data?.openCount === "number" ? data.openCount : 0);
-      setReports(Array.isArray(data?.recent) ? data.recent : []);
+      const data = await res.json().catch(() => ({}));
+      const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+      setReports(items);
     } catch (e: any) {
       setErr(e?.message || "Failed to load reports.");
+      setReports([]);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function resolveReport(reportId: string) {
+    const t = token.trim();
+    if (!t) return;
+
+    const note = window.prompt("Optional note to reporter:", "") || "";
+
+    setWorkingId(reportId);
+    setErr(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/resolve`, {
+        method: "POST",
+        headers: buildAdminHeaders(t),
+        body: JSON.stringify({ note }),
+      });
+
+      if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+
+      // reload the current filter view
+      await loadReports();
+    } catch (e: any) {
+      setErr(e?.message || "Resolve failed.");
+    } finally {
+      setWorkingId(null);
     }
   }
 
@@ -103,7 +145,29 @@ export default function AdminReportsPage() {
       return;
     }
     setToken(t);
-    loadReports(t);
+    // load open by default
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/admin/reports?status=open&limit=50`, {
+          method: "GET",
+          headers: buildAdminHeaders(t),
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+        const data = await res.json().catch(() => ({}));
+        const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+        setReports(items);
+        setStatusFilter("open");
+        setErr(null);
+      } catch (e: any) {
+        setErr(e?.message || "Failed to load reports.");
+        setReports([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
@@ -114,7 +178,7 @@ export default function AdminReportsPage() {
     background: "white",
   };
 
-  const btn: React.CSSProperties = {
+  const btnBase: React.CSSProperties = {
     padding: "0.5rem 0.75rem",
     borderRadius: 10,
     border: "1px solid #ccc",
@@ -124,6 +188,19 @@ export default function AdminReportsPage() {
     textDecoration: "none",
     color: "inherit",
     display: "inline-block",
+  };
+
+  const primaryBtn: React.CSSProperties = {
+    ...btnBase,
+    border: "1px solid #111",
+    background: "#111",
+    color: "white",
+  };
+
+  const dangerBtn: React.CSSProperties = {
+    ...btnBase,
+    border: "1px solid #f0c9c9",
+    background: "#fff7f7",
   };
 
   return (
@@ -141,32 +218,44 @@ export default function AdminReportsPage() {
           <div>
             <h1 style={{ fontSize: "2.2rem", marginBottom: 6 }}>Reports</h1>
             <div style={{ color: "#666" }}>
-              Open reports: <b>{openCount}</b>
-              {reports?.length ? (
+              Filter: <b>{statusFilter}</b> • Showing: <b>{reports.length}</b>
+              {statusFilter !== "resolved" ? (
                 <>
                   {" "}
-                  • Showing latest: <b>{reports.length}</b>
+                  • Open in this list: <b>{openCount}</b>
                 </>
               ) : null}
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Link href="/admin" style={btn}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <Link href="/admin" style={btnBase}>
               Back to Admin
             </Link>
 
-            <button
-              type="button"
-              style={{
-                ...btn,
-                border: "1px solid #111",
-                background: "#111",
-                color: "white",
+            {/* ✅ Dropdown filter */}
+            <select
+              value={statusFilter}
+              onChange={(e) => {
+                const v = e.target.value as "open" | "resolved" | "all";
+                setStatusFilter(v);
+                loadReports(v);
               }}
-              onClick={() => loadReports()}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                background: "white",
+                fontWeight: 700,
+              }}
               disabled={loading}
             >
+              <option value="open">Open</option>
+              <option value="resolved">Resolved</option>
+              <option value="all">All</option>
+            </select>
+
+            <button type="button" style={primaryBtn} onClick={() => loadReports()} disabled={loading}>
               {loading ? "Loading..." : "Refresh"}
             </button>
           </div>
@@ -192,68 +281,97 @@ export default function AdminReportsPage() {
           {loading ? (
             <div style={{ color: "#666" }}>Loading reports…</div>
           ) : reports.length === 0 ? (
-            <div style={{ color: "#666" }}>No recent open reports found.</div>
+            <div style={{ color: "#666" }}>No reports found for this filter.</div>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ textAlign: "left", color: "#666", fontSize: 12 }}>
                     <th style={{ padding: "10px 8px" }}>When</th>
-                    <th style={{ padding: "10px 8px" }}>Reason</th>
+                    <th style={{ padding: "10px 8px" }}>Category / Reason</th>
                     <th style={{ padding: "10px 8px" }}>Details</th>
                     <th style={{ padding: "10px 8px" }}>Target</th>
                     <th style={{ padding: "10px 8px" }}>Reporter</th>
+                    <th style={{ padding: "10px 8px" }}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {reports.map((r) => (
-                    <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
-                      <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-                        {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
-                      </td>
+                  {reports.map((r) => {
+                    const status = (r.status || "open").toLowerCase();
+                    const busy = workingId === r.id;
 
-                      <td style={{ padding: "10px 8px" }}>
-                        <div style={{ fontWeight: 800 }}>{r.reason || r.category || "—"}</div>
-                        <div style={{ color: "#666", fontSize: 12 }}>{r.status || "open"}</div>
-                      </td>
-
-                      <td style={{ padding: "10px 8px", maxWidth: 520 }}>
-                        <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>
-                          {r.details || "—"}
-                        </div>
-                      </td>
-
-                      <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
-                        {r.reported_user_id ? (
-                          <div>
-                            user: <b>{r.reported_user_id}</b>
+                    return (
+                      <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
+                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                          {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
+                          <div style={{ marginTop: 4, fontSize: 12, color: "#666" }}>
+                            status: <b>{status}</b>
                           </div>
-                        ) : null}
+                        </td>
 
-                        {(r.reported_profile_id || r.profile_id) ? (
-                          <div>
-                            profile: <b>{r.reported_profile_id || r.profile_id}</b>
+                        <td style={{ padding: "10px 8px" }}>
+                          <div style={{ fontWeight: 900 }}>{r.category || "—"}</div>
+                          <div style={{ fontSize: 12, color: "#333", marginTop: 4 }}>{r.reason || "—"}</div>
+                        </td>
+
+                        <td style={{ padding: "10px 8px", maxWidth: 520 }}>
+                          <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>
+                            {r.details || "—"}
                           </div>
-                        ) : null}
+                        </td>
 
-                        {r.thread_id ? (
-                          <div>
-                            thread: <b>{r.thread_id}</b>
-                          </div>
-                        ) : null}
+                        <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
+                          {r.reported_user_id ? (
+                            <div>
+                              user: <b>{r.reported_user_id}</b>
+                            </div>
+                          ) : null}
 
-                        {r.message_id ? (
-                          <div>
-                            message: <b>{r.message_id}</b>
-                          </div>
-                        ) : null}
-                      </td>
+                          {r.reported_profile_id || r.profile_id ? (
+                            <div>
+                              profile: <b>{r.reported_profile_id || r.profile_id}</b>
+                            </div>
+                          ) : null}
 
-                      <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
-                        {r.reporter_user_id ? <b>{r.reporter_user_id}</b> : "—"}
-                      </td>
-                    </tr>
-                  ))}
+                          {r.thread_id ? (
+                            <div>
+                              thread: <b>{r.thread_id}</b>
+                            </div>
+                          ) : null}
+
+                          {r.message_id ? (
+                            <div>
+                              message: <b>{r.message_id}</b>
+                            </div>
+                          ) : null}
+                        </td>
+
+                        <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
+                          {r.reporter_user_id ? <b>{r.reporter_user_id}</b> : "—"}
+                        </td>
+
+                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                          {status === "open" ? (
+                            <button
+                              type="button"
+                              style={{
+                                ...(busy ? btnBase : dangerBtn),
+                                cursor: busy ? "not-allowed" : "pointer",
+                                opacity: busy ? 0.7 : 1,
+                              }}
+                              onClick={() => resolveReport(r.id)}
+                              disabled={busy}
+                              title="Resolve this report (and notify the reporter if backend is set up to do so)"
+                            >
+                              {busy ? "Resolving..." : "Resolve"}
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 12, color: "#666" }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -261,7 +379,7 @@ export default function AdminReportsPage() {
         </div>
 
         <div style={{ marginTop: 12, color: "#777", fontSize: 12 }}>
-          This page is pulling from <code>/admin/report-alerts</code> and showing the latest 10.
+          This page pulls from <code>/admin/reports</code>. Resolving calls <code>/admin/reports/&lt;id&gt;/resolve</code>.
         </div>
       </div>
     </main>
