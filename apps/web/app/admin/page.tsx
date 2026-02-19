@@ -417,6 +417,19 @@ export default function AdminDashboardPage() {
               Create Free User
             </Link>
 
+         <Link
+           href="/admin/reports"
+           style={{
+               padding: "8px 12px",
+               border: "1px solid #ddd",
+               borderRadius: 10,
+               fontWeight: 700,
+               textDecoration: "none",
+              }}
+            >
+  View Reports
+</Link>
+
             <button type="button" style={btn} onClick={() => refresh()} disabled={loading}>
               {loading ? "Loading..." : "Refresh"}
             </button>
