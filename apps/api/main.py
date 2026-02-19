@@ -3066,38 +3066,82 @@ def create_report(req: ReportCreateRequest):
 
     return {"ok": True}
 
-
-@app.get("/admin/reports", response_model=List[ReportRow])
+@app.get("/admin/reports")
 def admin_list_reports(
-    status: str = "open",
+    status: str = "open",  # open | resolved | all
+    limit: int = 200,
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
     authorization: Optional[str] = Header(default=None),
 ):
     require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
     st = (status or "open").strip().lower()
-    if st not in ("open", "resolved"):
-        st = "open"
+    if st not in ("open", "resolved", "all"):
+        raise HTTPException(status_code=400, detail="status must be open, resolved, or all")
+
+    lim = max(1, min(int(limit or 200), 500))
+
+    where_sql = ""
+    params: Dict[str, Any] = {"lim": lim}
+
+    if st == "open":
+        where_sql = "WHERE COALESCE(status,'open') = 'open'"
+    elif st == "resolved":
+        where_sql = "WHERE COALESCE(status,'open') = 'resolved'"
+    elif st == "all":
+        where_sql = ""
 
     with engine.begin() as conn:
         rows = conn.execute(
             text(
-                """
-                SELECT id, reporter_user_id, category, reason, details,
-                       target_user_id, target_profile_id, target_thread_id, target_message_id,
-                       status, admin_note,
-                       created_at::text AS created_at,
-                       resolved_at::text AS resolved_at
+                f"""
+                SELECT
+                    id,
+                    reporter_user_id,
+                    category,
+                    reason,
+                    details,
+                    target_user_id,
+                    target_profile_id,
+                    target_thread_id,
+                    target_message_id,
+                    COALESCE(status,'open') AS status,
+                    admin_note,
+                    created_at,
+                    resolved_at
                 FROM reports
-                WHERE status = :st
+                {where_sql}
                 ORDER BY created_at DESC
-                LIMIT 200
+                LIMIT :lim
                 """
             ),
-            {"st": st},
+            params,
         ).mappings().all()
 
-    return [dict(r) for r in rows]
+    # Return in the format the admin UI expects
+    items = []
+    for r in rows:
+        created = r.get("created_at")
+        resolved = r.get("resolved_at")
+        items.append(
+            {
+                "id": str(r.get("id")),
+                "reporter_user_id": r.get("reporter_user_id") or "",
+                "category": r.get("category") or "",
+                "reason": r.get("reason") or "",
+                "details": r.get("details") or "",
+                "target_user_id": r.get("target_user_id"),
+                "target_profile_id": r.get("target_profile_id"),
+                "target_thread_id": r.get("target_thread_id"),
+                "target_message_id": r.get("target_message_id"),
+                "status": r.get("status") or "open",
+                "admin_note": r.get("admin_note"),
+                "created_at": created.isoformat() + "Z" if hasattr(created, "isoformat") and created else "",
+                "resolved_at": resolved.isoformat() + "Z" if hasattr(resolved, "isoformat") and resolved else None,
+            }
+        )
+
+    return {"items": items}
 
 
 @app.post("/admin/reports/{report_id}/resolve")
