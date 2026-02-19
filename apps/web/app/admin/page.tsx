@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -206,6 +206,9 @@ export default function AdminDashboardPage() {
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportsError, setReportsError] = useState<string | null>(null);
 
+  // ✅ Prevent overlapping report refresh calls (fixes stale-closure polling overlaps)
+  const reportsLoadingRef = useRef(false);
+
   const adminToken = token;
 
   function showToast(msg: string) {
@@ -214,25 +217,25 @@ export default function AdminDashboardPage() {
   }
 
   useEffect(() => {
-  const t = getAdminToken();
-  if (!t) {
-    router.replace("/admin/login");
-    return;
-  }
-
-  (async () => {
-    try {
-      const me = await apiAdminMe(t);
-      setToken(t);
-      setTokenInput(t);
-      showToast(`Signed in as ${me.email} (${me.role})`);
-    } catch (e: any) {
-      clearAdminToken();
+    const t = getAdminToken();
+    if (!t) {
       router.replace("/admin/login");
+      return;
     }
-  })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [router]);
+
+    (async () => {
+      try {
+        const me = await apiAdminMe(t);
+        setToken(t);
+        setTokenInput(t);
+        showToast(`Signed in as ${me.email} (${me.role})`);
+      } catch (e: any) {
+        clearAdminToken();
+        router.replace("/admin/login");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   async function refresh(tOverride?: string) {
     const t = (tOverride ?? token).trim();
@@ -260,35 +263,39 @@ export default function AdminDashboardPage() {
 
   // ✅ REPLACE refreshReports WITH THIS (updated to setOpenReports)
   async function refreshReports() {
-  if (reportsLoading) return;
-  setReportsLoading(true);
-  setReportsError(null);
+    // IMPORTANT: use a ref to prevent overlap even if polling closure has stale state
+    if (reportsLoadingRef.current) return;
+    reportsLoadingRef.current = true;
 
-  try {
-    const t = (adminToken || "").trim();
-    if (!t) return;
+    setReportsLoading(true);
+    setReportsError(null);
 
-    const res = await fetch(`${API_BASE}/admin/report-alerts`, {
-      method: "GET",
-      headers: buildAdminHeaders(t),
-      cache: "no-store",
-    });
+    try {
+      const t = (adminToken || "").trim();
+      if (!t) return;
 
-    if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-    const data = await res.json();
+      const res = await fetch(`${API_BASE}/admin/report-alerts`, {
+        method: "GET",
+        headers: buildAdminHeaders(t),
+        cache: "no-store",
+      });
 
-    setReportCounts((prev) => ({
-      open: typeof data?.openCount === "number" ? data.openCount : prev.open,
-      resolved: prev.resolved,
-    }));
+      if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+      const data = await res.json();
 
-    setOpenReports(Array.isArray(data?.recent) ? data.recent : []);
-  } catch (e: any) {
-    setReportsError(e?.message || "Failed to refresh reports.");
-  } finally {
-    setReportsLoading(false);
+      setReportCounts((prev) => ({
+        open: typeof data?.openCount === "number" ? data.openCount : prev.open,
+        resolved: prev.resolved,
+      }));
+
+      setOpenReports(Array.isArray(data?.recent) ? data.recent : []);
+    } catch (e: any) {
+      setReportsError(e?.message || "Failed to refresh reports.");
+    } finally {
+      setReportsLoading(false);
+      reportsLoadingRef.current = false;
+    }
   }
-}
 
   // keep counts updating (so "Open/Resolved" stays accurate)
   async function refreshReportCountsOnly() {
@@ -417,18 +424,18 @@ export default function AdminDashboardPage() {
               Create Free User
             </Link>
 
-         <Link
-           href="/admin/reports"
-           style={{
-               padding: "8px 12px",
-               border: "1px solid #ddd",
-               borderRadius: 10,
-               fontWeight: 700,
-               textDecoration: "none",
+            <Link
+              href="/admin/reports"
+              style={{
+                padding: "8px 12px",
+                border: "1px solid #ddd",
+                borderRadius: 10,
+                fontWeight: 700,
+                textDecoration: "none",
               }}
             >
-  View Reports
-</Link>
+              View Reports
+            </Link>
 
             <button type="button" style={btn} onClick={() => refresh()} disabled={loading}>
               {loading ? "Loading..." : "Refresh"}
