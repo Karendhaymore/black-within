@@ -2658,6 +2658,58 @@ def send_message(payload: MessageCreatePayload):
 
         return MessageItem(id=m.id, thread_id=m.thread_id, sender_user_id=m.sender_user_id, body=m.body, created_at=m.created_at.isoformat())
 
+@app.get("/admin-messages", response_model=AdminMessagesOut)
+def list_admin_messages(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT
+                  id::text,
+                  subject,
+                  body,
+                  created_at::text,
+                  read_at::text
+                FROM admin_messages
+                WHERE user_id = :uid
+                ORDER BY created_at DESC
+                LIMIT 200
+            """),
+            {"uid": user_id},
+        ).mappings().all()
+
+    items: List[AdminMessageItem] = []
+    for r in rows:
+        items.append(
+            AdminMessageItem(
+                id=r["id"],
+                subject=r["subject"],
+                body=r["body"],
+                created_at=r["created_at"],
+                read_at=r["read_at"],
+            )
+        )
+
+    return AdminMessagesOut(items=items)
+
+
+@app.post("/admin-messages/{message_id}/read")
+def mark_admin_message_read(message_id: str, user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+
+    with engine.begin() as conn:
+        updated = conn.execute(
+            text("""
+                UPDATE admin_messages
+                SET read_at = NOW()
+                WHERE id = :mid AND user_id = :uid AND read_at IS NULL
+            """),
+            {"mid": message_id, "uid": user_id},
+        ).rowcount or 0
+
+    return {"ok": True, "updated": bool(updated)}
+
 
 @app.post("/messaging/unlock")
 def admin_unlock(payload: MessagingUnlockPayload, admin_key: str = Query(default="")):
