@@ -76,7 +76,7 @@ export default function AdminReportsPage() {
     try {
       // Option A: uses your existing backend route
       // GET /admin/report-alerts -> { openCount, recent: [...] }
-      const res = await fetch(`${API_BASE}/admin/report-alerts`, {
+      fetch(${API_BASE}/admin/reports?status=${status}&limit=50
         method: "GET",
         headers: buildAdminHeaders(t),
         cache: "no-store",
