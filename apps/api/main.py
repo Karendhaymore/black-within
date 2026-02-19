@@ -1182,12 +1182,12 @@ async def allow_preflight(request: Request, call_next):
 
 from fastapi.middleware.cors import CORSMiddleware
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://meetblackwithin.com",
-        "http://localhost:3000",
-    ],
+allow_origins=[
+    "http://localhost:3000",
+    "https://meetblackwithin.com",
+    "https://www.meetblackwithin.com",
+],
+
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
