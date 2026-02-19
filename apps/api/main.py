@@ -8,6 +8,10 @@ import base64
 import shutil
 import urllib.request
 import urllib.error
+from sqlalchemy import Table
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import NoSuchTableError
+
 from datetime import datetime, timedelta, date, time
 from typing import List, Optional, Dict, Any, Tuple
 
