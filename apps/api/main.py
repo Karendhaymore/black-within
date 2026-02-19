@@ -1188,9 +1188,9 @@ allow_origins=[
     "https://www.meetblackwithin.com",
 ],
 
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+allow_credentials=True,
+allow_methods=["*"],
+allow_headers=["*"],
 )
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
