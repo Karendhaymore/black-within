@@ -1138,18 +1138,6 @@ class ReportResolveRequest(BaseModel):
     admin_note: Optional[str] = None
     status: str = "resolved"  # allowed: "open" or "resolved"
 
-    
-class ReportCreateRequest(BaseModel):
-    reporter_user_id: str
-    category: str
-    reason: str
-    details: str
-
-    target_user_id: Optional[str] = None
-    target_profile_id: Optional[str] = None
-    target_thread_id: Optional[str] = None
-    target_message_id: Optional[int] = None
-
 
 class ReportRow(BaseModel):
     id: int
