@@ -3029,6 +3029,32 @@ def create_report(req: ReportCreateRequest):
         )
 
     return {"ok": True}
+def _reports_note_column(conn):
+    """
+    Detect which note column exists in the reports table.
+    """
+    candidates = ["admin_note", "resolved_note", "note"]
+
+    rows = conn.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'reports'
+              AND column_name = ANY(:cols)
+            """
+        ),
+        {"cols": candidates},
+    ).fetchall()
+
+    existing = {r[0] for r in rows}
+
+    for c in candidates:
+        if c in existing:
+            return c
+
+    return None
 
 @app.get("/admin/reports")
 def admin_list_reports(
