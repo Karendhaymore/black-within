@@ -3174,10 +3174,6 @@ def create_report(req: ReportCreateRequest, background_tasks: BackgroundTasks):
             if row:
         background_tasks.add_task(_notify_admins_new_report, dict(row))
 
-
-            },
-        )
-
     return {"ok": True}
     
 def _reports_note_column(conn):
