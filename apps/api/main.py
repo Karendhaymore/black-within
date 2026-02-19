@@ -1377,15 +1377,31 @@ def _notify_admins_new_report(report_row: Any) -> None:
     if not to_emails:
         return
 
-    rid = getattr(report_row, "id", "")
-    reporter = getattr(report_row, "reporter_user_id", "") or getattr(report_row, "user_id", "")
-    reported_profile_id = getattr(report_row, "reported_profile_id", "") or getattr(report_row, "profile_id", "")
-    reported_user_id = getattr(report_row, "reported_user_id", "")
+    def _get(obj: Any, key: str, default: str = "") -> Any:
+        # supports SQLAlchemy objects AND dict/mapping rows
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        try:
+            return getattr(obj, key, default)
+        except Exception:
+            return default
 
-    reason = getattr(report_row, "reason", "") or ""
-    details = getattr(report_row, "details", "") or getattr(report_row, "message", "") or ""
+    rid = _get(report_row, "id", "")
+    reporter = _get(report_row, "reporter_user_id", "") or _get(report_row, "user_id", "")
 
-    subject = f"[Black Within] New user report ({reason or 'reported'})"
+    # Support BOTH naming styles:
+    # - old user_reports style: reported_user_id / reported_profile_id / thread_id
+    # - new reports style: target_user_id / target_profile_id / target_thread_id / target_message_id
+    target_user_id = _get(report_row, "target_user_id", "") or _get(report_row, "reported_user_id", "")
+    target_profile_id = _get(report_row, "target_profile_id", "") or _get(report_row, "reported_profile_id", "") or _get(report_row, "profile_id", "")
+    target_thread_id = _get(report_row, "target_thread_id", "") or _get(report_row, "thread_id", "")
+    target_message_id = _get(report_row, "target_message_id", "")
+
+    category = _get(report_row, "category", "") or ""
+    reason = _get(report_row, "reason", "") or ""
+    details = _get(report_row, "details", "") or _get(report_row, "message", "") or ""
+
+    subject = f"[Black Within] New report ({reason or 'reported'})"
     admin_url = "https://meetblackwithin.com/admin"
 
     html = f"""
@@ -1396,9 +1412,12 @@ def _notify_admins_new_report(report_row: Any) -> None:
       <table cellpadding="6" cellspacing="0" border="0" style="border-collapse: collapse;">
         <tr><td><b>Report ID</b></td><td>{rid}</td></tr>
         <tr><td><b>Reporter user_id</b></td><td>{reporter}</td></tr>
-        <tr><td><b>Reported profile_id</b></td><td>{reported_profile_id}</td></tr>
-        <tr><td><b>Reported user_id</b></td><td>{reported_user_id}</td></tr>
+        <tr><td><b>Category</b></td><td>{category}</td></tr>
         <tr><td><b>Reason</b></td><td>{reason}</td></tr>
+        <tr><td><b>Target user_id</b></td><td>{target_user_id}</td></tr>
+        <tr><td><b>Target profile_id</b></td><td>{target_profile_id}</td></tr>
+        <tr><td><b>Target thread_id</b></td><td>{target_thread_id}</td></tr>
+        <tr><td><b>Target message_id</b></td><td>{target_message_id}</td></tr>
       </table>
 
       <p style="margin: 12px 0 0;"><b>Details</b></p>
