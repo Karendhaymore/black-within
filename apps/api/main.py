@@ -3058,7 +3058,7 @@ def _reports_note_column(conn):
 
 @app.get("/admin/reports")
 def admin_list_reports(
-    status: str = "open",  # open | resolved | all
+    status: str = "open",
     limit: int = 200,
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
     authorization: Optional[str] = Header(default=None),
@@ -3072,8 +3072,6 @@ def admin_list_reports(
     lim = max(1, min(int(limit or 200), 500))
 
     where_sql = ""
-    params: Dict[str, Any] = {"lim": lim}
-
     if st == "open":
         where_sql = "WHERE COALESCE(status,'open') = 'open'"
     elif st == "resolved":
@@ -3082,6 +3080,10 @@ def admin_list_reports(
         where_sql = ""
 
     with engine.begin() as conn:
+        note_col = _reports_note_column(conn)
+
+        note_select_sql = f", {note_col} AS admin_note" if note_col else ", NULL AS admin_note"
+
         rows = conn.execute(
             text(
                 f"""
@@ -3095,8 +3097,8 @@ def admin_list_reports(
                     target_profile_id,
                     target_thread_id,
                     target_message_id,
-                    COALESCE(status,'open') AS status,
-                    admin_note,
+                    COALESCE(status,'open') AS status
+                    {note_select_sql},
                     created_at,
                     resolved_at
                 FROM reports
@@ -3105,10 +3107,9 @@ def admin_list_reports(
                 LIMIT :lim
                 """
             ),
-            params,
+            {"lim": lim},
         ).mappings().all()
 
-    # Return in the format the admin UI expects
     items = []
     for r in rows:
         created = r.get("created_at")
@@ -3132,6 +3133,7 @@ def admin_list_reports(
         )
 
     return {"items": items}
+
 
 @app.post("/admin/reports/{report_id}/resolve")
 def admin_resolve_report(
