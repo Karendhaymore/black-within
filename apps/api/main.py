@@ -3143,7 +3143,6 @@ def admin_list_reports(
 
     return {"items": items}
 
-
 @app.post("/admin/reports/{report_id}/resolve")
 def admin_resolve_report(
     report_id: int,
@@ -3157,8 +3156,10 @@ def admin_resolve_report(
     if status not in ("open", "resolved"):
         status = "resolved"
 
+    note = (req.admin_note or "").strip() or None
+
     with engine.begin() as conn:
-        conn.execute(
+        updated = conn.execute(
             text(
                 """
                 UPDATE reports
@@ -3168,12 +3169,11 @@ def admin_resolve_report(
                 WHERE id = :id
                 """
             ),
-            {
-                "id": int(report_id),
-                "status": status,
-                "admin_note": (req.admin_note or "").strip() or None,
-            },
-        )
+            {"id": int(report_id), "status": status, "admin_note": note},
+        ).rowcount
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Report not found")
 
     return {"ok": True}
 
