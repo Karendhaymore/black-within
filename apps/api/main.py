@@ -3030,42 +3030,6 @@ def create_report(req: ReportCreateRequest):
 
     return {"ok": True}
 
-    reporter = (req.reporter_user_id or "").strip()
-    if not reporter:
-        raise HTTPException(status_code=400, detail="reporter_user_id is required")
-
-    details = (req.details or "").strip()
-    if not details:
-        raise HTTPException(status_code=400, detail="details is required")
-
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                INSERT INTO reports
-                (reporter_user_id, category, reason, details,
-                 target_user_id, target_profile_id, target_thread_id, target_message_id,
-                 status, created_at)
-                VALUES
-                (:reporter_user_id, :category, :reason, :details,
-                 :target_user_id, :target_profile_id, :target_thread_id, :target_message_id,
-                 'open', NOW())
-                """
-            ),
-            {
-                "reporter_user_id": reporter,
-                "category": (req.category or "").strip(),
-                "reason": (req.reason or "").strip(),
-                "details": details,
-                "target_user_id": (req.target_user_id or "").strip() or None,
-                "target_profile_id": (req.target_profile_id or "").strip() or None,
-                "target_thread_id": (req.target_thread_id or "").strip() or None,
-                "target_message_id": req.target_message_id,
-            },
-        )
-
-    return {"ok": True}
-
 @app.get("/admin/reports")
 def admin_list_reports(
     status: str = "open",  # open | resolved | all
