@@ -3162,7 +3162,7 @@ def admin_resolve_report(
                 WHERE id = :id
                 """
             )
-            params = {"id": int(report_id), "status": status, "note": note}
+            params = {"id": report_id, "status": status, "note": note}
         else:
             sql = text(
                 """
