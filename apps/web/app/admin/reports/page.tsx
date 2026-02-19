@@ -65,6 +65,7 @@ export default function AdminReportsPage() {
 
   const [openCount, setOpenCount] = useState<number>(0);
   const [reports, setReports] = useState<ReportItem[]>([]);
+  const [statusFilter, setStatusFilter] = useState<"open" | "resolved" | "all">("open");
 
   async function loadReports(tOverride?: string) {
     const t = (tOverride ?? token).trim();
