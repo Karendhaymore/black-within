@@ -1026,6 +1026,24 @@ class AdminPatchProfileIn(BaseModel):
 
 class AdminClearPhotoIn(BaseModel):
     slot: int
+
+class AdminSendMessageRequest(BaseModel):
+    user_id: str
+    subject: str
+    body: str
+
+
+class AdminMessageItem(BaseModel):
+    id: str
+    subject: str
+    body: str
+    created_at: str
+    read_at: Optional[str] = None
+
+
+class AdminMessagesOut(BaseModel):
+    items: List[AdminMessageItem]
+
 # -----------------------------
 # Reports (public + admin)
 # -----------------------------
