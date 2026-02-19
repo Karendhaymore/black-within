@@ -687,6 +687,27 @@ def _auto_migrate_admin_tables():
         """
             )
         )
+
+def _auto_migrate_admin_messages_table():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+            CREATE TABLE IF NOT EXISTS admin_messages (
+              id SERIAL PRIMARY KEY,
+              user_id VARCHAR(40) NOT NULL,
+              subject VARCHAR(200) NOT NULL,
+              body TEXT NOT NULL,
+              created_at TIMESTAMP DEFAULT NOW(),
+              read_at TIMESTAMP NULL
+            );
+            """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_user_id ON admin_messages(user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_created_at ON admin_messages(created_at);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_read_at ON admin_messages(read_at);"))
+
 # -----------------------------
 # Migrations
 # -----------------------------
