@@ -3143,7 +3143,7 @@ def create_report(req: ReportCreateRequest, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail="details is required")
 
         with engine.begin() as conn:
-        row = conn.execute(
+            row = conn.execute(
             text(
                 """
                 INSERT INTO reports
@@ -3171,8 +3171,8 @@ def create_report(req: ReportCreateRequest, background_tasks: BackgroundTasks):
                 "target_message_id": req.target_message_id,
             },
         ).mappings().first()
-            if row:
-        background_tasks.add_task(_notify_admins_new_report, dict(row))
+        if row:
+            background_tasks.add_task(_notify_admins_new_report, dict(row))
 
     return {"ok": True}
     
