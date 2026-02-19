@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -14,14 +14,20 @@ type ReportItem = {
   created_at: string;
 
   reporter_user_id?: string | null;
-  reported_user_id?: string | null;
 
-  // some backends store profile in either field
+  // Backends may use different naming; support both.
+  reported_user_id?: string | null;
+  target_user_id?: string | null;
+
   profile_id?: string | null;
   reported_profile_id?: string | null;
+  target_profile_id?: string | null;
 
   thread_id?: string | null;
+  target_thread_id?: string | null;
+
   message_id?: string | null;
+  target_message_id?: string | null;
 
   category?: string | null;
   reason?: string | null;
@@ -43,16 +49,19 @@ function buildAdminHeaders(token: string): Record<string, string> {
   const t = (token || "").trim();
   return {
     "Content-Type": "application/json",
+    // Send both header styles so backend can accept either.
     "X-Admin-Token": t,
     Authorization: `Bearer ${t}`,
   };
 }
 
 async function safeReadErrorDetail(res: Response): Promise<string> {
+  // Prefer JSON detail/message, otherwise text, otherwise status.
   try {
     const j = await res.json();
     if (j?.detail) return String(j.detail);
     if (j?.message) return String(j.message);
+    return JSON.stringify(j);
   } catch {}
   try {
     const t = await res.text();
@@ -64,8 +73,6 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
 export default function AdminReportsPage() {
   const router = useRouter();
 
-  const [token, setToken] = useState("");
-
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -75,14 +82,23 @@ export default function AdminReportsPage() {
   // For nice UX when resolving
   const [workingId, setWorkingId] = useState<string | null>(null);
 
+  // Keep token in a ref so ALL functions always have the latest value
+  const tokenRef = useRef<string>("");
+
   // Derived open count from what we loaded (reliable)
   const openCount = useMemo(() => {
     return reports.filter((r) => (r.status || "open") === "open").length;
   }, [reports]);
 
   async function loadReports(nextStatus?: "open" | "resolved" | "all") {
-    const t = token.trim();
-    if (!t) return;
+    // Always pull token fresh (prevents “state timing” bugs)
+    const t = getAdminToken().trim() || tokenRef.current.trim();
+    tokenRef.current = t;
+
+    if (!t) {
+      router.replace("/admin/login");
+      return;
+    }
 
     const status = (nextStatus || statusFilter).trim();
 
@@ -90,13 +106,14 @@ export default function AdminReportsPage() {
     setErr(null);
 
     try {
-      // ✅ Correct endpoint for Option A
-      // GET /admin/reports?status=open|resolved|all&limit=50 -> { items: [...] }
-      const res = await fetch(`${API_BASE}/admin/reports?status=${encodeURIComponent(status)}&limit=50`, {
-        method: "GET",
-        headers: buildAdminHeaders(t),
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `${API_BASE}/admin/reports?status=${encodeURIComponent(status)}&limit=50`,
+        {
+          method: "GET",
+          headers: buildAdminHeaders(t),
+          cache: "no-store",
+        }
+      );
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
@@ -112,8 +129,13 @@ export default function AdminReportsPage() {
   }
 
   async function resolveReport(reportId: string) {
-    const t = token.trim();
-    if (!t) return;
+    const t = getAdminToken().trim() || tokenRef.current.trim();
+    tokenRef.current = t;
+
+    if (!t) {
+      router.replace("/admin/login");
+      return;
+    }
 
     const note = window.prompt("Optional note to reporter:", "") || "";
 
@@ -125,6 +147,7 @@ export default function AdminReportsPage() {
         method: "POST",
         headers: buildAdminHeaders(t),
         body: JSON.stringify({ note }),
+        cache: "no-store",
       });
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
@@ -139,35 +162,17 @@ export default function AdminReportsPage() {
   }
 
   useEffect(() => {
-    const t = getAdminToken();
+    const t = getAdminToken().trim();
     if (!t) {
       router.replace("/admin/login");
       return;
     }
-    setToken(t);
-    // load open by default
+
+    tokenRef.current = t;
+
+    // Initial load: load using the same function (one source of truth)
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`${API_BASE}/admin/reports?status=open&limit=50`, {
-          method: "GET",
-          headers: buildAdminHeaders(t),
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(await safeReadErrorDetail(res));
-        const data = await res.json().catch(() => ({}));
-        const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-        setReports(items);
-        setStatusFilter("open");
-        setErr(null);
-      } catch (e: any) {
-        setErr(e?.message || "Failed to load reports.");
-        setReports([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    loadReports("open");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
@@ -233,12 +238,12 @@ export default function AdminReportsPage() {
               Back to Admin
             </Link>
 
-            {/* ✅ Dropdown filter */}
             <select
               value={statusFilter}
               onChange={(e) => {
                 const v = e.target.value as "open" | "resolved" | "all";
                 setStatusFilter(v);
+                // eslint-disable-next-line @typescript-eslint/no-floating-promises
                 loadReports(v);
               }}
               style={{
@@ -255,7 +260,15 @@ export default function AdminReportsPage() {
               <option value="all">All</option>
             </select>
 
-            <button type="button" style={primaryBtn} onClick={() => loadReports()} disabled={loading}>
+            <button
+              type="button"
+              style={primaryBtn}
+              onClick={() => {
+                // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                loadReports();
+              }}
+              disabled={loading}
+            >
               {loading ? "Loading..." : "Refresh"}
             </button>
           </div>
@@ -300,6 +313,11 @@ export default function AdminReportsPage() {
                     const status = (r.status || "open").toLowerCase();
                     const busy = workingId === r.id;
 
+                    const targetUser = r.target_user_id ?? r.reported_user_id ?? null;
+                    const targetProfile = r.target_profile_id ?? r.reported_profile_id ?? r.profile_id ?? null;
+                    const targetThread = r.target_thread_id ?? r.thread_id ?? null;
+                    const targetMessage = r.target_message_id ?? r.message_id ?? null;
+
                     return (
                       <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
                         <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
@@ -321,27 +339,27 @@ export default function AdminReportsPage() {
                         </td>
 
                         <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
-                          {r.reported_user_id ? (
+                          {targetUser ? (
                             <div>
-                              user: <b>{r.reported_user_id}</b>
+                              user: <b>{targetUser}</b>
                             </div>
                           ) : null}
 
-                          {r.reported_profile_id || r.profile_id ? (
+                          {targetProfile ? (
                             <div>
-                              profile: <b>{r.reported_profile_id || r.profile_id}</b>
+                              profile: <b>{targetProfile}</b>
                             </div>
                           ) : null}
 
-                          {r.thread_id ? (
+                          {targetThread ? (
                             <div>
-                              thread: <b>{r.thread_id}</b>
+                              thread: <b>{targetThread}</b>
                             </div>
                           ) : null}
 
-                          {r.message_id ? (
+                          {targetMessage ? (
                             <div>
-                              message: <b>{r.message_id}</b>
+                              message: <b>{targetMessage}</b>
                             </div>
                           ) : null}
                         </td>
@@ -359,9 +377,12 @@ export default function AdminReportsPage() {
                                 cursor: busy ? "not-allowed" : "pointer",
                                 opacity: busy ? 0.7 : 1,
                               }}
-                              onClick={() => resolveReport(r.id)}
+                              onClick={() => {
+                                // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                                resolveReport(r.id);
+                              }}
                               disabled={busy}
-                              title="Resolve this report (and notify the reporter if backend is set up to do so)"
+                              title="Resolve this report"
                             >
                               {busy ? "Resolving..." : "Resolve"}
                             </button>
