@@ -3172,7 +3172,7 @@ def admin_resolve_report(
                 WHERE id = :id
                 """
             )
-            params = {"id": int(report_id), "status": status}
+            params = {"id": report_id, "status": status}
 
         updated = conn.execute(sql, params).rowcount
 
