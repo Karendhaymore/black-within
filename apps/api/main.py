@@ -2769,8 +2769,8 @@ def admin_reports_counts(
     require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
 
     with engine.begin() as conn:
-        open_count = conn.execute(text("SELECT COUNT(1) FROM reports WHERE status = 'open'")).scalar() or 0
-        resolved_count = conn.execute(text("SELECT COUNT(1) FROM reports WHERE status = 'resolved'")).scalar() or 0
+        open_count = conn.execute(text("SELECT COUNT(1) FROM reports WHERE COALESCE(status,'open') = 'open'")).scalar() or 0
+        resolved_count = conn.execute(text("SELECT COUNT(1) FROM reports WHERE COALESCE(status,'open') = 'resolved'")).scalar() or 0
 
     return {"open": int(open_count), "resolved": int(resolved_count)}
 
