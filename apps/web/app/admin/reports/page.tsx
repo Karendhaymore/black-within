@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -15,7 +15,7 @@ type ReportItem = {
 
   reporter_user_id?: string | null;
 
-  // Backends may use different naming; support both.
+  // Some backends use different names for the "reported" user/profile
   reported_user_id?: string | null;
   target_user_id?: string | null;
 
@@ -33,11 +33,26 @@ type ReportItem = {
   reason?: string | null;
   details?: string | null;
   status?: string | null;
+
+  // Sometimes present on resolved items
+  admin_note?: string | null;
+  resolved_at?: string | null;
 };
 
 function getAdminToken(): string {
   if (typeof window === "undefined") return "";
-  const keys = ["bw_admin_token", "admin_token", "bw_admin_session", "bw_admin_key"];
+
+  /**
+   * ✅ Put the most likely “real” admin key first.
+   * If you know EXACTLY what key name you store under, put it at the top.
+   */
+  const keys = [
+    "bw_admin_key", // <-- common “admin key” storage name
+    "bw_admin_token",
+    "admin_token",
+    "bw_admin_session",
+  ];
+
   for (const k of keys) {
     const v = window.localStorage.getItem(k);
     if (v && v.trim()) return v.trim();
@@ -45,33 +60,69 @@ function getAdminToken(): string {
   return "";
 }
 
+/**
+ * Sends BOTH header styles so whichever your API expects will work.
+ * (You’re already able to fetch reports, so auth is basically fine.)
+ */
 function buildAdminHeaders(token: string): Record<string, string> {
   const t = (token || "").trim();
   return {
     "Content-Type": "application/json",
-    // Send both header styles so backend can accept either.
     "X-Admin-Token": t,
+    "X-Admin-Key": t,
     Authorization: `Bearer ${t}`,
   };
 }
 
+/**
+ * ✅ Makes API error messages human-readable instead of "[object Object]"
+ */
 async function safeReadErrorDetail(res: Response): Promise<string> {
-  // Prefer JSON detail/message, otherwise text, otherwise status.
+  // Try JSON first
   try {
-    const j = await res.json();
-    if (j?.detail) return String(j.detail);
+    const j: any = await res.json();
+
+    // FastAPI often returns { detail: "..." } OR { detail: [...] }
+    if (j?.detail) {
+      if (typeof j.detail === "string") return j.detail;
+
+      // detail as array of validation errors
+      if (Array.isArray(j.detail)) {
+        const lines = j.detail
+          .map((d: any) => {
+            const loc = Array.isArray(d?.loc) ? d.loc.join(" > ") : "";
+            const msg = d?.msg || d?.message || JSON.stringify(d);
+            return loc ? `${loc}: ${msg}` : String(msg);
+          })
+          .join("\n");
+        return lines || `Request failed (${res.status}).`;
+      }
+
+      // detail as object
+      return JSON.stringify(j.detail);
+    }
+
     if (j?.message) return String(j.message);
+    if (j?.error) return String(j.error);
+
+    // Fallback: stringify whole JSON
     return JSON.stringify(j);
-  } catch {}
+  } catch {
+    // If it wasn't JSON, try text
+  }
+
   try {
     const t = await res.text();
     if (t) return t;
   } catch {}
+
   return `Request failed (${res.status}).`;
 }
 
 export default function AdminReportsPage() {
   const router = useRouter();
+
+  const [token, setToken] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -82,44 +133,62 @@ export default function AdminReportsPage() {
   // For nice UX when resolving
   const [workingId, setWorkingId] = useState<string | null>(null);
 
-  // Keep token in a ref so ALL functions always have the latest value
-  const tokenRef = useRef<string>("");
-
-  // Derived open count from what we loaded (reliable)
   const openCount = useMemo(() => {
-    return reports.filter((r) => (r.status || "open") === "open").length;
+    return reports.filter((r) => (r.status || "open").toLowerCase() === "open").length;
   }, [reports]);
 
+  async function fetchReportsByStatus(t: string, status: "open" | "resolved") {
+    const res = await fetch(
+      `${API_BASE}/admin/reports?status=${encodeURIComponent(status)}&limit=50`,
+      {
+        method: "GET",
+        headers: buildAdminHeaders(t),
+        cache: "no-store",
+      }
+    );
+
+    if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+
+    const data = await res.json().catch(() => ({}));
+    const items = Array.isArray((data as any)?.items)
+      ? (data as any).items
+      : Array.isArray(data)
+      ? data
+      : [];
+
+    return items as ReportItem[];
+  }
+
   async function loadReports(nextStatus?: "open" | "resolved" | "all") {
-    // Always pull token fresh (prevents “state timing” bugs)
-    const t = getAdminToken().trim() || tokenRef.current.trim();
-    tokenRef.current = t;
+    const t = token.trim();
+    if (!t) return;
 
-    if (!t) {
-      router.replace("/admin/login");
-      return;
-    }
-
-    const status = (nextStatus || statusFilter).trim();
+    const status = (nextStatus || statusFilter).trim() as "open" | "resolved" | "all";
 
     setLoading(true);
     setErr(null);
 
     try {
-      const res = await fetch(
-        `${API_BASE}/admin/reports?status=${encodeURIComponent(status)}&limit=50`,
-        {
-          method: "GET",
-          headers: buildAdminHeaders(t),
-          cache: "no-store",
-        }
-      );
+      if (status === "all") {
+        // ✅ Many backends do NOT support status=all reliably.
+        // So we fetch open + resolved and combine.
+        const [openItems, resolvedItems] = await Promise.all([
+          fetchReportsByStatus(t, "open"),
+          fetchReportsByStatus(t, "resolved"),
+        ]);
 
-      if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+        // Combine & sort newest first
+        const combined = [...openItems, ...resolvedItems].sort((a, b) => {
+          const ad = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const bd = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return bd - ad;
+        });
 
-      const data = await res.json().catch(() => ({}));
-      const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-      setReports(items);
+        setReports(combined);
+      } else {
+        const items = await fetchReportsByStatus(t, status);
+        setReports(items);
+      }
     } catch (e: any) {
       setErr(e?.message || "Failed to load reports.");
       setReports([]);
@@ -129,13 +198,8 @@ export default function AdminReportsPage() {
   }
 
   async function resolveReport(reportId: string) {
-    const t = getAdminToken().trim() || tokenRef.current.trim();
-    tokenRef.current = t;
-
-    if (!t) {
-      router.replace("/admin/login");
-      return;
-    }
+    const t = token.trim();
+    if (!t) return;
 
     const note = window.prompt("Optional note to reporter:", "") || "";
 
@@ -143,17 +207,25 @@ export default function AdminReportsPage() {
     setErr(null);
 
     try {
+      /**
+       * ✅ The 422 error is very likely because the backend expects "admin_note"
+       * but we were sending "note".
+       * So we send BOTH to be safe.
+       */
+      const payload =
+        note.trim().length > 0
+          ? { admin_note: note.trim(), note: note.trim() }
+          : { admin_note: "", note: "" };
+
       const res = await fetch(`${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/resolve`, {
         method: "POST",
         headers: buildAdminHeaders(t),
-        body: JSON.stringify({ note }),
-        cache: "no-store",
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
-      // reload the current filter view
-      await loadReports();
+      await loadReports(); // reload current filter view
     } catch (e: any) {
       setErr(e?.message || "Resolve failed.");
     } finally {
@@ -162,17 +234,31 @@ export default function AdminReportsPage() {
   }
 
   useEffect(() => {
-    const t = getAdminToken().trim();
+    const t = getAdminToken();
+
     if (!t) {
       router.replace("/admin/login");
       return;
     }
 
-    tokenRef.current = t;
+    setToken(t);
 
-    // Initial load: load using the same function (one source of truth)
+    // Load open by default
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    loadReports("open");
+    (async () => {
+      setLoading(true);
+      try {
+        const items = await fetchReportsByStatus(t, "open");
+        setReports(items);
+        setStatusFilter("open");
+        setErr(null);
+      } catch (e: any) {
+        setErr(e?.message || "Failed to load reports.");
+        setReports([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
@@ -243,7 +329,6 @@ export default function AdminReportsPage() {
               onChange={(e) => {
                 const v = e.target.value as "open" | "resolved" | "all";
                 setStatusFilter(v);
-                // eslint-disable-next-line @typescript-eslint/no-floating-promises
                 loadReports(v);
               }}
               style={{
@@ -260,15 +345,7 @@ export default function AdminReportsPage() {
               <option value="all">All</option>
             </select>
 
-            <button
-              type="button"
-              style={primaryBtn}
-              onClick={() => {
-                // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                loadReports();
-              }}
-              disabled={loading}
-            >
+            <button type="button" style={primaryBtn} onClick={() => loadReports()} disabled={loading}>
               {loading ? "Loading..." : "Refresh"}
             </button>
           </div>
@@ -313,10 +390,10 @@ export default function AdminReportsPage() {
                     const status = (r.status || "open").toLowerCase();
                     const busy = workingId === r.id;
 
-                    const targetUser = r.target_user_id ?? r.reported_user_id ?? null;
-                    const targetProfile = r.target_profile_id ?? r.reported_profile_id ?? r.profile_id ?? null;
-                    const targetThread = r.target_thread_id ?? r.thread_id ?? null;
-                    const targetMessage = r.target_message_id ?? r.message_id ?? null;
+                    const targetUser = r.reported_user_id || r.target_user_id;
+                    const targetProfile = r.reported_profile_id || r.profile_id || r.target_profile_id;
+                    const targetThread = r.thread_id || r.target_thread_id;
+                    const targetMessage = r.message_id || r.target_message_id;
 
                     return (
                       <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
@@ -329,7 +406,9 @@ export default function AdminReportsPage() {
 
                         <td style={{ padding: "10px 8px" }}>
                           <div style={{ fontWeight: 900 }}>{r.category || "—"}</div>
-                          <div style={{ fontSize: 12, color: "#333", marginTop: 4 }}>{r.reason || "—"}</div>
+                          <div style={{ fontSize: 12, color: "#333", marginTop: 4 }}>
+                            {r.reason || "—"}
+                          </div>
                         </td>
 
                         <td style={{ padding: "10px 8px", maxWidth: 520 }}>
@@ -377,10 +456,7 @@ export default function AdminReportsPage() {
                                 cursor: busy ? "not-allowed" : "pointer",
                                 opacity: busy ? 0.7 : 1,
                               }}
-                              onClick={() => {
-                                // eslint-disable-next-line @typescript-eslint/no-floating-promises
-                                resolveReport(r.id);
-                              }}
+                              onClick={() => resolveReport(r.id)}
                               disabled={busy}
                               title="Resolve this report"
                             >
@@ -400,7 +476,8 @@ export default function AdminReportsPage() {
         </div>
 
         <div style={{ marginTop: 12, color: "#777", fontSize: 12 }}>
-          This page pulls from <code>/admin/reports</code>. Resolving calls <code>/admin/reports/&lt;id&gt;/resolve</code>.
+          This page pulls from <code>/admin/reports</code>. Resolving calls{" "}
+          <code>/admin/reports/&lt;id&gt;/resolve</code>.
         </div>
       </div>
     </main>
