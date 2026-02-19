@@ -3134,7 +3134,6 @@ def admin_list_reports(
 
     return {"items": items}
 
-
 @app.post("/admin/reports/{report_id}/resolve")
 def admin_resolve_report(
     report_id: int,
@@ -3151,18 +3150,31 @@ def admin_resolve_report(
     note = (req.admin_note or "").strip() or None
 
     with engine.begin() as conn:
-        updated = conn.execute(
-            text(
-                """
+        note_col = _reports_note_column(conn)
+
+        if note_col:
+            sql = text(
+                f"""
                 UPDATE reports
                 SET status = :status,
-                    admin_note = :admin_note,
+                    {note_col} = :note,
                     resolved_at = CASE WHEN :status = 'resolved' THEN NOW() ELSE NULL END
                 WHERE id = :id
                 """
-            ),
-            {"id": int(report_id), "status": status, "admin_note": note},
-        ).rowcount
+            )
+            params = {"id": int(report_id), "status": status, "note": note}
+        else:
+            sql = text(
+                """
+                UPDATE reports
+                SET status = :status,
+                    resolved_at = CASE WHEN :status = 'resolved' THEN NOW() ELSE NULL END
+                WHERE id = :id
+                """
+            )
+            params = {"id": int(report_id), "status": status}
+
+        updated = conn.execute(sql, params).rowcount
 
     if not updated:
         raise HTTPException(status_code=404, detail="Report not found")
