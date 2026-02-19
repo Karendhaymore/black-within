@@ -1180,9 +1180,14 @@ async def allow_preflight(request: Request, call_next):
         return Response(status_code=200)
     return await call_next(request)
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "https://meetblackwithin.com",
+        "http://localhost:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
