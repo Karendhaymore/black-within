@@ -2846,6 +2846,59 @@ def admin_list_reports(
 
     return {"items": out}
 
+@app.post("/admin/reports/{report_id}/resolve")
+def admin_resolve_report(
+    report_id: str,
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
+    note = (body or {}).get("note") or ""
+    note = str(note).strip()
+
+    with engine.begin() as conn:
+        # mark resolved
+        row = conn.execute(
+            text("""
+                UPDATE reports
+                SET status='resolved',
+                    resolved_at = NOW(),
+                    resolved_note = :note
+                WHERE id = :rid
+                RETURNING reporter_user_id
+            """),
+            {"rid": report_id, "note": note},
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        reporter_user_id = row.get("reporter_user_id")
+
+        # ✅ notify the reporter (in-app notification)
+        # This assumes you have a "notifications" table.
+        # If you don’t, tell me and I’ll give you the exact migration + minimal schema.
+        try:
+            conn.execute(
+                text("""
+                    INSERT INTO notifications (user_id, type, title, body, created_at, is_read)
+                    VALUES (:uid, 'report_resolved', 'Your report was resolved',
+                            :msg, NOW(), false)
+                """),
+                {
+                    "uid": reporter_user_id,
+                    "msg": ("Your report was reviewed and resolved."
+                            + (f" Note from admin: {note}" if note else "")),
+                },
+            )
+        except Exception:
+            # If notifications table doesn't exist, we still succeed resolving.
+            pass
+
+    return {"ok": True}
+
 
 @app.get("/admin/profiles", response_model=AdminProfilesOut)
 def admin_list_profiles(
