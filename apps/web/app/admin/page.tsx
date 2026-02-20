@@ -921,5 +921,88 @@ export default function AdminDashboardPage() {
         </div>
       </div>
     </main>
+
+    {msgOpen && msgTargetProfile ? (
+  <div
+    onClick={() => setMsgOpen(false)}
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.35)",
+      display: "grid",
+      placeItems: "center",
+      padding: 20,
+      zIndex: 50,
+    }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: "100%",
+        maxWidth: 520,
+        background: "white",
+        borderRadius: 16,
+        border: "1px solid #eee",
+        padding: 16,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Send Admin Message</div>
+          <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>
+            To: <b>{msgTargetProfile.displayName}</b> • Profile:{" "}
+            <code>{msgTargetProfile.profile_id}</code>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          style={dangerBtn}
+          onClick={() => setMsgOpen(false)}
+        >
+          Close
+        </button>
+      </div>
+
+      <textarea
+        value={msgText}
+        onChange={(e) => setMsgText(e.target.value)}
+        placeholder="Write your message…"
+        style={{
+          width: "100%",
+          marginTop: 12,
+          minHeight: 130,
+          padding: 12,
+          borderRadius: 12,
+          border: "1px solid #ccc",
+          resize: "vertical",
+        }}
+      />
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+        <button
+          type="button"
+          style={btn}
+          disabled={msgSending || !msgText.trim()}
+          onClick={async () => {
+            try {
+              setMsgSending(true);
+              await apiAdminSendMessage(token, msgTargetProfile.profile_id, msgText.trim());
+              showToast("Message sent.");
+              setMsgOpen(false);
+            } catch (e: any) {
+              alert(e?.message || "Failed to send message.");
+            } finally {
+              setMsgSending(false);
+            }
+          }}
+        >
+          {msgSending ? "Sending..." : "Send"}
+        </button>
+      </div>
+    </div>
+  </div>
+) : null}
+
   );
 }
