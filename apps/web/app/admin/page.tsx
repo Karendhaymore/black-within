@@ -883,6 +883,21 @@ export default function AdminDashboardPage() {
                           {p.is_banned ? "Unban" : "Ban"}
                         </button>
                       </td>
+                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                        <button
+                          type="button"
+                          style={btn}
+                          disabled={busy}
+                          onClick={() => {
+                            setMsgTargetProfile(p);
+                            setMsgText("");
+                            setMsgOpen(true);
+                          }}
+                        >
+                          Message
+                        </button>
+                      </td>
+
                     </tr>
                   );
                 })}
