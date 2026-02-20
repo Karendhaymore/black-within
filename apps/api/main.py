@@ -2834,6 +2834,14 @@ def admin_send_message_to_user(
 
     return {"ok": True}
 
+@app.post("/admin/messages/send")
+def admin_messages_send_alias(
+    req: AdminSendMessageRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    # This makes /admin/messages/send work, using the SAME logic as /admin/users/message
+    return admin_send_message_to_user(req, authorization=authorization, x_admin_token=x_admin_token)
 
 @app.get("/admin/me", response_model=AdminMeOut)
 def admin_me(
