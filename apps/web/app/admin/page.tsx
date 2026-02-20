@@ -195,6 +195,11 @@ export default function AdminDashboardPage() {
   const [query, setQuery] = useState("");
   const [workingId, setWorkingId] = useState<string | null>(null);
 
+  const [msgOpen, setMsgOpen] = useState(false);
+  const [msgTargetProfile, setMsgTargetProfile] = useState<AdminProfileRow | null>(null);
+  const [msgText, setMsgText] = useState("");
+  const [msgSending, setMsgSending] = useState(false);
+
   // ---- Reports state + polling ----
   const [reportCounts, setReportCounts] = useState<{ open: number; resolved: number }>({
     open: 0,
