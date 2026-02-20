@@ -154,6 +154,23 @@ async function apiAdminBan(token: string, profile_id: string, banned: boolean, r
   });
 }
 
+async function apiAdminSendMessage(
+  token: string,
+  target_profile_id: string,
+  text: string
+) {
+  const res = await fetch(`${API_BASE}/admin/messages/send`, {
+    method: "POST",
+    headers: buildAdminHeaders(token),
+    body: JSON.stringify({
+      target_profile_id,
+      text,
+    }),
+  });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return res.json().catch(() => ({}));
+}
+
 // ---- Reports API helpers ----
 
 async function apiAdminReportsCount(adminToken: string) {
