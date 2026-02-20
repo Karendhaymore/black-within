@@ -154,11 +154,7 @@ async function apiAdminBan(token: string, profile_id: string, banned: boolean, r
   });
 }
 
-async function apiAdminSendMessage(
-  token: string,
-  target_profile_id: string,
-  text: string
-) {
+async function apiAdminSendMessage(token: string, target_profile_id: string, text: string) {
   const res = await fetch(`${API_BASE}/admin/messages/send`, {
     method: "POST",
     headers: buildAdminHeaders(token),
@@ -212,6 +208,7 @@ export default function AdminDashboardPage() {
   const [query, setQuery] = useState("");
   const [workingId, setWorkingId] = useState<string | null>(null);
 
+  // ✅ Message modal state
   const [msgOpen, setMsgOpen] = useState(false);
   const [msgTargetProfile, setMsgTargetProfile] = useState<AdminProfileRow | null>(null);
   const [msgText, setMsgText] = useState("");
@@ -224,11 +221,9 @@ export default function AdminDashboardPage() {
   });
   const [openReports, setOpenReports] = useState<ReportItem[]>([]);
 
-  // ✅ REQUIRED STATES (added)
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportsError, setReportsError] = useState<string | null>(null);
 
-  // ✅ Prevent overlapping report refresh calls (fixes stale-closure polling overlaps)
   const reportsLoadingRef = useRef(false);
 
   const adminToken = token;
@@ -283,9 +278,7 @@ export default function AdminDashboardPage() {
     }
   }
 
-  // ✅ REPLACE refreshReports WITH THIS (updated to setOpenReports)
   async function refreshReports() {
-    // IMPORTANT: use a ref to prevent overlap even if polling closure has stale state
     if (reportsLoadingRef.current) return;
     reportsLoadingRef.current = true;
 
@@ -319,15 +312,14 @@ export default function AdminDashboardPage() {
     }
   }
 
-  // keep counts updating (so "Open/Resolved" stays accurate)
   async function refreshReportCountsOnly() {
     const t = (adminToken || "").trim();
     if (!t) return;
     try {
       const counts = await apiAdminReportsCount(t);
       setReportCounts(counts);
-    } catch (e: any) {
-      // don't clobber reportsError here; keep it tied to refreshReports
+    } catch {
+      // keep quiet
     }
   }
 
@@ -340,11 +332,9 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (!adminToken) return;
 
-    // initial
     refreshReportCountsOnly();
     refreshReports();
 
-    // polling
     const t = window.setInterval(() => {
       refreshReportCountsOnly();
       refreshReports();
@@ -398,611 +388,610 @@ export default function AdminDashboardPage() {
   };
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "2rem",
-        background: "#fff",
-        display: "grid",
-        placeItems: "start center",
-      }}
-    >
-      <div style={{ width: "100%", maxWidth: 1100 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: "1rem",
-            flexWrap: "wrap",
-            alignItems: "flex-start",
-          }}
-        >
-          <div>
-            <h1 style={{ fontSize: "2.2rem", marginBottom: 6 }}>Admin Dashboard</h1>
-            <div style={{ color: "#666" }}>
-              Profiles: <b>{stats.total}</b> • Visible: <b>{stats.available}</b> • Banned:{" "}
-              <b>{stats.banned}</b>
+    <>
+      <main
+        style={{
+          minHeight: "100vh",
+          padding: "2rem",
+          background: "#fff",
+          display: "grid",
+          placeItems: "start center",
+        }}
+      >
+        <div style={{ width: "100%", maxWidth: 1100 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "1rem",
+              flexWrap: "wrap",
+              alignItems: "flex-start",
+            }}
+          >
+            <div>
+              <h1 style={{ fontSize: "2.2rem", marginBottom: 6 }}>Admin Dashboard</h1>
+              <div style={{ color: "#666" }}>
+                Profiles: <b>{stats.total}</b> • Visible: <b>{stats.available}</b> • Banned:{" "}
+                <b>{stats.banned}</b>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Link href="/discover" style={{ ...btn, textDecoration: "none", color: "inherit" }}>
+                Discover
+              </Link>
+              <Link href="/profile" style={{ ...btn, textDecoration: "none", color: "inherit" }}>
+                My Profile
+              </Link>
+
+              <Link
+                href="/admin/users/create-free"
+                style={{
+                  padding: "8px 12px",
+                  border: "1px solid #ddd",
+                  borderRadius: 10,
+                  fontWeight: 700,
+                  textDecoration: "none",
+                }}
+              >
+                Create Free User
+              </Link>
+
+              <Link
+                href="/admin/reports"
+                style={{
+                  padding: "8px 12px",
+                  border: "1px solid #ddd",
+                  borderRadius: 10,
+                  fontWeight: 700,
+                  textDecoration: "none",
+                }}
+              >
+                View Reports
+              </Link>
+
+              <button type="button" style={btn} onClick={() => refresh()} disabled={loading}>
+                {loading ? "Loading..." : "Refresh"}
+              </button>
+
+              <button
+                type="button"
+                style={dangerBtn}
+                onClick={() => {
+                  clearAdminToken();
+                  showToast("Signed out.");
+                  router.replace("/admin/login");
+                }}
+              >
+                Sign out
+              </button>
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Link href="/discover" style={{ ...btn, textDecoration: "none", color: "inherit" }}>
-              Discover
-            </Link>
-            <Link href="/profile" style={{ ...btn, textDecoration: "none", color: "inherit" }}>
-              My Profile
-            </Link>
-
-            <Link
-              href="/admin/users/create-free"
+          {apiError && (
+            <div
               style={{
-                padding: "8px 12px",
-                border: "1px solid #ddd",
-                borderRadius: 10,
-                fontWeight: 700,
-                textDecoration: "none",
+                marginTop: "0.9rem",
+                padding: "0.85rem",
+                borderRadius: 12,
+                border: "1px solid #f0c9c9",
+                background: "#fff7f7",
+                color: "#7a2d2d",
+                whiteSpace: "pre-wrap",
               }}
             >
-              Create Free User
-            </Link>
+              <b>Admin API notice:</b> {apiError}
+            </div>
+          )}
 
-            <Link
-              href="/admin/reports"
+          {toast && (
+            <div
               style={{
-                padding: "8px 12px",
-                border: "1px solid #ddd",
+                marginTop: "0.9rem",
+                padding: "0.75rem",
                 borderRadius: 10,
-                fontWeight: 700,
-                textDecoration: "none",
+                border: "1px solid #cfe7cf",
+                background: "#f6fff6",
               }}
             >
-              View Reports
-            </Link>
+              {toast}
+            </div>
+          )}
 
-            <button type="button" style={btn} onClick={() => refresh()} disabled={loading}>
-              {loading ? "Loading..." : "Refresh"}
-            </button>
+          {/* -------- Reports card -------- */}
+          <div style={{ border: "1px solid #eee", borderRadius: 16, padding: "1rem", marginTop: "1rem" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>Reports</div>
+                <div style={{ color: "#666", marginTop: 4 }}>
+                  Open: <b>{reportCounts.open}</b> • Resolved: <b>{reportCounts.resolved}</b>
+                </div>
 
-            <button
-              type="button"
-              style={dangerBtn}
-              onClick={() => {
-                clearAdminToken();
-                showToast("Signed out.");
-                router.replace("/admin/login");
-              }}
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-
-        {apiError && (
-          <div
-            style={{
-              marginTop: "0.9rem",
-              padding: "0.85rem",
-              borderRadius: 12,
-              border: "1px solid #f0c9c9",
-              background: "#fff7f7",
-              color: "#7a2d2d",
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            <b>Admin API notice:</b> {apiError}
-          </div>
-        )}
-
-        {toast && (
-          <div
-            style={{
-              marginTop: "0.9rem",
-              padding: "0.75rem",
-              borderRadius: 10,
-              border: "1px solid #cfe7cf",
-              background: "#f6fff6",
-            }}
-          >
-            {toast}
-          </div>
-        )}
-
-        {/* -------- Reports card -------- */}
-        <div style={{ border: "1px solid #eee", borderRadius: 16, padding: "1rem", marginTop: "1rem" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <div>
-              <div style={{ fontWeight: 900, fontSize: 18 }}>Reports</div>
-              <div style={{ color: "#666", marginTop: 4 }}>
-                Open: <b>{reportCounts.open}</b> • Resolved: <b>{reportCounts.resolved}</b>
+                {reportsError ? (
+                  <div style={{ marginTop: 8, color: "#b00020", fontWeight: 700 }}>{reportsError}</div>
+                ) : null}
               </div>
 
-              {/* ✅ error display (updated) */}
-              {reportsError ? (
-                <div style={{ marginTop: 8, color: "#b00020", fontWeight: 700 }}>{reportsError}</div>
-              ) : null}
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  refreshReports();
+                }}
+                disabled={reportsLoading}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #ddd",
+                  background: reportsLoading ? "#f3f3f3" : "white",
+                  cursor: reportsLoading ? "not-allowed" : "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                {reportsLoading ? "Refreshing..." : "Refresh reports"}
+              </button>
             </div>
 
-            {/* ✅ clickable + visible loading (updated) */}
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                refreshReports();
-              }}
-              disabled={reportsLoading}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "1px solid #ddd",
-                background: reportsLoading ? "#f3f3f3" : "white",
-                cursor: reportsLoading ? "not-allowed" : "pointer",
-                fontWeight: 700,
-              }}
-            >
-              {reportsLoading ? "Refreshing..." : "Refresh reports"}
-            </button>
+            {openReports.length > 0 ? (
+              <div style={{ marginTop: 12, overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", color: "#666", fontSize: 12 }}>
+                      <th style={{ padding: "10px 8px" }}>When</th>
+                      <th style={{ padding: "10px 8px" }}>Category</th>
+                      <th style={{ padding: "10px 8px" }}>Reason</th>
+                      <th style={{ padding: "10px 8px" }}>Target</th>
+                      <th style={{ padding: "10px 8px" }}>Details</th>
+                      <th style={{ padding: "10px 8px" }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {openReports.map((r) => (
+                      <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
+                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                          {new Date(r.created_at).toLocaleString()}
+                        </td>
+                        <td style={{ padding: "10px 8px" }}>{r.category}</td>
+                        <td style={{ padding: "10px 8px" }}>{r.reason}</td>
+                        <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
+                          {r.reported_user_id ? (
+                            <>
+                              user: <b>{r.reported_user_id}</b>
+                            </>
+                          ) : null}
+                          {r.reported_profile_id ? (
+                            <div>
+                              profile: <b>{r.reported_profile_id}</b>
+                            </div>
+                          ) : null}
+                          {r.thread_id ? (
+                            <div>
+                              thread: <b>{r.thread_id}</b>
+                            </div>
+                          ) : null}
+                          {r.message_id ? (
+                            <div>
+                              msg: <b>{r.message_id}</b>
+                            </div>
+                          ) : null}
+                        </td>
+                        <td style={{ padding: "10px 8px", maxWidth: 420 }}>
+                          <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>
+                            {r.details || "—"}
+                          </div>
+                        </td>
+                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                          <button
+                            onClick={async () => {
+                              const note = window.prompt("Resolve note (optional):", "");
+                              try {
+                                await apiAdminResolveReport(adminToken, r.id, note || "");
+                                await refreshReports();
+                                await refreshReportCountsOnly();
+                              } catch (e: any) {
+                                alert(e?.message || "Resolve failed");
+                              }
+                            }}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              border: "1px solid #ddd",
+                              background: "white",
+                              fontWeight: 800,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Resolve
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ marginTop: 12, color: "#666" }}>No open reports 🎉</div>
+            )}
           </div>
 
-          {openReports.length > 0 ? (
+          <div style={{ ...card, marginTop: "1.25rem" }}>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Admin Token (stored locally)</div>
+            <div style={{ color: "#666", fontSize: 13, marginBottom: 10 }}>
+              This page sends your token as <code>X-Admin-Token</code> and <code>Authorization</code>.
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <input
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                placeholder="Admin token…"
+                style={{
+                  flex: 1,
+                  minWidth: 280,
+                  padding: "0.65rem 0.75rem",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                }}
+              />
+              <button
+                type="button"
+                style={btn}
+                onClick={() => {
+                  const t = tokenInput.trim();
+                  if (!t) return;
+                  setAdminToken(t);
+                  setToken(t);
+                  showToast("Token updated.");
+                }}
+              >
+                Save token
+              </button>
+            </div>
+          </div>
+
+          <div style={{ ...card, marginTop: "1.25rem" }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ fontWeight: 800 }}>Profiles</div>
+              <div style={{ flex: 1 }} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name, city, state, user_id, profile_id…"
+                style={{
+                  width: 420,
+                  maxWidth: "100%",
+                  padding: "0.65rem 0.75rem",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                }}
+              />
+            </div>
+
             <div style={{ marginTop: 12, overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                 <thead>
-                  <tr style={{ textAlign: "left", color: "#666", fontSize: 12 }}>
-                    <th style={{ padding: "10px 8px" }}>When</th>
-                    <th style={{ padding: "10px 8px" }}>Category</th>
-                    <th style={{ padding: "10px 8px" }}>Reason</th>
-                    <th style={{ padding: "10px 8px" }}>Target</th>
-                    <th style={{ padding: "10px 8px" }}>Details</th>
-                    <th style={{ padding: "10px 8px" }}></th>
+                  <tr style={{ textAlign: "left" }}>
+                    <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>User</th>
+                    <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Profile</th>
+                    <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Visible</th>
+                    <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Photos</th>
+                    <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Activity</th>
+                    <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Ban</th>
+                    <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Message</th>
                   </tr>
                 </thead>
+
                 <tbody>
-                  {openReports.map((r) => (
-                    <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
-                      <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-                        {new Date(r.created_at).toLocaleString()}
-                      </td>
-                      <td style={{ padding: "10px 8px" }}>{r.category}</td>
-                      <td style={{ padding: "10px 8px" }}>{r.reason}</td>
-                      <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
-                        {r.reported_user_id ? (
-                          <>
-                            user: <b>{r.reported_user_id}</b>
-                          </>
-                        ) : null}
-                        {r.reported_profile_id ? (
+                  {filtered.map((p) => {
+                    const busy = workingId === p.profile_id;
+                    const likes = p.likes_count ?? 0;
+                    const saved = p.saved_count ?? 0;
+                    const threads = p.threads_count ?? 0;
+
+                    return (
+                      <tr key={p.profile_id}>
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                          <div style={{ fontWeight: 800 }}>{p.displayName}</div>
+                          <div style={{ color: "#666", fontSize: 12 }}>{p.owner_user_id}</div>
+                        </td>
+
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
                           <div>
-                            profile: <b>{r.reported_profile_id}</b>
+                            {p.age}, {p.city}, {p.stateUS}
                           </div>
-                        ) : null}
-                        {r.thread_id ? (
-                          <div>
-                            thread: <b>{r.thread_id}</b>
+                          <div style={{ color: "#666", fontSize: 12 }}>{p.profile_id}</div>
+                          {p.is_banned ? (
+                            <div style={{ color: "#7a2d2d", fontSize: 12, marginTop: 4 }}>
+                              <b>BANNED</b>
+                              {p.banned_reason ? ` — ${p.banned_reason}` : ""}
+                            </div>
+                          ) : null}
+                        </td>
+
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                          <button
+                            type="button"
+                            style={{
+                              ...btn,
+                              border: "1px solid #111",
+                              background: p.isAvailable ? "#111" : "white",
+                              color: p.isAvailable ? "white" : "#111",
+                              opacity: busy ? 0.7 : 1,
+                              cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                            disabled={busy}
+                            onClick={async () => {
+                              try {
+                                setApiError(null);
+                                setWorkingId(p.profile_id);
+                                await apiAdminSetAvailable(token, p.profile_id, !p.isAvailable);
+                                showToast(p.isAvailable ? "Hidden in Discover." : "Shown in Discover.");
+                                await refresh();
+                              } catch (e: any) {
+                                setApiError(e?.message || "Could not update availability.");
+                              } finally {
+                                setWorkingId(null);
+                              }
+                            }}
+                          >
+                            {p.isAvailable ? "Visible" : "Hidden"}
+                          </button>
+                        </td>
+
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                            {p.photo ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={p.photo}
+                                alt="p1"
+                                style={{
+                                  width: 42,
+                                  height: 42,
+                                  borderRadius: 10,
+                                  objectFit: "cover",
+                                  border: "1px solid #eee",
+                                }}
+                              />
+                            ) : (
+                              <div style={{ width: 42, height: 42, borderRadius: 10, border: "1px dashed #ccc" }} />
+                            )}
+
+                            {p.photo2 ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={p.photo2}
+                                alt="p2"
+                                style={{
+                                  width: 42,
+                                  height: 42,
+                                  borderRadius: 10,
+                                  objectFit: "cover",
+                                  border: "1px solid #eee",
+                                }}
+                              />
+                            ) : (
+                              <div style={{ width: 42, height: 42, borderRadius: 10, border: "1px dashed #ccc" }} />
+                            )}
                           </div>
-                        ) : null}
-                        {r.message_id ? (
-                          <div>
-                            msg: <b>{r.message_id}</b>
+
+                          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              style={dangerBtn}
+                              disabled={busy || !p.photo}
+                              onClick={async () => {
+                                const ok = window.confirm("Remove Photo 1 from this profile?");
+                                if (!ok) return;
+
+                                try {
+                                  setApiError(null);
+                                  setWorkingId(p.profile_id);
+                                  await apiAdminRemovePhoto(token, p.profile_id, 1);
+                                  showToast("Photo 1 removed.");
+                                  await refresh();
+                                } catch (e: any) {
+                                  setApiError(e?.message || "Could not remove photo 1.");
+                                } finally {
+                                  setWorkingId(null);
+                                }
+                              }}
+                            >
+                              Remove P1
+                            </button>
+
+                            <button
+                              type="button"
+                              style={dangerBtn}
+                              disabled={busy || !p.photo2}
+                              onClick={async () => {
+                                const ok = window.confirm("Remove Photo 2 from this profile?");
+                                if (!ok) return;
+
+                                try {
+                                  setApiError(null);
+                                  setWorkingId(p.profile_id);
+                                  await apiAdminRemovePhoto(token, p.profile_id, 2);
+                                  showToast("Photo 2 removed.");
+                                  await refresh();
+                                } catch (e: any) {
+                                  setApiError(e?.message || "Could not remove photo 2.");
+                                } finally {
+                                  setWorkingId(null);
+                                }
+                              }}
+                            >
+                              Remove P2
+                            </button>
                           </div>
-                        ) : null}
-                      </td>
-                      <td style={{ padding: "10px 8px", maxWidth: 420 }}>
-                        <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>
-                          {r.details || "—"}
-                        </div>
-                      </td>
-                      <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-                        <button
-                          onClick={async () => {
-                            const note = window.prompt("Resolve note (optional):", "");
-                            try {
-                              await apiAdminResolveReport(adminToken, r.id, note || "");
-                              await refreshReports();
-                              await refreshReportCountsOnly();
-                            } catch (e: any) {
-                              alert(e?.message || "Resolve failed");
-                            }
-                          }}
-                          style={{
-                            padding: "8px 10px",
-                            borderRadius: 10,
-                            border: "1px solid #ddd",
-                            background: "white",
-                            fontWeight: 800,
-                            cursor: "pointer",
-                          }}
-                        >
-                          Resolve
-                        </button>
+                        </td>
+
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                          <div style={{ color: "#333" }}>
+                            Likes: <b>{likes}</b>
+                          </div>
+                          <div style={{ color: "#333" }}>
+                            Saved: <b>{saved}</b>
+                          </div>
+                          <div style={{ color: "#333" }}>
+                            Threads: <b>{threads}</b>
+                          </div>
+                        </td>
+
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                          <button
+                            type="button"
+                            style={p.is_banned ? btn : dangerBtn}
+                            disabled={busy}
+                            onClick={async () => {
+                              try {
+                                setApiError(null);
+                                setWorkingId(p.profile_id);
+
+                                if (!p.is_banned) {
+                                  const reason =
+                                    window.prompt("Ban reason (optional):", "Violation of community guidelines") ||
+                                    "";
+                                  await apiAdminBan(token, p.profile_id, true, reason);
+                                  showToast("User banned.");
+                                } else {
+                                  const ok = window.confirm("Unban this user?");
+                                  if (!ok) return;
+                                  await apiAdminBan(token, p.profile_id, false, "");
+                                  showToast("User unbanned.");
+                                }
+
+                                await refresh();
+                              } catch (e: any) {
+                                setApiError(e?.message || "Could not update ban.");
+                              } finally {
+                                setWorkingId(null);
+                              }
+                            }}
+                          >
+                            {p.is_banned ? "Unban" : "Ban"}
+                          </button>
+                        </td>
+
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
+                          <button
+                            type="button"
+                            style={btn}
+                            disabled={busy}
+                            onClick={() => {
+                              setMsgTargetProfile(p);
+                              setMsgText("");
+                              setMsgOpen(true);
+                            }}
+                          >
+                            Message
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {!loading && filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ padding: "14px 8px", color: "#666" }}>
+                        No results.
                       </td>
                     </tr>
-                  ))}
+                  ) : null}
                 </tbody>
               </table>
             </div>
-          ) : (
-            <div style={{ marginTop: 12, color: "#666" }}>No open reports 🎉</div>
-          )}
-        </div>
 
-        <div style={{ ...card, marginTop: "1.25rem" }}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Admin Token (stored locally)</div>
-          <div style={{ color: "#666", fontSize: 13, marginBottom: 10 }}>
-            This page sends your token as <code>X-Admin-Token</code> and <code>Authorization</code>.
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <input
-              value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              placeholder="Admin token…"
-              style={{
-                flex: 1,
-                minWidth: 280,
-                padding: "0.65rem 0.75rem",
-                borderRadius: 10,
-                border: "1px solid #ccc",
-              }}
-            />
-            <button
-              type="button"
-              style={btn}
-              onClick={() => {
-                const t = tokenInput.trim();
-                if (!t) return;
-                setAdminToken(t);
-                setToken(t);
-                showToast("Token updated.");
-              }}
-            >
-              Save token
-            </button>
-          </div>
-        </div>
-
-        <div style={{ ...card, marginTop: "1.25rem" }}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ fontWeight: 800 }}>Profiles</div>
-            <div style={{ flex: 1 }} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name, city, state, user_id, profile_id…"
-              style={{
-                width: 420,
-                maxWidth: "100%",
-                padding: "0.65rem 0.75rem",
-                borderRadius: 10,
-                border: "1px solid #ccc",
-              }}
-            />
+            {loading ? <div style={{ marginTop: 12, color: "#666" }}>Loading…</div> : null}
           </div>
 
-          <div style={{ marginTop: 12, overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-              <thead>
-                <tr style={{ textAlign: "left" }}>
-                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>User</th>
-                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Profile</th>
-                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Visible</th>
-                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Photos</th>
-                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Activity</th>
-                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Ban</th>
-                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Message</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filtered.map((p) => {
-                  const busy = workingId === p.profile_id;
-                  const likes = p.likes_count ?? 0;
-                  const saved = p.saved_count ?? 0;
-                  const threads = p.threads_count ?? 0;
-
-                  return (
-                    <tr key={p.profile_id}>
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
-                        <div style={{ fontWeight: 800 }}>{p.displayName}</div>
-                        <div style={{ color: "#666", fontSize: 12 }}>{p.owner_user_id}</div>
-                      </td>
-
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
-                        <div>
-                          {p.age}, {p.city}, {p.stateUS}
-                        </div>
-                        <div style={{ color: "#666", fontSize: 12 }}>{p.profile_id}</div>
-                        {p.is_banned ? (
-                          <div style={{ color: "#7a2d2d", fontSize: 12, marginTop: 4 }}>
-                            <b>BANNED</b>
-                            {p.banned_reason ? ` — ${p.banned_reason}` : ""}
-                          </div>
-                        ) : null}
-                      </td>
-
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
-                        <button
-                          type="button"
-                          style={{
-                            ...btn,
-                            border: "1px solid #111",
-                            background: p.isAvailable ? "#111" : "white",
-                            color: p.isAvailable ? "white" : "#111",
-                            opacity: busy ? 0.7 : 1,
-                            cursor: busy ? "not-allowed" : "pointer",
-                          }}
-                          disabled={busy}
-                          onClick={async () => {
-                            try {
-                              setApiError(null);
-                              setWorkingId(p.profile_id);
-                              await apiAdminSetAvailable(token, p.profile_id, !p.isAvailable);
-                              showToast(p.isAvailable ? "Hidden in Discover." : "Shown in Discover.");
-                              await refresh();
-                            } catch (e: any) {
-                              setApiError(e?.message || "Could not update availability.");
-                            } finally {
-                              setWorkingId(null);
-                            }
-                          }}
-                        >
-                          {p.isAvailable ? "Visible" : "Hidden"}
-                        </button>
-                      </td>
-
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
-                        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                          {p.photo ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={p.photo}
-                              alt="p1"
-                              style={{
-                                width: 42,
-                                height: 42,
-                                borderRadius: 10,
-                                objectFit: "cover",
-                                border: "1px solid #eee",
-                              }}
-                            />
-                          ) : (
-                            <div style={{ width: 42, height: 42, borderRadius: 10, border: "1px dashed #ccc" }} />
-                          )}
-
-                          {p.photo2 ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={p.photo2}
-                              alt="p2"
-                              style={{
-                                width: 42,
-                                height: 42,
-                                borderRadius: 10,
-                                objectFit: "cover",
-                                border: "1px solid #eee",
-                              }}
-                            />
-                          ) : (
-                            <div style={{ width: 42, height: 42, borderRadius: 10, border: "1px dashed #ccc" }} />
-                          )}
-                        </div>
-
-                        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                          <button
-                            type="button"
-                            style={dangerBtn}
-                            disabled={busy || !p.photo}
-                            onClick={async () => {
-                              const ok = window.confirm("Remove Photo 1 from this profile?");
-                              if (!ok) return;
-
-                              try {
-                                setApiError(null);
-                                setWorkingId(p.profile_id);
-                                await apiAdminRemovePhoto(token, p.profile_id, 1);
-                                showToast("Photo 1 removed.");
-                                await refresh();
-                              } catch (e: any) {
-                                setApiError(e?.message || "Could not remove photo 1.");
-                              } finally {
-                                setWorkingId(null);
-                              }
-                            }}
-                          >
-                            Remove P1
-                          </button>
-
-                          <button
-                            type="button"
-                            style={dangerBtn}
-                            disabled={busy || !p.photo2}
-                            onClick={async () => {
-                              const ok = window.confirm("Remove Photo 2 from this profile?");
-                              if (!ok) return;
-
-                              try {
-                                setApiError(null);
-                                setWorkingId(p.profile_id);
-                                await apiAdminRemovePhoto(token, p.profile_id, 2);
-                                showToast("Photo 2 removed.");
-                                await refresh();
-                              } catch (e: any) {
-                                setApiError(e?.message || "Could not remove photo 2.");
-                              } finally {
-                                setWorkingId(null);
-                              }
-                            }}
-                          >
-                            Remove P2
-                          </button>
-                        </div>
-                      </td>
-
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
-                        <div style={{ color: "#333" }}>
-                          Likes: <b>{likes}</b>
-                        </div>
-                        <div style={{ color: "#333" }}>
-                          Saved: <b>{saved}</b>
-                        </div>
-                        <div style={{ color: "#333" }}>
-                          Threads: <b>{threads}</b>
-                        </div>
-                      </td>
-
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
-                        <button
-                          type="button"
-                          style={p.is_banned ? btn : dangerBtn}
-                          disabled={busy}
-                          onClick={async () => {
-                            try {
-                              setApiError(null);
-                              setWorkingId(p.profile_id);
-
-                              if (!p.is_banned) {
-                                const reason =
-                                  window.prompt(
-                                    "Ban reason (optional):",
-                                    "Violation of community guidelines"
-                                  ) || "";
-                                await apiAdminBan(token, p.profile_id, true, reason);
-                                showToast("User banned.");
-                              } else {
-                                const ok = window.confirm("Unban this user?");
-                                if (!ok) return;
-                                await apiAdminBan(token, p.profile_id, false, "");
-                                showToast("User unbanned.");
-                              }
-
-                              await refresh();
-                            } catch (e: any) {
-                              setApiError(e?.message || "Could not update ban.");
-                            } finally {
-                              setWorkingId(null);
-                            }
-                          }}
-                        >
-                          {p.is_banned ? "Unban" : "Ban"}
-                        </button>
-                      </td>
-                      <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
-                        <button
-                          type="button"
-                          style={btn}
-                          disabled={busy}
-                          onClick={() => {
-                            setMsgTargetProfile(p);
-                            setMsgText("");
-                            setMsgOpen(true);
-                          }}
-                        >
-                          Message
-                        </button>
-                      </td>
-
-                    </tr>
-                  );
-                })}
-
-                {!loading && filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} style={{ padding: "14px 8px", color: "#666" }}>
-                      No results.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-
-          {loading ? <div style={{ marginTop: 12, color: "#666" }}>Loading…</div> : null}
-        </div>
-
-        <div style={{ marginTop: "1rem", color: "#777", fontSize: 12 }}>
-          If any button errors, paste the exact endpoint error message and we’ll align instantly.
-        </div>
-      </div>
-    </main>
-
-    {msgOpen && msgTargetProfile ? (
-  <div
-    onClick={() => setMsgOpen(false)}
-    style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.35)",
-      display: "grid",
-      placeItems: "center",
-      padding: 20,
-      zIndex: 50,
-    }}
-  >
-    <div
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        width: "100%",
-        maxWidth: 520,
-        background: "white",
-        borderRadius: 16,
-        border: "1px solid #eee",
-        padding: 16,
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <div style={{ fontWeight: 900, fontSize: 18 }}>Send Admin Message</div>
-          <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>
-            To: <b>{msgTargetProfile.displayName}</b> • Profile:{" "}
-            <code>{msgTargetProfile.profile_id}</code>
+          <div style={{ marginTop: "1rem", color: "#777", fontSize: 12 }}>
+            If any button errors, paste the exact endpoint error message and we’ll align instantly.
           </div>
         </div>
+      </main>
 
-        <button
-          type="button"
-          style={dangerBtn}
+      {/* ✅ Message Modal (must be inside return, outside main is fine) */}
+      {msgOpen && msgTargetProfile ? (
+        <div
           onClick={() => setMsgOpen(false)}
-        >
-          Close
-        </button>
-      </div>
-
-      <textarea
-        value={msgText}
-        onChange={(e) => setMsgText(e.target.value)}
-        placeholder="Write your message…"
-        style={{
-          width: "100%",
-          marginTop: 12,
-          minHeight: 130,
-          padding: 12,
-          borderRadius: 12,
-          border: "1px solid #ccc",
-          resize: "vertical",
-        }}
-      />
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
-        <button
-          type="button"
-          style={btn}
-          disabled={msgSending || !msgText.trim()}
-          onClick={async () => {
-            try {
-              setMsgSending(true);
-              await apiAdminSendMessage(token, msgTargetProfile.profile_id, msgText.trim());
-              showToast("Message sent.");
-              setMsgOpen(false);
-            } catch (e: any) {
-              alert(e?.message || "Failed to send message.");
-            } finally {
-              setMsgSending(false);
-            }
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "grid",
+            placeItems: "center",
+            padding: 20,
+            zIndex: 50,
           }}
         >
-          {msgSending ? "Sending..." : "Send"}
-        </button>
-      </div>
-    </div>
-  </div>
-) : null}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 560,
+              background: "white",
+              borderRadius: 16,
+              border: "1px solid #eee",
+              padding: 16,
+              boxShadow: "0 10px 40px rgba(0,0,0,0.15)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>Send Admin Message</div>
+                <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>
+                  To: <b>{msgTargetProfile.displayName}</b> • Profile: <code>{msgTargetProfile.profile_id}</code>
+                </div>
+              </div>
 
+              <button type="button" style={dangerBtn} onClick={() => setMsgOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <textarea
+              value={msgText}
+              onChange={(e) => setMsgText(e.target.value)}
+              placeholder="Write your message…"
+              style={{
+                width: "100%",
+                marginTop: 12,
+                minHeight: 140,
+                padding: 12,
+                borderRadius: 12,
+                border: "1px solid #ccc",
+                resize: "vertical",
+                fontSize: 14,
+              }}
+            />
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+              <button
+                type="button"
+                style={btn}
+                disabled={msgSending || !msgText.trim()}
+                onClick={async () => {
+                  try {
+                    setMsgSending(true);
+                    await apiAdminSendMessage(token, msgTargetProfile.profile_id, msgText.trim());
+                    showToast("Message sent.");
+                    setMsgOpen(false);
+                  } catch (e: any) {
+                    alert(e?.message || "Failed to send message.");
+                  } finally {
+                    setMsgSending(false);
+                  }
+                }}
+              >
+                {msgSending ? "Sending..." : "Send"}
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10, color: "#777", fontSize: 12 }}>
+              Tip: click outside this box to close.
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
