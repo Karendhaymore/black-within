@@ -8,21 +8,7 @@ import base64
 import shutil
 import urllib.request
 import urllib.error
-
-from fastapi import Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 import logging
-
-logger = logging.getLogger("uvicorn.error")
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.error(f"VALIDATION ERROR on {request.method} {request.url}: {exc.errors()} | body={exc.body}")
-    return JSONResponse(
-        status_code=422,
-        content={"detail": exc.errors(), "body": exc.body},
-    )
 
 from sqlalchemy import Table
 from sqlalchemy import inspect as sa_inspect
@@ -33,8 +19,9 @@ from typing import List, Optional, Dict, Any, Tuple
 
 import stripe
 from fastapi import FastAPI, HTTPException, Query, Request, Header, UploadFile, File, BackgroundTasks
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from sqlalchemy import (
@@ -59,7 +46,6 @@ from sqlalchemy.exc import IntegrityError
 # SendGrid (still supported, optional)
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
-
 
 # -----------------------------
 # Config
