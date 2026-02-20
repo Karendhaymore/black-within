@@ -686,6 +686,7 @@ export default function AdminDashboardPage() {
                   <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Photos</th>
                   <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Activity</th>
                   <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Ban</th>
+                  <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Message</th>
                 </tr>
               </thead>
 
