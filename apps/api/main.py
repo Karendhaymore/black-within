@@ -3639,3 +3639,103 @@ async def stripe_webhook(request: Request):
             return {"status": "success"}
 
     return {"status": "ignored"}
+from pydantic import BaseModel
+from fastapi import HTTPException, Depends
+from sqlalchemy import text
+import os, uuid
+from datetime import datetime
+
+# -------------------------
+# Config: system admin user
+# -------------------------
+ADMIN_SYSTEM_USER_ID = os.getenv("ADMIN_SYSTEM_USER_ID", "").strip()
+
+class AdminSendMessageIn(BaseModel):
+    target_profile_id: str
+    text: str
+
+
+# NOTE:
+# Replace `require_admin` below with YOUR existing admin auth dependency/function.
+# Example names people use: require_admin, admin_required, get_admin_user, etc.
+def require_admin():
+    # <-- replace this with your real implementation
+    return True
+
+
+@app.post("/admin/messages/send")
+def admin_send_message(req: AdminSendMessageIn, admin=Depends(require_admin)):
+    if not ADMIN_SYSTEM_USER_ID:
+        raise HTTPException(status_code=500, detail="ADMIN_SYSTEM_USER_ID is not set in environment variables.")
+
+    target_profile_id = (req.target_profile_id or "").strip()
+    body = (req.text or "").strip()
+
+    if not target_profile_id:
+        raise HTTPException(status_code=400, detail="target_profile_id is required.")
+    if not body:
+        raise HTTPException(status_code=400, detail="Message text is required.")
+
+    with engine.begin() as conn:
+        # 1) Find the user_id who owns this profile
+        row = conn.execute(
+            text("""
+                SELECT owner_user_id
+                FROM profiles
+                WHERE profile_id = :pid
+                LIMIT 1
+            """),
+            {"pid": target_profile_id},
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Target profile not found.")
+
+        target_user_id = row["owner_user_id"]
+
+        # 2) Get or create a thread between ADMIN_SYSTEM_USER_ID and target_user_id
+        thread = conn.execute(
+            text("""
+                SELECT id
+                FROM threads
+                WHERE (user_a_id = :a AND user_b_id = :b)
+                   OR (user_a_id = :b AND user_b_id = :a)
+                LIMIT 1
+            """),
+            {"a": ADMIN_SYSTEM_USER_ID, "b": target_user_id},
+        ).mappings().first()
+
+        if thread:
+            thread_id = thread["id"]
+        else:
+            thread_id = str(uuid.uuid4())
+            conn.execute(
+                text("""
+                    INSERT INTO threads (id, user_a_id, user_b_id, created_at)
+                    VALUES (:id, :a, :b, :created_at)
+                """),
+                {
+                    "id": thread_id,
+                    "a": ADMIN_SYSTEM_USER_ID,
+                    "b": target_user_id,
+                    "created_at": datetime.utcnow(),
+                },
+            )
+
+        # 3) Insert the message
+        message_id = str(uuid.uuid4())
+        conn.execute(
+            text("""
+                INSERT INTO messages (id, thread_id, sender_user_id, text, created_at)
+                VALUES (:id, :thread_id, :sender_user_id, :text, :created_at)
+            """),
+            {
+                "id": message_id,
+                "thread_id": thread_id,
+                "sender_user_id": ADMIN_SYSTEM_USER_ID,
+                "text": body,
+                "created_at": datetime.utcnow(),
+            },
+        )
+
+    return {"ok": True, "thread_id": thread_id, "message_id": message_id}
