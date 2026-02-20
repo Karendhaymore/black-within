@@ -154,13 +154,18 @@ async function apiAdminBan(token: string, profile_id: string, banned: boolean, r
   });
 }
 
-async function apiAdminSendMessage(token: string, target_profile_id: string, text: string) {
+/**
+ * ✅ FIXED: Backend expects { user_id, subject, body }
+ * (NOT { target_profile_id, text })
+ */
+async function apiAdminSendMessage(token: string, user_id: string, subject: string, body: string) {
   const res = await fetch(`${API_BASE}/admin/messages/send`, {
     method: "POST",
     headers: buildAdminHeaders(token),
     body: JSON.stringify({
-      target_profile_id,
-      text,
+      user_id,
+      subject,
+      body,
     }),
   });
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
@@ -213,6 +218,9 @@ export default function AdminDashboardPage() {
   const [msgTargetProfile, setMsgTargetProfile] = useState<AdminProfileRow | null>(null);
   const [msgText, setMsgText] = useState("");
   const [msgSending, setMsgSending] = useState(false);
+
+  // Optional: allow subject (defaults if left blank)
+  const [msgSubject, setMsgSubject] = useState("Admin message");
 
   // ---- Reports state + polling ----
   const [reportCounts, setReportCounts] = useState<{ open: number; resolved: number }>({
@@ -879,6 +887,7 @@ export default function AdminDashboardPage() {
                             onClick={() => {
                               setMsgTargetProfile(p);
                               setMsgText("");
+                              setMsgSubject("Admin message");
                               setMsgOpen(true);
                             }}
                           >
@@ -909,7 +918,7 @@ export default function AdminDashboardPage() {
         </div>
       </main>
 
-      {/* ✅ Message Modal (must be inside return, outside main is fine) */}
+      {/* ✅ Message Modal */}
       {msgOpen && msgTargetProfile ? (
         <div
           onClick={() => setMsgOpen(false)}
@@ -939,7 +948,13 @@ export default function AdminDashboardPage() {
               <div>
                 <div style={{ fontWeight: 900, fontSize: 18 }}>Send Admin Message</div>
                 <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>
-                  To: <b>{msgTargetProfile.displayName}</b> • Profile: <code>{msgTargetProfile.profile_id}</code>
+                  To: <b>{msgTargetProfile.displayName}</b>
+                  <div style={{ marginTop: 4 }}>
+                    User ID: <code>{msgTargetProfile.owner_user_id}</code>
+                  </div>
+                  <div style={{ marginTop: 4 }}>
+                    Profile: <code>{msgTargetProfile.profile_id}</code>
+                  </div>
                 </div>
               </div>
 
@@ -947,6 +962,21 @@ export default function AdminDashboardPage() {
                 Close
               </button>
             </div>
+
+            {/* Subject (optional but matches backend requirement) */}
+            <input
+              value={msgSubject}
+              onChange={(e) => setMsgSubject(e.target.value)}
+              placeholder="Subject…"
+              style={{
+                width: "100%",
+                marginTop: 12,
+                padding: 10,
+                borderRadius: 12,
+                border: "1px solid #ccc",
+                fontSize: 14,
+              }}
+            />
 
             <textarea
               value={msgText}
@@ -972,7 +1002,26 @@ export default function AdminDashboardPage() {
                 onClick={async () => {
                   try {
                     setMsgSending(true);
-                    await apiAdminSendMessage(token, msgTargetProfile.profile_id, msgText.trim());
+
+                    const userId = (msgTargetProfile.owner_user_id || "").trim();
+                    const subject = (msgSubject || "Admin message").trim();
+                    const body = msgText.trim();
+
+                    if (!userId) {
+                      alert("Missing user_id for this profile. Refresh the page and try again.");
+                      return;
+                    }
+                    if (!subject) {
+                      alert("Please enter a subject.");
+                      return;
+                    }
+                    if (!body) {
+                      alert("Please enter a message.");
+                      return;
+                    }
+
+                    await apiAdminSendMessage(token, userId, subject, body);
+
                     showToast("Message sent.");
                     setMsgOpen(false);
                   } catch (e: any) {
@@ -986,9 +1035,7 @@ export default function AdminDashboardPage() {
               </button>
             </div>
 
-            <div style={{ marginTop: 10, color: "#777", fontSize: 12 }}>
-              Tip: click outside this box to close.
-            </div>
+            <div style={{ marginTop: 10, color: "#777", fontSize: 12 }}>Tip: click outside this box to close.</div>
           </div>
         </div>
       ) : null}
