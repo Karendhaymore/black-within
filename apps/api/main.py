@@ -1201,7 +1201,20 @@ class AdminDeleteResponse(BaseModel):
 # -----------------------------
 app = FastAPI(title="Black Within API", version="1.1.5")
 from fastapi.responses import Response
+logger = logging.getLogger("uvicorn.error")
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # This prints exactly why FastAPI is rejecting the request (422)
+    logger.error(
+        f"VALIDATION ERROR on {request.method} {request.url}: "
+        f"errors={exc.errors()} body={exc.body}"
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": exc.body},
+    )
+    
 @app.middleware("http")
 async def allow_preflight(request: Request, call_next):
     # Browsers send an OPTIONS request first for cross-site calls.
