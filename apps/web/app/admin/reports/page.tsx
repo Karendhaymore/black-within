@@ -9,13 +9,21 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
+/**
+ * Change this if your public profile URL is different.
+ * Examples:
+ *  - `/discover/` (default below)
+ *  - `/profile/`
+ *  - `/profiles/`
+ */
+const PUBLIC_PROFILE_PATH_PREFIX = "/discover/";
+
 type ReportItem = {
   id: string;
   created_at: string;
 
   reporter_user_id?: string | null;
 
-  // Some backends use different names for the "reported" user/profile
   reported_user_id?: string | null;
   target_user_id?: string | null;
 
@@ -34,7 +42,6 @@ type ReportItem = {
   details?: string | null;
   status?: string | null;
 
-  // Sometimes present on resolved items
   admin_note?: string | null;
   resolved_at?: string | null;
 };
@@ -97,8 +104,8 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
 }
 
 /**
- * UI uses Open/Closed language.
- * Backend uses open/resolved.
+ * Our UI uses Open/Closed language.
+ * Your backend currently uses open/resolved.
  * So: closed === resolved
  */
 function normalizeRowStatus(s?: string | null): "open" | "closed" {
@@ -125,14 +132,11 @@ export default function AdminReportsPage() {
   }, [reports]);
 
   async function fetchReportsByStatus(t: string, status: "open" | "resolved") {
-    const res = await fetch(
-      `${API_BASE}/admin/reports?status=${encodeURIComponent(status)}&limit=50`,
-      {
-        method: "GET",
-        headers: buildAdminHeaders(t),
-        cache: "no-store",
-      }
-    );
+    const res = await fetch(`${API_BASE}/admin/reports?status=${encodeURIComponent(status)}&limit=50`, {
+      method: "GET",
+      headers: buildAdminHeaders(t),
+      cache: "no-store",
+    });
 
     if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
@@ -182,13 +186,8 @@ export default function AdminReportsPage() {
   }
 
   /**
-   * ✅ Dropdown status changer (Open/Closed)
-   * Uses your EXISTING backend endpoint:
-   * POST /admin/reports/{id}/resolve
-   *
-   * We send:
-   * - Open  => status: "open"
-   * - Closed => status: "resolved"
+   * ✅ Re-opening enabled:
+   * We call the SAME backend endpoint /resolve, but pass status=open or status=resolved.
    */
   async function setReportUiStatus(reportId: string, nextUiStatus: "open" | "closed") {
     const t = token.trim();
@@ -202,40 +201,73 @@ export default function AdminReportsPage() {
     setWorkingId(reportId);
     setErr(null);
 
-    // optimistic UI update
+    // optimistic UI
     setReports((prev) =>
       prev.map((x) =>
-        x.id === reportId
-          ? { ...x, status: nextUiStatus === "closed" ? "resolved" : "open" }
-          : x
+        x.id === reportId ? { ...x, status: nextUiStatus === "closed" ? "resolved" : "open" } : x
       )
     );
 
     try {
       const backendStatus = nextUiStatus === "closed" ? "resolved" : "open";
 
-      const res = await fetch(
-        `${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/resolve`,
-        {
-          method: "POST",
-          headers: buildAdminHeaders(t),
-          body: JSON.stringify({
-            status: backendStatus,
-            admin_note: "",
-            note: "",
-          }),
-        }
-      );
+      const res = await fetch(`${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/resolve`, {
+        method: "POST",
+        headers: buildAdminHeaders(t),
+        body: JSON.stringify({
+          status: backendStatus,
+          admin_note: "",
+          note: "",
+        }),
+      });
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
       await loadReports();
     } catch (e: any) {
-      // revert if failed
+      // revert
       setReports((prev) =>
         prev.map((x) => (x.id === reportId ? { ...x, status: current?.status ?? "open" } : x))
       );
       setErr(e?.message || "Status update failed.");
+    } finally {
+      setWorkingId(null);
+    }
+  }
+
+  /**
+   * Suspend a user from the report row.
+   * (Backend route will be added in main.py below.)
+   */
+  async function suspendUser(userId: string, reportId: string) {
+    const t = token.trim();
+    if (!t) return;
+
+    const ok = window.confirm(
+      `Suspend this user?\n\nUser: ${userId}\nReport: ${reportId}\n\nThey will not be able to use the app until unsuspended.`
+    );
+    if (!ok) return;
+
+    setWorkingId(reportId);
+    setErr(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(userId)}/suspend`, {
+        method: "POST",
+        headers: buildAdminHeaders(t),
+        body: JSON.stringify({
+          reason: `Suspended from report ${reportId}`,
+        }),
+      });
+
+      if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+
+      // optional: auto-close report after suspension
+      // await setReportUiStatus(reportId, "closed");
+
+      alert("User suspended.");
+    } catch (e: any) {
+      setErr(e?.message || "Suspend failed.");
     } finally {
       setWorkingId(null);
     }
@@ -292,6 +324,12 @@ export default function AdminReportsPage() {
     border: "1px solid #111",
     background: "#111",
     color: "white",
+  };
+
+  const dangerBtn: React.CSSProperties = {
+    ...btnBase,
+    border: "1px solid #f0c9c9",
+    background: "#fff7f7",
   };
 
   return (
@@ -382,6 +420,7 @@ export default function AdminReportsPage() {
                     <th style={{ padding: "10px 8px" }}>Details</th>
                     <th style={{ padding: "10px 8px" }}>Target</th>
                     <th style={{ padding: "10px 8px" }}>Reporter</th>
+                    <th style={{ padding: "10px 8px" }}>Actions</th>
                     <th style={{ padding: "10px 8px" }}>Status</th>
                   </tr>
                 </thead>
@@ -391,10 +430,10 @@ export default function AdminReportsPage() {
                     const busy = workingId === r.id;
 
                     const targetUser = r.reported_user_id || r.target_user_id;
-                    const targetProfile =
-                      r.reported_profile_id || r.profile_id || r.target_profile_id;
-                    const targetThread = r.thread_id || r.target_thread_id;
-                    const targetMessage = r.message_id || r.target_message_id;
+                    const targetProfile = r.reported_profile_id || r.profile_id || r.target_profile_id;
+
+                    const publicProfileUrl =
+                      targetProfile ? `${PUBLIC_PROFILE_PATH_PREFIX}${encodeURIComponent(targetProfile)}` : null;
 
                     return (
                       <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
@@ -407,15 +446,11 @@ export default function AdminReportsPage() {
 
                         <td style={{ padding: "10px 8px" }}>
                           <div style={{ fontWeight: 900 }}>{r.category || "—"}</div>
-                          <div style={{ fontSize: 12, color: "#333", marginTop: 4 }}>
-                            {r.reason || "—"}
-                          </div>
+                          <div style={{ fontSize: 12, color: "#333", marginTop: 4 }}>{r.reason || "—"}</div>
                         </td>
 
                         <td style={{ padding: "10px 8px", maxWidth: 520 }}>
-                          <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>
-                            {r.details || "—"}
-                          </div>
+                          <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>{r.details || "—"}</div>
                         </td>
 
                         <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
@@ -428,18 +463,15 @@ export default function AdminReportsPage() {
                           {targetProfile ? (
                             <div>
                               profile: <b>{targetProfile}</b>
-                            </div>
-                          ) : null}
-
-                          {targetThread ? (
-                            <div>
-                              thread: <b>{targetThread}</b>
-                            </div>
-                          ) : null}
-
-                          {targetMessage ? (
-                            <div>
-                              message: <b>{targetMessage}</b>
+                              {publicProfileUrl ? (
+                                <>
+                                  {" "}
+                                  •{" "}
+                                  <a href={publicProfileUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 800 }}>
+                                    View
+                                  </a>
+                                </>
+                              ) : null}
                             </div>
                           ) : null}
                         </td>
@@ -449,12 +481,30 @@ export default function AdminReportsPage() {
                         </td>
 
                         <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                          {targetUser ? (
+                            <button
+                              type="button"
+                              style={{
+                                ...dangerBtn,
+                                cursor: busy ? "not-allowed" : "pointer",
+                                opacity: busy ? 0.7 : 1,
+                              }}
+                              onClick={() => suspendUser(targetUser, r.id)}
+                              disabled={busy}
+                              title="Suspend the reported user"
+                            >
+                              Suspend user
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 12, color: "#666" }}>—</span>
+                          )}
+                        </td>
+
+                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
                           <select
                             value={uiStatus}
                             disabled={busy}
-                            onChange={(e) =>
-                              setReportUiStatus(r.id, e.target.value as "open" | "closed")
-                            }
+                            onChange={(e) => setReportUiStatus(r.id, e.target.value as "open" | "closed")}
                             style={{
                               padding: "8px 10px",
                               borderRadius: 10,
@@ -470,11 +520,7 @@ export default function AdminReportsPage() {
                             <option value="closed">Closed</option>
                           </select>
 
-                          {busy ? (
-                            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-                              Updating…
-                            </div>
-                          ) : null}
+                          {busy ? <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>Updating…</div> : null}
                         </td>
                       </tr>
                     );
