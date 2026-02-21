@@ -1203,6 +1203,22 @@ app = FastAPI(title="Black Within API", version="1.1.5")
 from fastapi.responses import Response
 logger = logging.getLogger("uvicorn.error")
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://meetblackwithin.com",
+        "https://www.meetblackwithin.com",
+    ],
+    allow_origin_regex=r"^https:\/\/(www\.)?meetblackwithin\.com$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     # This prints exactly why FastAPI is rejecting the request (422)
