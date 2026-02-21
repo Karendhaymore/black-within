@@ -3405,35 +3405,44 @@ def admin_resolve_report(
 
     note = (req.admin_note or "").strip() or None
 
-    with engine.begin() as conn:
-        note_col = _reports_note_column(conn)
+    try:
+        with engine.begin() as conn:
+            note_col = _reports_note_column(conn)
 
-        if note_col:
-            sql = text(
-                f"""
-                UPDATE reports
-                SET status = :status,
-                    {note_col} = :note,
-                    resolved_at = CASE WHEN :status = 'resolved' THEN NOW() ELSE NULL END
-                WHERE id = :id
-                """
-            )
-            params = {"id": report_id, "status": status, "note": note}
-        else:
-            sql = text(
-                """
-                UPDATE reports
-                SET status = :status,
-                    resolved_at = CASE WHEN :status = 'resolved' THEN NOW() ELSE NULL END
-                WHERE id = :id
-                """
-            )
-            params = {"id": report_id, "status": status}
+            if note_col:
+                sql = text(
+                    f"""
+                    UPDATE reports
+                    SET status = :status,
+                        {note_col} = :note,
+                        resolved_at = CASE WHEN :status = 'resolved' THEN CURRENT_TIMESTAMP ELSE NULL END
+                    WHERE id = :id
+                    """
+                )
+                params = {"id": report_id, "status": status, "note": note}
+            else:
+                sql = text(
+                    """
+                    UPDATE reports
+                    SET status = :status,
+                        resolved_at = CASE WHEN :status = 'resolved' THEN CURRENT_TIMESTAMP ELSE NULL END
+                    WHERE id = :id
+                    """
+                )
+                params = {"id": report_id, "status": status}
 
-        updated = conn.execute(sql, params).rowcount
+            updated = conn.execute(sql, params).rowcount
 
-    if not updated:
-        raise HTTPException(status_code=404, detail="Report not found")
+        if not updated:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        return {"ok": True, "id": report_id, "status": status}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # This prevents the silent 500 and gives you a readable message in your frontend.
+        raise HTTPException(status_code=500, detail=f"Resolve failed: {str(e)}")
 
     return {"ok": True}
 
