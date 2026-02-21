@@ -2886,19 +2886,40 @@ def admin_send_message_to_user(
     if not body:
         raise HTTPException(status_code=400, detail="body is required")
 
-    # Make sure the user exists
+    # Make sure the target user exists
     _ensure_user(user_id)
 
-    with engine.begin() as conn:
-        conn.execute(
-            text("""
-                INSERT INTO admin_messages (user_id, subject, body)
-                VALUES (:user_id, :subject, :body)
-            """),
-            {"user_id": user_id, "subject": subject, "body": body},
-        )
+    # Put subject into the message body so the user actually sees it
+    composed = f"{subject}\n\n{body}".strip()
 
-    return {"ok": True}
+    now = datetime.utcnow()
+    with Session(engine) as session:
+        # Ensure support user + profile exists (so Inbox shows "Black Within Support")
+        _ensure_support_profile(session)
+
+        # Find or create thread between SUPPORT_USER_ID and target user_id
+        low, high = _sorted_pair(SUPPORT_USER_ID, user_id)
+
+        thread = session.execute(
+            select(Thread).where(Thread.user_low == low, Thread.user_high == high)
+        ).scalar_one_or_none()
+
+        if not thread:
+            thread = Thread(id=_new_id(), user_low=low, user_high=high, created_at=now, updated_at=now)
+            session.add(thread)
+            session.flush()
+
+        # Insert message as the support user
+        m = Message(thread_id=thread.id, sender_user_id=SUPPORT_USER_ID, body=composed, created_at=now)
+        session.add(m)
+
+        # Bump thread to top of inbox
+        thread.updated_at = now
+
+        session.commit()
+        session.refresh(m)
+
+        return {"ok": True, "threadId": thread.id, "messageId": m.id}
 
 @app.post("/admin/messages/send")
 def admin_messages_send_alias(
