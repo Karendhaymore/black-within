@@ -3424,6 +3424,61 @@ def admin_resolve_report(
     return {"ok": True}
 
 
+# ✅ NEW: simple "open/closed" style endpoint for your dropdown
+class ReportStatusUpdateRequest(BaseModel):
+    # front-end will send: "open" or "resolved"
+    status: str
+    admin_note: Optional[str] = None
+
+
+@app.post("/admin/reports/{report_id}/status")
+def admin_set_report_status(
+    report_id: str,
+    req: ReportStatusUpdateRequest,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+    authorization: Optional[str] = Header(default=None),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
+    status = (req.status or "resolved").strip().lower()
+    if status not in ("open", "resolved"):
+        raise HTTPException(status_code=422, detail="status must be 'open' or 'resolved'")
+
+    note = (req.admin_note or "").strip() or None
+
+    with engine.begin() as conn:
+        note_col = _reports_note_column(conn)
+
+        if note_col:
+            sql = text(
+                f"""
+                UPDATE reports
+                SET status = :status,
+                    {note_col} = :note,
+                    resolved_at = CASE WHEN :status = 'resolved' THEN NOW() ELSE NULL END
+                WHERE id = :id
+                """
+            )
+            params = {"id": report_id, "status": status, "note": note}
+        else:
+            sql = text(
+                """
+                UPDATE reports
+                SET status = :status,
+                    resolved_at = CASE WHEN :status = 'resolved' THEN NOW() ELSE NULL END
+                WHERE id = :id
+                """
+            )
+            params = {"id": report_id, "status": status}
+
+        updated = conn.execute(sql, params).rowcount
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    return {"ok": True, "id": report_id, "status": status}
+
+
 @app.post("/admin/users/create", response_model=AdminCreateUserOut)
 def admin_create_user_free(
     body: AdminCreateUserIn,
