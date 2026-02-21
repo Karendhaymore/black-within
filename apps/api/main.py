@@ -3178,6 +3178,117 @@ def admin_clear_photo(
 
     return {"ok": True}
 
+@app.get("/admin/profiles/{profile_id}")
+def admin_get_profile(
+    profile_id: str,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    # admin permission check
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
+    pid = (profile_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
+    with Session(engine) as session:
+        p = session.execute(select(Profile).where(Profile.id == pid)).scalar_one_or_none()
+        if not p:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        # Return a clean JSON shape (easy for the frontend)
+        return {
+            "profile_id": p.id,
+            "owner_user_id": p.owner_user_id,
+            "displayName": p.display_name,
+            "age": p.age,
+            "city": p.city,
+            "stateUS": p.state_us,
+            "photo": p.photo,
+            "photo2": getattr(p, "photo2", None),
+            "identityPreview": p.identity_preview,
+            "intention": p.intention,
+            "tags": _parse_json_list(p.tags_csv),
+            "culturalIdentity": _parse_json_list(getattr(p, "cultural_identity_csv", "[]")),
+            "spiritualFramework": _parse_json_list(getattr(p, "spiritual_framework_csv", "[]")),
+            "relationshipIntent": getattr(p, "relationship_intent", None),
+            "datingChallenge": getattr(p, "dating_challenge_text", None),
+            "personalTruth": getattr(p, "personal_truth_text", None),
+            "isAvailable": bool(p.is_available),
+            "is_banned": bool(getattr(p, "is_banned", False)),
+            "banned_reason": getattr(p, "banned_reason", None),
+            "banned_at": (p.banned_at.isoformat() + "Z") if getattr(p, "banned_at", None) else None,
+            "updated_at": (p.updated_at.isoformat() + "Z") if getattr(p, "updated_at", None) else None,
+            "created_at": (p.created_at.isoformat() + "Z") if getattr(p, "created_at", None) else None,
+        }
+
+
+@app.post("/admin/users/{user_id}/suspend")
+def admin_suspend_user(
+    user_id: str,
+    body: AdminSuspendUserIn,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
+    uid = (user_id or "").strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    reason = (body.reason or "").strip() or None
+
+    with Session(engine) as session:
+        p = session.execute(select(Profile).where(Profile.owner_user_id == uid)).scalar_one_or_none()
+        if not p:
+            raise HTTPException(status_code=404, detail="No profile found for that user_id")
+
+        p.is_banned = True
+        p.banned_reason = reason
+        p.banned_at = datetime.utcnow()
+        p.is_available = False  # suspended users should not appear in Discover
+        p.updated_at = datetime.utcnow()
+
+        session.add(p)
+        session.commit()
+
+        return {"ok": True, "user_id": uid, "profile_id": p.id, "is_banned": True}
+
+
+@app.post("/admin/users/{user_id}/unsuspend")
+def admin_unsuspend_user(
+    user_id: str,
+    body: AdminUnsuspendUserIn,
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
+    uid = (user_id or "").strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    restore_available = bool(getattr(body, "restore_available", True))
+
+    with Session(engine) as session:
+        p = session.execute(select(Profile).where(Profile.owner_user_id == uid)).scalar_one_or_none()
+        if not p:
+            raise HTTPException(status_code=404, detail="No profile found for that user_id")
+
+        p.is_banned = False
+        p.banned_reason = None
+        p.banned_at = None
+
+        # optional: put them back in Discover
+        if restore_available:
+            p.is_available = True
+
+        p.updated_at = datetime.utcnow()
+
+        session.add(p)
+        session.commit()
+
+        return {"ok": True, "user_id": uid, "profile_id": p.id, "is_banned": False, "isAvailable": bool(p.is_available)}
 from fastapi import Header
 
 @app.post("/admin/messages/{message_id}/delete", response_model=AdminDeleteResponse)
