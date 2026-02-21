@@ -42,12 +42,7 @@ type ReportItem = {
 function getAdminToken(): string {
   if (typeof window === "undefined") return "";
 
-  const keys = [
-    "bw_admin_key",
-    "bw_admin_token",
-    "admin_token",
-    "bw_admin_session",
-  ];
+  const keys = ["bw_admin_key", "bw_admin_token", "admin_token", "bw_admin_session"];
 
   for (const k of keys) {
     const v = window.localStorage.getItem(k);
@@ -103,7 +98,7 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
 
 /**
  * Our UI uses Open/Closed language.
- * Your backend currently uses open/resolved.
+ * Backend uses open/resolved.
  * So: closed === resolved
  */
 function normalizeRowStatus(s?: string | null): "open" | "closed" {
@@ -123,7 +118,7 @@ export default function AdminReportsPage() {
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<"open" | "resolved" | "all">("open");
 
-  // For nice UX when resolving / changing status
+  // For nice UX when changing status
   const [workingId, setWorkingId] = useState<string | null>(null);
 
   const openCount = useMemo(() => {
@@ -188,10 +183,10 @@ export default function AdminReportsPage() {
   }
 
   /**
-   * Current backend supports "resolve" (open -> resolved).
-   * We now use the dropdown:
-   * - selecting "Closed" calls /resolve (no prompt anymore)
-   * - selecting "Open" on a closed report is NOT enabled yet (until we add /status endpoint in main.py)
+   * ✅ Dropdown status changer (Open/Closed)
+   * Uses backend endpoint:
+   * POST /admin/reports/{id}/status
+   * with body: { status: "open" | "resolved", admin_note?: "" }
    */
   async function setReportUiStatus(reportId: string, nextUiStatus: "open" | "closed") {
     const t = token.trim();
@@ -203,18 +198,10 @@ export default function AdminReportsPage() {
     // If no real change, do nothing
     if (currentUiStatus === nextUiStatus) return;
 
-    // If trying to re-open, block for now (until backend supports it)
-    if (currentUiStatus === "closed" && nextUiStatus === "open") {
-      alert("Re-opening is not enabled yet. Next step is adding the backend status endpoint in main.py.");
-      // snap back by reloading current list or reverting state
-      await loadReports();
-      return;
-    }
-
     setWorkingId(reportId);
     setErr(null);
 
-    // Optimistic UI update
+    // Optimistic UI update (update dropdown immediately)
     setReports((prev) =>
       prev.map((x) =>
         x.id === reportId
@@ -224,20 +211,24 @@ export default function AdminReportsPage() {
     );
 
     try {
-      // Closed => call your existing resolve endpoint
+      // UI "closed" => backend "resolved"
+      const backendStatus = nextUiStatus === "closed" ? "resolved" : "open";
+
       const res = await fetch(
-        `${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/resolve`,
+        `${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/status`,
         {
           method: "POST",
           headers: buildAdminHeaders(t),
-          // No prompt anymore. We send empty note fields for compatibility.
-          body: JSON.stringify({ admin_note: "", note: "" }),
+          body: JSON.stringify({
+            status: backendStatus,
+            admin_note: "",
+          }),
         }
       );
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
-      await loadReports(); // refresh list so it stays consistent with backend
+      await loadReports(); // keep UI consistent with backend
     } catch (e: any) {
       // revert if failed
       setReports((prev) =>
@@ -399,7 +390,8 @@ export default function AdminReportsPage() {
                     const busy = workingId === r.id;
 
                     const targetUser = r.reported_user_id || r.target_user_id;
-                    const targetProfile = r.reported_profile_id || r.profile_id || r.target_profile_id;
+                    const targetProfile =
+                      r.reported_profile_id || r.profile_id || r.target_profile_id;
                     const targetThread = r.thread_id || r.target_thread_id;
                     const targetMessage = r.message_id || r.target_message_id;
 
@@ -459,7 +451,9 @@ export default function AdminReportsPage() {
                           <select
                             value={uiStatus}
                             disabled={busy}
-                            onChange={(e) => setReportUiStatus(r.id, e.target.value as "open" | "closed")}
+                            onChange={(e) =>
+                              setReportUiStatus(r.id, e.target.value as "open" | "closed")
+                            }
                             style={{
                               padding: "8px 10px",
                               borderRadius: 10,
@@ -469,18 +463,16 @@ export default function AdminReportsPage() {
                               opacity: busy ? 0.7 : 1,
                               cursor: busy ? "not-allowed" : "pointer",
                             }}
-                            title={
-                              uiStatus === "closed"
-                                ? "Closed reports can’t be re-opened yet (we’ll enable that in main.py next)."
-                                : "Change this report status."
-                            }
+                            title="Change this report status."
                           >
                             <option value="open">Open</option>
                             <option value="closed">Closed</option>
                           </select>
 
                           {busy ? (
-                            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>Updating…</div>
+                            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                              Updating…
+                            </div>
                           ) : null}
                         </td>
                       </tr>
@@ -493,9 +485,8 @@ export default function AdminReportsPage() {
         </div>
 
         <div style={{ marginTop: 12, color: "#777", fontSize: 12 }}>
-          This page pulls from <code>/admin/reports</code>. Closing calls{" "}
-          <code>/admin/reports/&lt;id&gt;/resolve</code>. Re-opening will be enabled after we add a status
-          endpoint in <code>main.py</code>.
+          This page pulls from <code>/admin/reports</code>. Status changes call{" "}
+          <code>/admin/reports/&lt;id&gt;/status</code>.
         </div>
       </div>
     </main>
