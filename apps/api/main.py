@@ -1199,20 +1199,37 @@ class AdminDeleteResponse(BaseModel):
 # -----------------------------
 # App
 # -----------------------------
+from fastapi import FastAPI, Request
+from fastapi.responses import Response, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+
+import logging
+import re
+import hashlib
+import secrets
+import json
+from typing import Any, List, Optional
+
 app = FastAPI(title="Black Within API", version="1.1.5")
-from fastapi.responses import Response
 logger = logging.getLogger("uvicorn.error")
 
-from fastapi.middleware.cors import CORSMiddleware
+# ✅ CORS: allow your frontend domains to call the API
+ALLOWED_ORIGINS = [
+    # Local dev
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+
+    # Production
+    "https://meetblackwithin.com",
+    "https://www.meetblackwithin.com",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://meetblackwithin.com",
-        "https://www.meetblackwithin.com",
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1220,7 +1237,7 @@ app.add_middleware(
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # This prints exactly why FastAPI is rejecting the request (422)
+    # Print why FastAPI is rejecting the request (422)
     logger.error(
         f"VALIDATION ERROR on {request.method} {request.url}: "
         f"errors={exc.errors()} body={exc.body}"
@@ -1229,28 +1246,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=422,
         content={"detail": exc.errors(), "body": exc.body},
     )
-    
-@app.middleware("http")
-async def allow_preflight(request: Request, call_next):
-    # Browsers send an OPTIONS request first for cross-site calls.
-    # If we don't allow it, the browser shows "Failed to fetch".
-    if request.method == "OPTIONS":
-        return Response(status_code=200)
-    return await call_next(request)
 
-from fastapi.middleware.cors import CORSMiddleware
-
-# ✅ CORS: allow your frontend domains to call the API
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-
-    # ✅ Production site
-    "https://meetblackwithin.com",
-    "https://www.meetblackwithin.com",
-]
-
-
+# -----------------------------
+# Helpers
+# -----------------------------
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
