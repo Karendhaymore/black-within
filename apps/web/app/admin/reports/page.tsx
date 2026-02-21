@@ -97,7 +97,7 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
 }
 
 /**
- * Our UI uses Open/Closed language.
+ * UI uses Open/Closed language.
  * Backend uses open/resolved.
  * So: closed === resolved
  */
@@ -118,7 +118,6 @@ export default function AdminReportsPage() {
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<"open" | "resolved" | "all">("open");
 
-  // For nice UX when changing status
   const [workingId, setWorkingId] = useState<string | null>(null);
 
   const openCount = useMemo(() => {
@@ -184,9 +183,12 @@ export default function AdminReportsPage() {
 
   /**
    * ✅ Dropdown status changer (Open/Closed)
-   * Uses backend endpoint:
-   * POST /admin/reports/{id}/status
-   * with body: { status: "open" | "resolved", admin_note?: "" }
+   * Uses your EXISTING backend endpoint:
+   * POST /admin/reports/{id}/resolve
+   *
+   * We send:
+   * - Open  => status: "open"
+   * - Closed => status: "resolved"
    */
   async function setReportUiStatus(reportId: string, nextUiStatus: "open" | "closed") {
     const t = token.trim();
@@ -195,13 +197,12 @@ export default function AdminReportsPage() {
     const current = reports.find((x) => x.id === reportId);
     const currentUiStatus = normalizeRowStatus(current?.status);
 
-    // If no real change, do nothing
     if (currentUiStatus === nextUiStatus) return;
 
     setWorkingId(reportId);
     setErr(null);
 
-    // Optimistic UI update (update dropdown immediately)
+    // optimistic UI update
     setReports((prev) =>
       prev.map((x) =>
         x.id === reportId
@@ -211,24 +212,24 @@ export default function AdminReportsPage() {
     );
 
     try {
-      // UI "closed" => backend "resolved"
       const backendStatus = nextUiStatus === "closed" ? "resolved" : "open";
 
       const res = await fetch(
-        `${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/status`,
+        `${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/resolve`,
         {
           method: "POST",
           headers: buildAdminHeaders(t),
           body: JSON.stringify({
             status: backendStatus,
             admin_note: "",
+            note: "",
           }),
         }
       );
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
-      await loadReports(); // keep UI consistent with backend
+      await loadReports();
     } catch (e: any) {
       // revert if failed
       setReports((prev) =>
@@ -486,7 +487,7 @@ export default function AdminReportsPage() {
 
         <div style={{ marginTop: 12, color: "#777", fontSize: 12 }}>
           This page pulls from <code>/admin/reports</code>. Status changes call{" "}
-          <code>/admin/reports/&lt;id&gt;/status</code>.
+          <code>/admin/reports/&lt;id&gt;/resolve</code>.
         </div>
       </div>
     </main>
