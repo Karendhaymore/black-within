@@ -1196,6 +1196,13 @@ class AdminDeleteResponse(BaseModel):
     deleted_threads: int = 0
     deleted_unlocks: int = 0
 
+class AdminSuspendUserIn(BaseModel):
+    reason: Optional[str] = None  # why you suspended (optional)
+
+
+class AdminUnsuspendUserIn(BaseModel):
+    restore_available: bool = True  # if True, sets profile back to is_available=True
+    
 # -----------------------------
 # App
 # -----------------------------
