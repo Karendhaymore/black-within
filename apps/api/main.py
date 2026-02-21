@@ -1251,14 +1251,6 @@ ALLOWED_ORIGINS = [
     "https://www.meetblackwithin.com",
 ]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],   # ✅ allow GET/POST/OPTIONS/etc
-    allow_headers=["*"],   # ✅ allow Authorization, X-Admin-Token, X-Admin-Key, etc
-)
-
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
