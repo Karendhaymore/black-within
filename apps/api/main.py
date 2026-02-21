@@ -2443,6 +2443,57 @@ def _sorted_pair(a: str, b: str) -> Tuple[str, str]:
         raise HTTPException(status_code=400, detail="Both user ids are required.")
     return (a, b) if a < b else (b, a)
 
+# -----------------------------
+# Support/Admin messaging identity
+# -----------------------------
+SUPPORT_USER_ID = "support_admin_user"  # safe constant; not a real user signup
+SUPPORT_DISPLAY_NAME = "Black Within Support"
+
+def _ensure_support_profile(session: Session) -> None:
+    """
+    Ensures a dedicated Support user + profile exists so messages show in Inbox
+    with a recognizable display name + photo (optional).
+    """
+    # Ensure the user exists
+    u = session.get(User, SUPPORT_USER_ID)
+    if not u:
+        session.add(User(id=SUPPORT_USER_ID, created_at=datetime.utcnow()))
+        session.flush()
+
+    # Ensure the profile exists (Inbox UI looks up Profile by owner_user_id)
+    p = session.execute(
+        select(Profile).where(Profile.owner_user_id == SUPPORT_USER_ID)
+    ).scalar_one_or_none()
+
+    if not p:
+        now = datetime.utcnow()
+        session.add(
+            Profile(
+                id=_new_id(),
+                owner_user_id=SUPPORT_USER_ID,
+                display_name=SUPPORT_DISPLAY_NAME,
+                age=99,
+                city="",
+                state_us="",
+                photo=None,
+                photo2=None,
+                identity_preview="Official Support",
+                intention="Support",
+                tags_csv="[]",
+                cultural_identity_csv="[]",
+                spiritual_framework_csv="[]",
+                relationship_intent=None,
+                dating_challenge_text=None,
+                personal_truth_text=None,
+                is_available=False,
+                is_banned=False,
+                banned_reason=None,
+                banned_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.flush()
 
 def _get_entitlement(session: Session, user_id: str) -> Entitlement:
     row = session.execute(select(Entitlement).where(Entitlement.user_id == user_id)).scalar_one_or_none()
