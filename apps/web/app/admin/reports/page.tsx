@@ -42,12 +42,8 @@ type ReportItem = {
 function getAdminToken(): string {
   if (typeof window === "undefined") return "";
 
-  /**
-   * ✅ Put the most likely “real” admin key first.
-   * If you know EXACTLY what key name you store under, put it at the top.
-   */
   const keys = [
-    "bw_admin_key", // <-- common “admin key” storage name
+    "bw_admin_key",
     "bw_admin_token",
     "admin_token",
     "bw_admin_session",
@@ -60,10 +56,6 @@ function getAdminToken(): string {
   return "";
 }
 
-/**
- * Sends BOTH header styles so whichever your API expects will work.
- * (You’re already able to fetch reports, so auth is basically fine.)
- */
 function buildAdminHeaders(token: string): Record<string, string> {
   const t = (token || "").trim();
   return {
@@ -74,19 +66,13 @@ function buildAdminHeaders(token: string): Record<string, string> {
   };
 }
 
-/**
- * ✅ Makes API error messages human-readable instead of "[object Object]"
- */
 async function safeReadErrorDetail(res: Response): Promise<string> {
-  // Try JSON first
   try {
     const j: any = await res.json();
 
-    // FastAPI often returns { detail: "..." } OR { detail: [...] }
     if (j?.detail) {
       if (typeof j.detail === "string") return j.detail;
 
-      // detail as array of validation errors
       if (Array.isArray(j.detail)) {
         const lines = j.detail
           .map((d: any) => {
@@ -98,18 +84,14 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
         return lines || `Request failed (${res.status}).`;
       }
 
-      // detail as object
       return JSON.stringify(j.detail);
     }
 
     if (j?.message) return String(j.message);
     if (j?.error) return String(j.error);
 
-    // Fallback: stringify whole JSON
     return JSON.stringify(j);
-  } catch {
-    // If it wasn't JSON, try text
-  }
+  } catch {}
 
   try {
     const t = await res.text();
@@ -117,6 +99,17 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
   } catch {}
 
   return `Request failed (${res.status}).`;
+}
+
+/**
+ * Our UI uses Open/Closed language.
+ * Your backend currently uses open/resolved.
+ * So: closed === resolved
+ */
+function normalizeRowStatus(s?: string | null): "open" | "closed" {
+  const v = (s || "open").toLowerCase().trim();
+  if (v === "resolved" || v === "closed") return "closed";
+  return "open";
 }
 
 export default function AdminReportsPage() {
@@ -130,11 +123,11 @@ export default function AdminReportsPage() {
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<"open" | "resolved" | "all">("open");
 
-  // For nice UX when resolving
+  // For nice UX when resolving / changing status
   const [workingId, setWorkingId] = useState<string | null>(null);
 
   const openCount = useMemo(() => {
-    return reports.filter((r) => (r.status || "open").toLowerCase() === "open").length;
+    return reports.filter((r) => normalizeRowStatus(r.status) === "open").length;
   }, [reports]);
 
   async function fetchReportsByStatus(t: string, status: "open" | "resolved") {
@@ -170,14 +163,11 @@ export default function AdminReportsPage() {
 
     try {
       if (status === "all") {
-        // ✅ Many backends do NOT support status=all reliably.
-        // So we fetch open + resolved and combine.
         const [openItems, resolvedItems] = await Promise.all([
           fetchReportsByStatus(t, "open"),
           fetchReportsByStatus(t, "resolved"),
         ]);
 
-        // Combine & sort newest first
         const combined = [...openItems, ...resolvedItems].sort((a, b) => {
           const ad = a.created_at ? new Date(a.created_at).getTime() : 0;
           const bd = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -197,37 +187,63 @@ export default function AdminReportsPage() {
     }
   }
 
-  async function resolveReport(reportId: string) {
+  /**
+   * Current backend supports "resolve" (open -> resolved).
+   * We now use the dropdown:
+   * - selecting "Closed" calls /resolve (no prompt anymore)
+   * - selecting "Open" on a closed report is NOT enabled yet (until we add /status endpoint in main.py)
+   */
+  async function setReportUiStatus(reportId: string, nextUiStatus: "open" | "closed") {
     const t = token.trim();
     if (!t) return;
 
-    const note = window.prompt("Optional note to reporter:", "") || "";
+    const current = reports.find((x) => x.id === reportId);
+    const currentUiStatus = normalizeRowStatus(current?.status);
+
+    // If no real change, do nothing
+    if (currentUiStatus === nextUiStatus) return;
+
+    // If trying to re-open, block for now (until backend supports it)
+    if (currentUiStatus === "closed" && nextUiStatus === "open") {
+      alert("Re-opening is not enabled yet. Next step is adding the backend status endpoint in main.py.");
+      // snap back by reloading current list or reverting state
+      await loadReports();
+      return;
+    }
 
     setWorkingId(reportId);
     setErr(null);
 
-    try {
-      /**
-       * ✅ The 422 error is very likely because the backend expects "admin_note"
-       * but we were sending "note".
-       * So we send BOTH to be safe.
-       */
-      const payload =
-        note.trim().length > 0
-          ? { admin_note: note.trim(), note: note.trim() }
-          : { admin_note: "", note: "" };
+    // Optimistic UI update
+    setReports((prev) =>
+      prev.map((x) =>
+        x.id === reportId
+          ? { ...x, status: nextUiStatus === "closed" ? "resolved" : "open" }
+          : x
+      )
+    );
 
-      const res = await fetch(`${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/resolve`, {
-        method: "POST",
-        headers: buildAdminHeaders(t),
-        body: JSON.stringify(payload),
-      });
+    try {
+      // Closed => call your existing resolve endpoint
+      const res = await fetch(
+        `${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/resolve`,
+        {
+          method: "POST",
+          headers: buildAdminHeaders(t),
+          // No prompt anymore. We send empty note fields for compatibility.
+          body: JSON.stringify({ admin_note: "", note: "" }),
+        }
+      );
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
-      await loadReports(); // reload current filter view
+      await loadReports(); // refresh list so it stays consistent with backend
     } catch (e: any) {
-      setErr(e?.message || "Resolve failed.");
+      // revert if failed
+      setReports((prev) =>
+        prev.map((x) => (x.id === reportId ? { ...x, status: current?.status ?? "open" } : x))
+      );
+      setErr(e?.message || "Status update failed.");
     } finally {
       setWorkingId(null);
     }
@@ -243,8 +259,6 @@ export default function AdminReportsPage() {
 
     setToken(t);
 
-    // Load open by default
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
     (async () => {
       setLoading(true);
       try {
@@ -286,12 +300,6 @@ export default function AdminReportsPage() {
     border: "1px solid #111",
     background: "#111",
     color: "white",
-  };
-
-  const dangerBtn: React.CSSProperties = {
-    ...btnBase,
-    border: "1px solid #f0c9c9",
-    background: "#fff7f7",
   };
 
   return (
@@ -382,12 +390,12 @@ export default function AdminReportsPage() {
                     <th style={{ padding: "10px 8px" }}>Details</th>
                     <th style={{ padding: "10px 8px" }}>Target</th>
                     <th style={{ padding: "10px 8px" }}>Reporter</th>
-                    <th style={{ padding: "10px 8px" }}></th>
+                    <th style={{ padding: "10px 8px" }}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {reports.map((r) => {
-                    const status = (r.status || "open").toLowerCase();
+                    const uiStatus = normalizeRowStatus(r.status);
                     const busy = workingId === r.id;
 
                     const targetUser = r.reported_user_id || r.target_user_id;
@@ -400,7 +408,7 @@ export default function AdminReportsPage() {
                         <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
                           {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
                           <div style={{ marginTop: 4, fontSize: 12, color: "#666" }}>
-                            status: <b>{status}</b>
+                            status: <b>{uiStatus}</b>
                           </div>
                         </td>
 
@@ -448,23 +456,32 @@ export default function AdminReportsPage() {
                         </td>
 
                         <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-                          {status === "open" ? (
-                            <button
-                              type="button"
-                              style={{
-                                ...(busy ? btnBase : dangerBtn),
-                                cursor: busy ? "not-allowed" : "pointer",
-                                opacity: busy ? 0.7 : 1,
-                              }}
-                              onClick={() => resolveReport(r.id)}
-                              disabled={busy}
-                              title="Resolve this report"
-                            >
-                              {busy ? "Resolving..." : "Resolve"}
-                            </button>
-                          ) : (
-                            <span style={{ fontSize: 12, color: "#666" }}>—</span>
-                          )}
+                          <select
+                            value={uiStatus}
+                            disabled={busy}
+                            onChange={(e) => setReportUiStatus(r.id, e.target.value as "open" | "closed")}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              border: "1px solid #ddd",
+                              background: "white",
+                              fontWeight: 800,
+                              opacity: busy ? 0.7 : 1,
+                              cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                            title={
+                              uiStatus === "closed"
+                                ? "Closed reports can’t be re-opened yet (we’ll enable that in main.py next)."
+                                : "Change this report status."
+                            }
+                          >
+                            <option value="open">Open</option>
+                            <option value="closed">Closed</option>
+                          </select>
+
+                          {busy ? (
+                            <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>Updating…</div>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -476,8 +493,9 @@ export default function AdminReportsPage() {
         </div>
 
         <div style={{ marginTop: 12, color: "#777", fontSize: 12 }}>
-          This page pulls from <code>/admin/reports</code>. Resolving calls{" "}
-          <code>/admin/reports/&lt;id&gt;/resolve</code>.
+          This page pulls from <code>/admin/reports</code>. Closing calls{" "}
+          <code>/admin/reports/&lt;id&gt;/resolve</code>. Re-opening will be enabled after we add a status
+          endpoint in <code>main.py</code>.
         </div>
       </div>
     </main>
