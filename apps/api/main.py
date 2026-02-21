@@ -1225,16 +1225,22 @@ async def allow_preflight(request: Request, call_next):
 
 from fastapi.middleware.cors import CORSMiddleware
 
+# ✅ CORS: allow your frontend domains to call the API
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+
+    # ✅ Production site
+    "https://meetblackwithin.com",
+    "https://www.meetblackwithin.com",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://meetblackwithin.com",
-        "https://www.meetblackwithin.com",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],   # ✅ allow GET/POST/OPTIONS/etc
+    allow_headers=["*"],   # ✅ allow Authorization, X-Admin-Token, X-Admin-Key, etc
 )
 
 
