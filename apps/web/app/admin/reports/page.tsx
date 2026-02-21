@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -44,6 +44,15 @@ type ReportItem = {
 
   admin_note?: string | null;
   resolved_at?: string | null;
+
+  // Some backends include flags like this. If yours does, we'll use it.
+  target_user_suspended?: boolean | null;
+};
+
+type UserAdminStatus = {
+  suspended?: boolean;
+  suspended_until?: string | null;
+  suspended_reason?: string | null;
 };
 
 function getAdminToken(): string {
@@ -114,6 +123,14 @@ function normalizeRowStatus(s?: string | null): "open" | "closed" {
   return "open";
 }
 
+function pickTargetUser(r: ReportItem): string | null {
+  return (r.reported_user_id || r.target_user_id || null) as any;
+}
+
+function pickTargetProfile(r: ReportItem): string | null {
+  return (r.reported_profile_id || r.profile_id || r.target_profile_id || null) as any;
+}
+
 export default function AdminReportsPage() {
   const router = useRouter();
 
@@ -127,16 +144,26 @@ export default function AdminReportsPage() {
 
   const [workingId, setWorkingId] = useState<string | null>(null);
 
+  // Admin note drafts keyed by report id
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+
+  // Per-user suspension status (best-effort)
+  const [userStatus, setUserStatus] = useState<Record<string, UserAdminStatus>>({});
+  const fetchedUserIdsRef = useRef<Set<string>>(new Set());
+
   const openCount = useMemo(() => {
     return reports.filter((r) => normalizeRowStatus(r.status) === "open").length;
   }, [reports]);
 
   async function fetchReportsByStatus(t: string, status: "open" | "resolved") {
-    const res = await fetch(`${API_BASE}/admin/reports?status=${encodeURIComponent(status)}&limit=50`, {
-      method: "GET",
-      headers: buildAdminHeaders(t),
-      cache: "no-store",
-    });
+    const res = await fetch(
+      `${API_BASE}/admin/reports?status=${encodeURIComponent(status)}&limit=50`,
+      {
+        method: "GET",
+        headers: buildAdminHeaders(t),
+        cache: "no-store",
+      }
+    );
 
     if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
@@ -160,23 +187,36 @@ export default function AdminReportsPage() {
     setErr(null);
 
     try {
+      let nextItems: ReportItem[] = [];
+
       if (status === "all") {
         const [openItems, resolvedItems] = await Promise.all([
           fetchReportsByStatus(t, "open"),
           fetchReportsByStatus(t, "resolved"),
         ]);
 
-        const combined = [...openItems, ...resolvedItems].sort((a, b) => {
+        nextItems = [...openItems, ...resolvedItems].sort((a, b) => {
           const ad = a.created_at ? new Date(a.created_at).getTime() : 0;
           const bd = b.created_at ? new Date(b.created_at).getTime() : 0;
           return bd - ad;
         });
-
-        setReports(combined);
       } else {
-        const items = await fetchReportsByStatus(t, status);
-        setReports(items);
+        nextItems = await fetchReportsByStatus(t, status);
       }
+
+      setReports(nextItems);
+
+      // Initialize drafts for any reports missing in noteDrafts
+      setNoteDrafts((prev) => {
+        const copy = { ...prev };
+        for (const r of nextItems) {
+          if (copy[r.id] === undefined) copy[r.id] = (r.admin_note || "").toString();
+        }
+        return copy;
+      });
+
+      // Best-effort: fetch suspension status for involved users
+      queueFetchUserStatuses(nextItems);
     } catch (e: any) {
       setErr(e?.message || "Failed to load reports.");
       setReports([]);
@@ -216,8 +256,8 @@ export default function AdminReportsPage() {
         headers: buildAdminHeaders(t),
         body: JSON.stringify({
           status: backendStatus,
-          admin_note: "",
-          note: "",
+          admin_note: (noteDrafts[reportId] ?? "").toString(),
+          note: (noteDrafts[reportId] ?? "").toString(), // some backends use "note"
         }),
       });
 
@@ -236,8 +276,105 @@ export default function AdminReportsPage() {
   }
 
   /**
-   * Suspend a user from the report row.
-   * (Backend route will be added in main.py below.)
+   * Save admin note (without changing report status)
+   * Uses the same /resolve endpoint with the current status, but updates admin_note.
+   */
+  async function saveAdminNote(reportId: string) {
+    const t = token.trim();
+    if (!t) return;
+
+    const current = reports.find((x) => x.id === reportId);
+    const currentUiStatus = normalizeRowStatus(current?.status);
+    const backendStatus = currentUiStatus === "closed" ? "resolved" : "open";
+
+    setWorkingId(reportId);
+    setErr(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/admin/reports/${encodeURIComponent(reportId)}/resolve`, {
+        method: "POST",
+        headers: buildAdminHeaders(t),
+        body: JSON.stringify({
+          status: backendStatus,
+          admin_note: (noteDrafts[reportId] ?? "").toString(),
+          note: (noteDrafts[reportId] ?? "").toString(),
+        }),
+      });
+
+      if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+
+      await loadReports();
+    } catch (e: any) {
+      setErr(e?.message || "Saving note failed.");
+    } finally {
+      setWorkingId(null);
+    }
+  }
+
+  /**
+   * Best-effort: fetch a user's admin status so we can show Suspend vs Unsuspend.
+   * If your backend doesn't have GET /admin/users/:id, this will silently fail and we’ll default to "Suspend user".
+   */
+  async function fetchUserAdminStatus(userId: string) {
+    const t = token.trim();
+    if (!t) return;
+
+    // prevent refetch spam
+    if (fetchedUserIdsRef.current.has(userId)) return;
+    fetchedUserIdsRef.current.add(userId);
+
+    try {
+      const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(userId)}`, {
+        method: "GET",
+        headers: buildAdminHeaders(t),
+        cache: "no-store",
+      });
+
+      if (!res.ok) return;
+
+      const data: any = await res.json().catch(() => ({}));
+
+      // Try a few common shapes
+      const suspended =
+        typeof data?.suspended === "boolean"
+          ? data.suspended
+          : typeof data?.is_suspended === "boolean"
+          ? data.is_suspended
+          : typeof data?.disabled === "boolean"
+          ? data.disabled
+          : undefined;
+
+      const status: UserAdminStatus = {
+        suspended,
+        suspended_until: data?.suspended_until ?? data?.suspension_end ?? null,
+        suspended_reason: data?.suspended_reason ?? data?.suspension_reason ?? null,
+      };
+
+      setUserStatus((prev) => ({ ...prev, [userId]: status }));
+    } catch {
+      // ignore (best-effort)
+    }
+  }
+
+  function queueFetchUserStatuses(items: ReportItem[]) {
+    const ids = Array.from(
+      new Set(
+        items
+          .map((r) => pickTargetUser(r))
+          .filter(Boolean)
+          .map((x) => String(x))
+      )
+    );
+
+    // fire-and-forget best effort
+    for (const id of ids) {
+      void fetchUserAdminStatus(id);
+    }
+  }
+
+  /**
+   * Suspend / Unsuspend actions.
+   * (Requires backend routes /admin/users/:id/suspend and /admin/users/:id/unsuspend)
    */
   async function suspendUser(userId: string, reportId: string) {
     const t = token.trim();
@@ -262,12 +399,43 @@ export default function AdminReportsPage() {
 
       if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 
-      // optional: auto-close report after suspension
-      // await setReportUiStatus(reportId, "closed");
+      // Update local status immediately
+      setUserStatus((prev) => ({ ...prev, [userId]: { ...(prev[userId] || {}), suspended: true } }));
 
       alert("User suspended.");
     } catch (e: any) {
       setErr(e?.message || "Suspend failed.");
+    } finally {
+      setWorkingId(null);
+    }
+  }
+
+  async function unsuspendUser(userId: string, reportId: string) {
+    const t = token.trim();
+    if (!t) return;
+
+    const ok = window.confirm(`Unsuspend this user?\n\nUser: ${userId}\nReport: ${reportId}`);
+    if (!ok) return;
+
+    setWorkingId(reportId);
+    setErr(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(userId)}/unsuspend`, {
+        method: "POST",
+        headers: buildAdminHeaders(t),
+        body: JSON.stringify({
+          reason: `Unsuspended from report ${reportId}`,
+        }),
+      });
+
+      if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+
+      setUserStatus((prev) => ({ ...prev, [userId]: { ...(prev[userId] || {}), suspended: false } }));
+
+      alert("User unsuspended.");
+    } catch (e: any) {
+      setErr(e?.message || "Unsuspend failed.");
     } finally {
       setWorkingId(null);
     }
@@ -290,6 +458,16 @@ export default function AdminReportsPage() {
         setReports(items);
         setStatusFilter("open");
         setErr(null);
+
+        setNoteDrafts((prev) => {
+          const copy = { ...prev };
+          for (const r of items) {
+            if (copy[r.id] === undefined) copy[r.id] = (r.admin_note || "").toString();
+          }
+          return copy;
+        });
+
+        queueFetchUserStatuses(items);
       } catch (e: any) {
         setErr(e?.message || "Failed to load reports.");
         setReports([]);
@@ -332,6 +510,33 @@ export default function AdminReportsPage() {
     background: "#fff7f7",
   };
 
+  const subtleBtn: React.CSSProperties = {
+    ...btnBase,
+    border: "1px solid #e6e6e6",
+    background: "#fafafa",
+    fontWeight: 800,
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #ddd",
+    background: "white",
+    fontWeight: 700,
+  };
+
+  const textareaStyle: React.CSSProperties = {
+    width: "100%",
+    minHeight: 70,
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #ddd",
+    background: "white",
+    fontWeight: 600,
+    resize: "vertical",
+  };
+
   return (
     <main
       style={{
@@ -342,7 +547,7 @@ export default function AdminReportsPage() {
         placeItems: "start center",
       }}
     >
-      <div style={{ width: "100%", maxWidth: 1100 }}>
+      <div style={{ width: "100%", maxWidth: 1200 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
             <h1 style={{ fontSize: "2.2rem", marginBottom: 6 }}>Reports</h1>
@@ -369,13 +574,7 @@ export default function AdminReportsPage() {
                 setStatusFilter(v);
                 loadReports(v);
               }}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #ddd",
-                background: "white",
-                fontWeight: 700,
-              }}
+              style={inputStyle}
               disabled={loading}
             >
               <option value="open">Open</option>
@@ -420,27 +619,52 @@ export default function AdminReportsPage() {
                     <th style={{ padding: "10px 8px" }}>Details</th>
                     <th style={{ padding: "10px 8px" }}>Target</th>
                     <th style={{ padding: "10px 8px" }}>Reporter</th>
+                    <th style={{ padding: "10px 8px" }}>Admin note</th>
                     <th style={{ padding: "10px 8px" }}>Actions</th>
                     <th style={{ padding: "10px 8px" }}>Status</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {reports.map((r) => {
                     const uiStatus = normalizeRowStatus(r.status);
                     const busy = workingId === r.id;
 
-                    const targetUser = r.reported_user_id || r.target_user_id;
-                    const targetProfile = r.reported_profile_id || r.profile_id || r.target_profile_id;
+                    const targetUser = pickTargetUser(r);
+                    const targetProfile = pickTargetProfile(r);
 
-                    const publicProfileUrl =
-                      targetProfile ? `${PUBLIC_PROFILE_PATH_PREFIX}${encodeURIComponent(targetProfile)}` : null;
+                    const publicProfileUrl = targetProfile
+                      ? `${PUBLIC_PROFILE_PATH_PREFIX}${encodeURIComponent(targetProfile)}`
+                      : null;
+
+                    // Determine suspended state (best effort)
+                    const suspendedFromRow =
+                      typeof r.target_user_suspended === "boolean" ? r.target_user_suspended : undefined;
+                    const suspendedFromUserStatus =
+                      targetUser && typeof userStatus[targetUser]?.suspended === "boolean"
+                        ? userStatus[targetUser]!.suspended
+                        : undefined;
+
+                    const isSuspended =
+                      suspendedFromRow !== undefined
+                        ? suspendedFromRow
+                        : suspendedFromUserStatus !== undefined
+                        ? suspendedFromUserStatus
+                        : false;
+
+                    const noteVal = (noteDrafts[r.id] ?? "").toString();
+                    const originalNote = (r.admin_note ?? "").toString();
+                    const noteDirty = noteVal !== originalNote;
 
                     return (
-                      <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
+                      <tr key={r.id} style={{ borderTop: "1px solid #eee", verticalAlign: "top" }}>
                         <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
                           {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
                           <div style={{ marginTop: 4, fontSize: 12, color: "#666" }}>
                             status: <b>{uiStatus}</b>
+                          </div>
+                          <div style={{ marginTop: 6, fontSize: 11, color: "#777" }}>
+                            id: <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>{r.id}</span>
                           </div>
                         </td>
 
@@ -457,18 +681,40 @@ export default function AdminReportsPage() {
                           {targetUser ? (
                             <div>
                               user: <b>{targetUser}</b>
+                              {isSuspended ? (
+                                <span
+                                  style={{
+                                    marginLeft: 8,
+                                    padding: "2px 8px",
+                                    borderRadius: 999,
+                                    border: "1px solid #f0c9c9",
+                                    background: "#fff7f7",
+                                    color: "#7a2d2d",
+                                    fontWeight: 900,
+                                    fontSize: 11,
+                                  }}
+                                  title="This is best-effort based on admin user lookup (if available)."
+                                >
+                                  suspended
+                                </span>
+                              ) : null}
                             </div>
                           ) : null}
 
                           {targetProfile ? (
-                            <div>
+                            <div style={{ marginTop: 6 }}>
                               profile: <b>{targetProfile}</b>
                               {publicProfileUrl ? (
                                 <>
                                   {" "}
                                   •{" "}
-                                  <a href={publicProfileUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 800 }}>
-                                    View
+                                  <a
+                                    href={publicProfileUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{ fontWeight: 900, textDecoration: "underline" }}
+                                  >
+                                    View profile
                                   </a>
                                 </>
                               ) : null}
@@ -480,26 +726,127 @@ export default function AdminReportsPage() {
                           {r.reporter_user_id ? <b>{r.reporter_user_id}</b> : "—"}
                         </td>
 
-                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-                          {targetUser ? (
+                        {/* Admin note */}
+                        <td style={{ padding: "10px 8px", minWidth: 260 }}>
+                          <textarea
+                            value={noteVal}
+                            onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                            style={{
+                              ...textareaStyle,
+                              opacity: busy ? 0.8 : 1,
+                            }}
+                            disabled={busy}
+                            placeholder="Add internal admin note…"
+                          />
+                          <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
                             <button
                               type="button"
                               style={{
-                                ...dangerBtn,
-                                cursor: busy ? "not-allowed" : "pointer",
-                                opacity: busy ? 0.7 : 1,
+                                ...primaryBtn,
+                                padding: "0.45rem 0.7rem",
+                                opacity: busy ? 0.7 : noteDirty ? 1 : 0.6,
+                                cursor: busy ? "not-allowed" : noteDirty ? "pointer" : "not-allowed",
                               }}
-                              onClick={() => suspendUser(targetUser, r.id)}
-                              disabled={busy}
-                              title="Suspend the reported user"
+                              onClick={() => saveAdminNote(r.id)}
+                              disabled={busy || !noteDirty}
+                              title="Save admin note"
                             >
-                              Suspend user
+                              Save note
                             </button>
-                          ) : (
-                            <span style={{ fontSize: 12, color: "#666" }}>—</span>
-                          )}
+
+                            {noteDirty ? <span style={{ fontSize: 12, color: "#666" }}>Unsaved changes</span> : null}
+                          </div>
                         </td>
 
+                        {/* Actions */}
+                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap", minWidth: 240 }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {publicProfileUrl ? (
+                              <a
+                                href={publicProfileUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ ...subtleBtn, textAlign: "center" }}
+                                title="Open the user’s public profile in a new tab"
+                              >
+                                View profile
+                              </a>
+                            ) : (
+                              <span style={{ fontSize: 12, color: "#666" }}>—</span>
+                            )}
+
+                            {targetUser ? (
+                              isSuspended ? (
+                                <button
+                                  type="button"
+                                  style={{
+                                    ...btnBase,
+                                    border: "1px solid #cfe7d3",
+                                    background: "#f6fff7",
+                                    cursor: busy ? "not-allowed" : "pointer",
+                                    opacity: busy ? 0.7 : 1,
+                                  }}
+                                  onClick={() => unsuspendUser(targetUser, r.id)}
+                                  disabled={busy}
+                                  title="Unsuspend the reported user"
+                                >
+                                  Unsuspend user
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  style={{
+                                    ...dangerBtn,
+                                    cursor: busy ? "not-allowed" : "pointer",
+                                    opacity: busy ? 0.7 : 1,
+                                  }}
+                                  onClick={() => suspendUser(targetUser, r.id)}
+                                  disabled={busy}
+                                  title="Suspend the reported user"
+                                >
+                                  Suspend user
+                                </button>
+                              )
+                            ) : (
+                              <span style={{ fontSize: 12, color: "#666" }}>—</span>
+                            )}
+
+                            {/* Re-open action (explicit button) */}
+                            {uiStatus === "closed" ? (
+                              <button
+                                type="button"
+                                style={{
+                                  ...subtleBtn,
+                                  cursor: busy ? "not-allowed" : "pointer",
+                                  opacity: busy ? 0.7 : 1,
+                                }}
+                                onClick={() => setReportUiStatus(r.id, "open")}
+                                disabled={busy}
+                                title="Re-open this report"
+                              >
+                                Re-open report
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                style={{
+                                  ...subtleBtn,
+                                  cursor: busy ? "not-allowed" : "pointer",
+                                  opacity: busy ? 0.7 : 1,
+                                }}
+                                onClick={() => setReportUiStatus(r.id, "closed")}
+                                disabled={busy}
+                                title="Close (resolve) this report"
+                              >
+                                Close report
+                              </button>
+                            )}
+                          </div>
+
+                          {busy ? <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Working…</div> : null}
+                        </td>
+
+                        {/* Status (keep dropdown too) */}
                         <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
                           <select
                             value={uiStatus}
@@ -520,7 +867,11 @@ export default function AdminReportsPage() {
                             <option value="closed">Closed</option>
                           </select>
 
-                          {busy ? <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>Updating…</div> : null}
+                          {uiStatus === "closed" && r.resolved_at ? (
+                            <div style={{ fontSize: 12, color: "#666", marginTop: 6 }}>
+                              resolved: {new Date(r.resolved_at).toLocaleString()}
+                            </div>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -532,8 +883,9 @@ export default function AdminReportsPage() {
         </div>
 
         <div style={{ marginTop: 12, color: "#777", fontSize: 12 }}>
-          This page pulls from <code>/admin/reports</code>. Status changes call{" "}
-          <code>/admin/reports/&lt;id&gt;/resolve</code>.
+          This page pulls from <code>/admin/reports</code>. Status changes + admin notes call{" "}
+          <code>/admin/reports/&lt;id&gt;/resolve</code>. Suspend/unsuspend uses{" "}
+          <code>/admin/users/&lt;id&gt;/suspend</code> and <code>/admin/users/&lt;id&gt;/unsuspend</code>.
         </div>
       </div>
     </main>
