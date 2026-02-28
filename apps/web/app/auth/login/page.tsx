@@ -60,7 +60,14 @@ export default function LoginPage() {
       });
 
       if (!res.ok) {
-        throw new Error(await safeReadErrorDetail(res));
+        const detail = await safeReadErrorDetail(res);
+
+        // Friendly message for banned users (your API should return 403)
+        if (res.status === 403) {
+          throw new Error(detail || "Your account has been suspended.");
+        }
+
+        throw new Error(detail || "Email or password is incorrect.");
       }
 
       const data = await res.json();
@@ -132,7 +139,11 @@ export default function LoginPage() {
           autoComplete="current-password"
         />
 
-        {error && <div style={{ color: "crimson", fontSize: 14, whiteSpace: "pre-wrap" }}>{error}</div>}
+        {error && (
+          <div style={{ color: "crimson", fontSize: 14, whiteSpace: "pre-wrap" }}>
+            {error}
+          </div>
+        )}
 
         <button
           type="submit"
@@ -155,7 +166,6 @@ export default function LoginPage() {
           Forgot password?
         </a>
 
-        {/* ✅ Add signup link */}
         <div style={{ textAlign: "center", fontSize: 13, marginTop: 2 }}>
           <Link href="/auth/signup" style={{ color: "#111", textDecoration: "underline" }}>
             Create account
