@@ -1713,15 +1713,23 @@ def login(payload: LoginPayload):
     email = _normalize_email(payload.email)
     password = payload.password or ""
 
+    # ✅ Pull the user_id out while the database session is still open
     with Session(engine) as session:
-        acct = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
+        acct = session.execute(
+            select(AuthAccount).where(AuthAccount.email == email)
+        ).scalar_one_or_none()
+
         if not acct:
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
         if not _verify_password(password, acct.password_hash):
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
-    _ensure_user(acct.user_id)
-    return {"ok": True, "userId": acct.user_id, "user_id": acct.user_id, "email": email}
+        user_id = acct.user_id  # ✅ save it to a simple variable
+
+    # ✅ Now use the saved user_id (safe even after session closes)
+    _ensure_user(user_id)
+
+    return {"ok": True, "userId": user_id, "user_id": user_id, "email": email}
 
 
 @app.post("/auth/forgot-password")
