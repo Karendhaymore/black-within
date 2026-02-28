@@ -10,14 +10,29 @@ const API_BASE =
   "https://black-within-api.onrender.com";
 
 async function safeReadErrorDetail(res: Response): Promise<string> {
+  // Better handling (same style as login)
   try {
     const data = await res.json();
-    if (data?.detail) return String(data.detail);
+    if (data?.detail != null) {
+      if (typeof data.detail === "string") return data.detail;
+      try {
+        return JSON.stringify(data.detail, null, 2);
+      } catch {
+        return String(data.detail);
+      }
+    }
+    try {
+      return JSON.stringify(data, null, 2);
+    } catch {
+      return String(data);
+    }
   } catch {}
+
   try {
     const text = await res.text();
     if (text) return text;
   } catch {}
+
   return `Request failed (${res.status}).`;
 }
 
@@ -46,23 +61,31 @@ export default function SignupPage() {
         body: JSON.stringify({ email: e2, password: pw }),
       });
 
-      if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+      if (!res.ok) {
+        const detail = await safeReadErrorDetail(res);
+
+        // Friendly message for banned emails (your API should return 403)
+        if (res.status === 403) {
+          throw new Error(detail || "This email is not allowed to create an account.");
+        }
+
+        throw new Error(detail || "Signup failed.");
+      }
+
       const json = await res.json();
 
-      // Common shapes: { user_id }, { userId }, { id }
       const userId = (json?.user_id || json?.userId || json?.id || "").toString();
       if (!userId) throw new Error("Signup succeeded, but no user id returned.");
 
-      // Match your app’s login guard keys
       window.localStorage.setItem("bw_user_id", userId);
       window.localStorage.setItem("bw_logged_in", "1");
 
-      // If you also store a session token, keep it:
       if (json?.session_token) {
         window.localStorage.setItem("bw_session_token", String(json.session_token));
       }
 
-      router.replace("/profile"); // or /discover if you prefer
+      // After signup, most apps go straight to Discover
+      router.replace("/discover");
     } catch (e: any) {
       setErr(e?.message || "Signup failed.");
     } finally {
@@ -114,6 +137,8 @@ export default function SignupPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email"
+            required
+            type="email"
             style={{
               width: "100%",
               padding: "12px 12px",
@@ -127,6 +152,7 @@ export default function SignupPage() {
             value={pw}
             onChange={(e) => setPw(e.target.value)}
             placeholder="Password"
+            required
             type="password"
             style={{
               width: "100%",
