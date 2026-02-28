@@ -335,51 +335,7 @@ class UserClaimToken(Base):
 # -----------------------------
 # Migrations
 # -----------------------------
-def _run_sql_migrations():
-    """
-    Runs .sql files inside apps/api/migrations in filename order.
-    Each file runs only once (tracked in schema_migrations).
-    """
-    migrations_dir = Path(__file__).resolve().parent / "migrations"
-    if not migrations_dir.exists():
-        print("No migrations folder found at:", str(migrations_dir))
-        return
-
-    with engine.begin() as conn:
-        # 1) Create tracker table
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS schema_migrations (
-                    filename TEXT PRIMARY KEY,
-                    applied_at TIMESTAMP DEFAULT NOW()
-                );
-                """
-            )
-        )
-
-        # 2) Get already-applied filenames
-        applied = conn.execute(text("SELECT filename FROM schema_migrations")).fetchall()
-        applied_set = {row[0] for row in applied}
-
-        # 3) Run migration files in sorted order
-        sql_files = sorted(migrations_dir.glob("*.sql"))
-
-        for path in sql_files:
-            filename = path.name
-            if filename in applied_set:
-                continue
-
-            sql = path.read_text(encoding="utf-8")
-
-            print("Applying migration:", filename)
-            conn.execute(text(sql))
-            conn.execute(
-                text("INSERT INTO schema_migrations (filename) VALUES (:f)"),
-                {"f": filename},
-            )
-    
-    def _auto_migrate_threads_messages_tables():
+def _auto_migrate_threads_messages_tables():
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -803,11 +759,6 @@ def _auto_migrate_profiles_ban_fields():
 
 
 Base.metadata.create_all(engine)
-
-try:
-    _run_sql_migrations()
-except Exception as e:
-    print("SQL migrations failed:", str(e))
 
 for fn, label in [
     (_auto_migrate_threads_messages_tables, "AUTO_MIGRATE_THREADS_MESSAGES"),
@@ -1762,23 +1713,15 @@ def login(payload: LoginPayload):
     email = _normalize_email(payload.email)
     password = payload.password or ""
 
-    # ✅ Pull the user_id out while the database session is still open
     with Session(engine) as session:
-        acct = session.execute(
-            select(AuthAccount).where(AuthAccount.email == email)
-        ).scalar_one_or_none()
-
+        acct = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
         if not acct:
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
         if not _verify_password(password, acct.password_hash):
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
-        user_id = acct.user_id  # ✅ save it to a simple variable
-
-    # ✅ Now use the saved user_id (safe even after session closes)
-    _ensure_user(user_id)
-
-    return {"ok": True, "userId": user_id, "user_id": user_id, "email": email}
+    _ensure_user(acct.user_id)
+    return {"ok": True, "userId": acct.user_id, "user_id": acct.user_id, "email": email}
 
 
 @app.post("/auth/forgot-password")
@@ -3988,4 +3931,3 @@ from fastapi import HTTPException, Depends
 from sqlalchemy import text
 import os, uuid
 from datetime import datetime
-
