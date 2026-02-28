@@ -804,6 +804,11 @@ def _auto_migrate_profiles_ban_fields():
 
 Base.metadata.create_all(engine)
 
+try:
+    _run_sql_migrations()
+except Exception as e:
+    print("SQL migrations failed:", str(e))
+
 for fn, label in [
     (_auto_migrate_threads_messages_tables, "AUTO_MIGRATE_THREADS_MESSAGES"),
     (_auto_migrate_thread_reads_table, "AUTO_MIGRATE_THREAD_READS"),
