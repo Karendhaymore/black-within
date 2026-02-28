@@ -1689,23 +1689,59 @@ def me(user_id: str = Query(...)):
 
 
 @app.post("/auth/signup")
-def signup(payload: SignupPayload):
+def signup(payload: LoginPayload):
     email = _normalize_email(payload.email)
     password = payload.password or ""
 
-    user_id = _make_user_id_from_email(email)
-    pwd_hash = _hash_password(password)
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required.")
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required.")
 
     with Session(engine) as session:
-        existing = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
-        if existing:
-            raise HTTPException(status_code=409, detail="An account with that email already exists. Please log in.")
 
-        session.add(AuthAccount(user_id=user_id, email=email, password_hash=pwd_hash))
+        # 1️⃣ Block permanently banned emails
+        banned_email = session.execute(
+            text("SELECT 1 FROM banned_emails WHERE email = :email"),
+            {"email": email}
+        ).first()
+
+        if banned_email:
+            raise HTTPException(
+                status_code=403,
+                detail="This email is not allowed to create an account."
+            )
+
+        # 2️⃣ Block duplicate accounts
+        existing = session.execute(
+            select(AuthAccount).where(AuthAccount.email == email)
+        ).scalar_one_or_none()
+
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="An account with this email already exists."
+            )
+
+        # 3️⃣ Create new user
+        new_user = User()
+        session.add(new_user)
+        session.flush()
+
+        new_auth = AuthAccount(
+            user_id=new_user.id,
+            email=email,
+            password_hash=_hash_password(password)
+        )
+
+        session.add(new_auth)
         session.commit()
 
-    _ensure_user(user_id)
-    return {"ok": True, "userId": user_id, "email": email}
+    return {
+        "ok": True,
+        "user_id": new_user.id,
+        "email": email
+    }
 
 
 @app.post("/auth/login")
