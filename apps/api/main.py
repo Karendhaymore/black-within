@@ -1714,6 +1714,20 @@ def login(payload: LoginPayload):
     password = payload.password or ""
 
     with Session(engine) as session:
+
+        # 1️⃣ Block permanently banned emails
+        banned_email = session.execute(
+            text("SELECT 1 FROM banned_emails WHERE email = :email"),
+            {"email": email}
+        ).first()
+
+        if banned_email:
+            raise HTTPException(
+                status_code=403,
+                detail="Your account has been suspended."
+            )
+
+        # 2️⃣ Get auth account
         acct = session.execute(
             select(AuthAccount).where(AuthAccount.email == email)
         ).scalar_one_or_none()
@@ -1721,23 +1735,38 @@ def login(payload: LoginPayload):
         if not acct:
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
-        # ✅ NEW: Check if the user is banned (block login)
+        if not _verify_password(password, acct.password_hash):
+            raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+
+        # 3️⃣ Check users table ban
         user = session.execute(
             select(User).where(User.id == acct.user_id)
         ).scalar_one_or_none()
 
-        if user and getattr(user, "is_banned", False):
+        if user and user.is_banned:
             raise HTTPException(
                 status_code=403,
                 detail="Your account has been suspended."
             )
 
-        if not _verify_password(password, acct.password_hash):
-            raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+        # 4️⃣ Check profiles table ban
+        profile = session.execute(
+            select(Profile).where(Profile.owner_user_id == acct.user_id)
+        ).scalar_one_or_none()
+
+        if profile and getattr(profile, "is_banned", False):
+            raise HTTPException(
+                status_code=403,
+                detail="Your account has been suspended."
+            )
 
     _ensure_user(acct.user_id)
-    return {"ok": True, "userId": acct.user_id, "user_id": acct.user_id, "email": email}
-
+    return {
+        "ok": True,
+        "userId": acct.user_id,
+        "user_id": acct.user_id,
+        "email": email
+    }
 
 @app.post("/auth/forgot-password")
 def forgot_password(payload: ForgotPasswordPayload):
