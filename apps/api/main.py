@@ -1714,9 +1714,24 @@ def login(payload: LoginPayload):
     password = payload.password or ""
 
     with Session(engine) as session:
-        acct = session.execute(select(AuthAccount).where(AuthAccount.email == email)).scalar_one_or_none()
+        acct = session.execute(
+            select(AuthAccount).where(AuthAccount.email == email)
+        ).scalar_one_or_none()
+
         if not acct:
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+
+        # ✅ NEW: Check if the user is banned (block login)
+        user = session.execute(
+            select(User).where(User.id == acct.user_id)
+        ).scalar_one_or_none()
+
+        if user and getattr(user, "is_banned", False):
+            raise HTTPException(
+                status_code=403,
+                detail="Your account has been suspended."
+            )
+
         if not _verify_password(password, acct.password_hash):
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
