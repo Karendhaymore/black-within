@@ -1232,6 +1232,10 @@ ALLOWED_ORIGINS = [
     # Production
     "https://meetblackwithin.com",
     "https://www.meetblackwithin.com",
+
+    # (Optional) Render preview URLs (safe to keep)
+    "https://black-within.onrender.com",
+    "https://black-within-api.onrender.com",
 ]
 
 app.add_middleware(
@@ -1241,6 +1245,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# (Optional) helpful debug: logs the browser Origin header
+@app.middleware("http")
+async def log_origin(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if origin:
+        logger.info(f"[CORS] Incoming request Origin: {origin}")
+    return await call_next(request)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
