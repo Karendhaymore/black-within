@@ -2801,6 +2801,29 @@ def _require_profile_photo_for_messaging(session: Session, user_id: str) -> None
     if not (photo1 or photo2):
         raise HTTPException(status_code=403, detail="photo_required")
 
+def _require_not_banned(session: Session, user_id: str) -> None:
+    """
+    Blocks any banned/suspended user from doing protected actions like messaging or liking.
+    Uses Profile.is_banned (your admin suspend updates this).
+    """
+    if AUTH_PREVIEW_MODE:
+        return
+
+    uid = (user_id or "").strip()
+    if not uid:
+        raise HTTPException(status_code=401, detail="not_logged_in")
+
+    p = session.execute(
+        select(Profile).where(Profile.owner_user_id == uid)
+    ).scalar_one_or_none()
+
+    # If no profile exists yet, we still allow read-only, but block protected actions
+    # unless you prefer to allow it. For now: block.
+    if not p:
+        raise HTTPException(status_code=403, detail="profile_required")
+
+    if getattr(p, "is_banned", False):
+        raise HTTPException(status_code=403, detail="Your account has been suspended.")
 
 @app.get("/messages", response_model=MessagesResponse)
 def list_messages(thread_id: str = Query(...), user_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)):
