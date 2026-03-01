@@ -3338,19 +3338,21 @@ def admin_suspend_user(
 
     with Session(engine) as session:
         # 1) Find the user's profile
-        p = session.execute(select(Profile).where(Profile.owner_user_id == uid)).scalar_one_or_none()
+        p = session.execute(
+            select(Profile).where(Profile.owner_user_id == uid)
+        ).scalar_one_or_none()
         if not p:
             raise HTTPException(status_code=404, detail="No profile found for that user_id")
 
-        # 2) Mark profile as banned (so they disappear from Discover)
+        # 2) Mark profile as banned (hide from Discover, block messaging, etc.)
         p.is_banned = True
         p.banned_reason = reason
         p.banned_at = datetime.utcnow()
-        p.is_available = False
+        p.is_available = False  # suspended users should not appear in Discover
         p.updated_at = datetime.utcnow()
         session.add(p)
 
-        # 3) ALSO permanently block the email (so they cannot log in or sign up again)
+        # 3) Also permanently block this email from logging in
         email_row = session.execute(
             select(AuthAccount.email).where(AuthAccount.user_id == uid)
         ).scalar_one_or_none()
@@ -3365,7 +3367,6 @@ def admin_suspend_user(
                 {"email": _normalize_email(email_row)}
             )
 
-        # 4) Commit everything
         session.commit()
 
         return {"ok": True, "user_id": uid, "profile_id": p.id, "is_banned": True}
