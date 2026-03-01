@@ -3344,6 +3344,20 @@ if email_row:
         """),
         {"email": _normalize_email(email_row)}
     )
+    # 🔒 Also permanently block this email
+email_row = session.execute(
+    select(AuthAccount.email).where(AuthAccount.user_id == user_id)
+).scalar_one_or_none()
+
+if email_row:
+    session.execute(
+        text("""
+            INSERT INTO banned_emails (email)
+            VALUES (:email)
+            ON CONFLICT (email) DO NOTHING
+        """),
+        {"email": _normalize_email(email_row)}
+    )
         session.commit()
 
         return {"ok": True, "user_id": uid, "profile_id": p.id, "is_banned": True}
