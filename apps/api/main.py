@@ -2489,12 +2489,18 @@ def like(payload: ProfileAction):
         raise HTTPException(status_code=400, detail="profile_id is required")
 
     with Session(engine) as session:
+        _require_not_banned(session, liker_user_id)
         counter, likes_left_now, reset_at, window_type = _get_likes_window(session, liker_user_id)
 
-        existing = session.execute(select(Like).where(Like.user_id == liker_user_id, Like.profile_id == profile_id)).scalar_one_or_none()
+        existing = session.execute(
+            select(Like).where(
+                Like.user_id == liker_user_id,
+                Like.profile_id == profile_id
+            )
+        ).scalar_one_or_none()
+
         if existing:
             return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
-
         if int(counter.count) >= FREE_LIKES_PER_DAY:
             if window_type == "test_seconds":
                 raise HTTPException(status_code=429, detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.")
