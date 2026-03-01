@@ -1771,18 +1771,13 @@ def signup(payload: LoginPayload):
     }
 
 
-from fastapi import HTTPException
-from sqlalchemy import text
-from sqlmodel import Session, select
-
 @app.post("/auth/login")
 def login(payload: LoginPayload):
     email = _normalize_email(payload.email)
     password = payload.password or ""
 
     with Session(engine) as session:
-
-        # 1️⃣ Block permanently banned emails
+        # 1) Block permanently banned emails
         banned_email = session.execute(
             text("SELECT 1 FROM banned_emails WHERE email = :email"),
             {"email": email},
@@ -1791,7 +1786,7 @@ def login(payload: LoginPayload):
         if banned_email:
             raise HTTPException(status_code=403, detail="Your account has been suspended.")
 
-        # 2️⃣ Get auth account (email/password check)
+        # 2) Get auth account (email/password check)
         acct = session.execute(
             select(AuthAccount).where(AuthAccount.email == email)
         ).scalar_one_or_none()
@@ -1802,7 +1797,7 @@ def login(payload: LoginPayload):
         if not _verify_password(password, acct.password_hash):
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
 
-        # 3️⃣ Check ban status from Profile (this is what your admin suspend updates)
+        # 3) Check ban status from Profile (this is what your admin suspend updates)
         p = session.execute(
             select(Profile).where(Profile.owner_user_id == acct.user_id)
         ).scalar_one_or_none()
