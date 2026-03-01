@@ -3315,6 +3315,12 @@ def admin_get_profile(
         }
 
 
+from datetime import datetime
+from sqlalchemy import text
+from sqlalchemy.future import select
+from fastapi import Header, HTTPException
+from typing import Optional
+
 @app.post("/admin/users/{user_id}/suspend")
 def admin_suspend_user(
     user_id: str,
@@ -3336,21 +3342,15 @@ def admin_suspend_user(
         if not p:
             raise HTTPException(status_code=404, detail="No profile found for that user_id")
 
-        # 2) Ban the profile (so they disappear)
+        # 2) Mark profile as banned (so they disappear from Discover)
         p.is_banned = True
         p.banned_reason = reason
         p.banned_at = datetime.utcnow()
-        p.is_available = False  # suspended users should not appear in Discover
+        p.is_available = False
         p.updated_at = datetime.utcnow()
         session.add(p)
 
-        # 3) Ban the user in the USERS table (so login can block them)
-        u = session.execute(select(User).where(User.id == uid)).scalar_one_or_none()
-        if u:
-            u.is_banned = True
-            session.add(u)
-
-        # 4) Grab the email tied to this user_id and insert into banned_emails
+        # 3) ALSO permanently block the email (so they cannot log in or sign up again)
         email_row = session.execute(
             select(AuthAccount.email).where(AuthAccount.user_id == uid)
         ).scalar_one_or_none()
@@ -3365,6 +3365,7 @@ def admin_suspend_user(
                 {"email": _normalize_email(email_row)}
             )
 
+        # 4) Commit everything
         session.commit()
 
         return {"ok": True, "user_id": uid, "profile_id": p.id, "is_banned": True}
