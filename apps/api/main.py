@@ -1266,6 +1266,21 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": exc.errors(), "body": exc.body},
     )
 
+
+# 🔥 Catch ALL unhandled server errors (500) and print full traceback
+import traceback
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        f"UNHANDLED ERROR on {request.method} {request.url}: {exc}"
+    )
+    logger.error(traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error"},
+    )
+
 # -----------------------------
 # Helpers
 # -----------------------------
