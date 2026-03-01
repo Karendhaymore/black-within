@@ -3319,31 +3319,40 @@ def admin_suspend_user(
     reason = (body.reason or "").strip() or None
 
     with Session(engine) as session:
+        # 1) Find the user's profile
         p = session.execute(select(Profile).where(Profile.owner_user_id == uid)).scalar_one_or_none()
         if not p:
             raise HTTPException(status_code=404, detail="No profile found for that user_id")
 
+        # 2) Ban the profile (so they disappear)
         p.is_banned = True
         p.banned_reason = reason
         p.banned_at = datetime.utcnow()
         p.is_available = False  # suspended users should not appear in Discover
         p.updated_at = datetime.utcnow()
-
         session.add(p)
-        # 🔒 Also permanently block this email
-email_row = session.execute(
-    select(AuthAccount.email).where(AuthAccount.user_id == user_id)
-).scalar_one_or_none()
 
-if email_row:
-    session.execute(
-        text("""
-            INSERT INTO banned_emails (email)
-            VALUES (:email)
-            ON CONFLICT (email) DO NOTHING
-        """),
-        {"email": _normalize_email(email_row)}
-    )
+        # 3) Ban the user in the USERS table (so login can block them)
+        u = session.execute(select(User).where(User.id == uid)).scalar_one_or_none()
+        if u:
+            u.is_banned = True
+            session.add(u)
+
+        # 4) Grab the email tied to this user_id and insert into banned_emails
+        email_row = session.execute(
+            select(AuthAccount.email).where(AuthAccount.user_id == uid)
+        ).scalar_one_or_none()
+
+        if email_row:
+            session.execute(
+                text("""
+                    INSERT INTO banned_emails (email)
+                    VALUES (:email)
+                    ON CONFLICT (email) DO NOTHING
+                """),
+                {"email": _normalize_email(email_row)}
+            )
+
         session.commit()
 
         return {"ok": True, "user_id": uid, "profile_id": p.id, "is_banned": True}
