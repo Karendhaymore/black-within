@@ -2859,6 +2859,7 @@ def send_message(payload: MessageCreatePayload):
         raise HTTPException(status_code=400, detail="Message body is required")
 
     with Session(engine) as session:
+        _require_not_banned(session, user_id)  
         thread = session.get(Thread, thread_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Thread not found")
