@@ -2831,6 +2831,24 @@ def _require_not_banned(session: Session, user_id: str) -> None:
     if getattr(p, "is_banned", False):
         raise HTTPException(status_code=403, detail="Your account has been suspended.")
 
+def _enforce_thread_creation_limit(session: Session, user_id: str) -> None:
+    """
+    Prevent users from starting more than 10 new conversations per hour.
+    """
+    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+
+    count = session.execute(
+        select(Thread)
+        .where(Thread.created_by_user_id == user_id)
+        .where(Thread.created_at >= one_hour_ago)
+    ).scalars().all()
+
+    if len(count) >= 10:
+        raise HTTPException(
+            status_code=429,
+            detail="You have reached the limit of 10 new conversations per hour. Please try again later."
+        )
+
 @app.get("/messages", response_model=MessagesResponse)
 def list_messages(thread_id: str = Query(...), user_id: str = Query(...), limit: int = Query(default=200, ge=1, le=500)):
     user_id = _ensure_user(user_id)
