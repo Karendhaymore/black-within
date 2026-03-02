@@ -2893,6 +2893,31 @@ def list_messages(thread_id: str = Query(...), user_id: str = Query(...), limit:
         items = [MessageItem(id=m.id, thread_id=m.thread_id, sender_user_id=m.sender_user_id, body=m.body, created_at=m.created_at.isoformat()) for m in rows]
         return MessagesResponse(items=items, otherLastReadAt=other_last_read_at)
 
+def _enforce_thread_creation_limit(session: Session, user_id: str, limit: int = 10) -> None:
+    """
+    Blocks users from creating too many brand-new threads (new conversations) in a short time window.
+    Default: max 10 new threads per 1 hour.
+    """
+    if AUTH_PREVIEW_MODE:
+        return
+
+    now = datetime.utcnow()
+    window_start = now - timedelta(hours=1)
+
+    # Count threads created in the last hour where this user is part of the pair
+    created_count = session.execute(
+        select(func.count(Thread.id)).where(
+            Thread.created_at >= window_start,
+            or_(Thread.user_low == user_id, Thread.user_high == user_id),
+        )
+    ).scalar_one()
+
+    if (created_count or 0) >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail="You have started too many new conversations. Please wait a bit and try again.",
+        )
+
 
 @app.post("/messages", response_model=MessageItem)
 def send_message(payload: MessageCreatePayload):
