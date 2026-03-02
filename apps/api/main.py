@@ -2684,6 +2684,9 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
     user_id = _ensure_user(payload.user_id)
 
     with Session(engine) as session:
+        # ✅ Block banned users from starting or accessing threads
+        _require_not_banned(session, user_id)
+
         prof = session.get(Profile, (payload.with_profile_id or "").strip())
         if not prof or getattr(prof, "is_banned", False):
             raise HTTPException(status_code=404, detail="Profile not found")
@@ -2695,17 +2698,37 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
             raise HTTPException(status_code=400, detail="You cannot message yourself.")
 
         low, high = _sorted_pair(user_id, other_user_id)
-        existing = session.execute(select(Thread).where(Thread.user_low == low, Thread.user_high == high)).scalar_one_or_none()
+        existing = session.execute(
+            select(Thread).where(Thread.user_low == low, Thread.user_high == high)
+        ).scalar_one_or_none()
+
         now = datetime.utcnow()
 
         if existing:
             thread = existing
         else:
-            thread = Thread(id=_new_id(), user_low=low, user_high=high, created_at=now, updated_at=now)
+            # ✅ Limit brand-new conversations to 10 per hour
+            _enforce_thread_creation_limit(session, user_id)
+
+            thread = Thread(
+                id=_new_id(),
+                user_low=low,
+                user_high=high,
+                created_at=now,
+                updated_at=now
+            )
             session.add(thread)
             session.commit()
 
-        return ThreadItem(threadId=thread.id, with_user_id=other_user_id, with_profile_id=prof.id, with_display_name=prof.display_name, with_photo=prof.photo, last_message=None, last_message_at=None)
+        return ThreadItem(
+            threadId=thread.id,
+            with_user_id=other_user_id,
+            with_profile_id=prof.id,
+            with_display_name=prof.display_name,
+            with_photo=prof.photo,
+            last_message=None,
+            last_message_at=None
+        )
 
 
 @app.get("/threads/inbox", response_model=ThreadsInboxResponse)
