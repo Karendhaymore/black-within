@@ -123,7 +123,16 @@ async function apiLikeProfile(
       recipient_user_id: recipientUserId || null,
     }),
   });
-  if (!res.ok) throw new Error(`Like failed (${res.status}).`);
+
+  if (!res.ok) {
+    if (res.status === 403) {
+      throw new Error("Your account has been suspended.");
+    } else if (res.status === 429) {
+      throw new Error("You are doing that too quickly. Please wait a moment.");
+    } else {
+      throw new Error("Something went wrong. Please try again.");
+    }
+  }
 }
 
 /**
