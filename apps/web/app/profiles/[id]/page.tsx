@@ -159,15 +159,20 @@ async function apiGetOrCreateThread(
     }),
   });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Failed to create thread (${res.status}). ${text}`);
+ if (!res.ok) {
+  if (res.status === 403) {
+    throw new Error("Your account has been suspended.");
+  } else if (res.status === 429) {
+    throw new Error("You are starting too many conversations. Please wait a moment.");
+  } else {
+    throw new Error("Unable to start a conversation right now. Please try again.");
   }
+}
 
-  const data = (await res.json()) as ThreadGetOrCreateResponse;
-  const threadId = data.threadId || data.thread_id || data.id || "";
-  if (!threadId) throw new Error("Thread created, but no thread id returned.");
-  return threadId;
+const data = (await res.json()) as ThreadGetOrCreateResponse;
+const threadId = data.threadId || data.thread_id || data.id || "";
+if (!threadId) throw new Error("Conversation could not be started. Please try again.");
+return threadId;
 }
 
 // -----------------------------
