@@ -675,18 +675,6 @@ export default function DiscoverPage() {
           </div>
         </div>
 
-        <div style={{ marginTop: 10, fontSize: 13, color: "#666" }}>
-          <div>
-            <strong>API:</strong> {API_BASE}
-          </div>
-          <div>
-            <strong>Profiles loaded:</strong> {profiles.length} {loadingProfiles ? "(loading…)" : ""}
-          </div>
-          <div>
-            <strong>Saved/likes loading:</strong> {loadingSets ? "yes" : "no"}
-          </div>
-        </div>
-
         {apiError && (
           <div
             style={{
