@@ -114,7 +114,7 @@ async function apiLikeProfile(
   profileId: string,
   recipientUserId?: string
 ) {
-  const res = await fetch(`${API_BASE}/likes`, {
+  await apiFetch("/likes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -123,6 +123,7 @@ async function apiLikeProfile(
       recipient_user_id: recipientUserId || null,
     }),
   });
+}
 
   if (!res.ok) {
     if (res.status === 403) {
