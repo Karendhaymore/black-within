@@ -135,7 +135,6 @@ async function apiLikeProfile(
       throw new Error("Something went wrong. Please try again.");
     }
   }
-}
 
 /**
  * ✅ Threads API: POST /threads/get-or-create
