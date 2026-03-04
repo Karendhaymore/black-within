@@ -126,16 +126,6 @@ async function apiLikeProfile(
   });
 }
 
-  if (!res.ok) {
-    if (res.status === 403) {
-      throw new Error("Your account has been suspended.");
-    } else if (res.status === 429) {
-      throw new Error("You are doing that too quickly. Please wait a moment.");
-    } else {
-      throw new Error("Something went wrong. Please try again.");
-    }
-  }
-
 /**
  * ✅ Threads API: POST /threads/get-or-create
  * Backend expects: { user_id, with_profile_id }
@@ -151,23 +141,19 @@ async function apiGetOrCreateThread(
   userId: string,
   withProfileId: string
 ): Promise<string> {
-  const res = await fetch(`${API_BASE}/threads/get-or-create`, {
+  // Use apiFetch so we don't leak raw API messages to the user
+  const data = (await apiFetch("/threads/get-or-create", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       user_id: userId,
       with_profile_id: withProfileId,
     }),
-  });
+  })) as ThreadGetOrCreateResponse;
 
-if (!res.ok) {
-  throw new Error(await getFriendlyApiError(res));
-}
-
-const data = (await res.json()) as ThreadGetOrCreateResponse;
-const threadId = data.threadId || data.thread_id || data.id || "";
-if (!threadId) throw new Error("Conversation could not be started. Please try again.");
-return threadId;
+  const threadId = data.threadId || data.thread_id || data.id || "";
+  if (!threadId) throw new Error("Conversation could not be started. Please try again.");
+  return threadId;
 }
 
 // -----------------------------
@@ -369,7 +355,7 @@ export default function ProfileDetailPage() {
       showToast("Like sent.");
     } catch (e: any) {
       setLikedIds(prev);
-      showToast("Could not like right now. Please try again.");
+      showToast(e?.message || "Could not like right now. Please try again.");
       setApiError(e?.message || "Like failed.");
     }
   }
