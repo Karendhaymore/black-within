@@ -161,14 +161,8 @@ async function apiGetOrCreateThread(
     }),
   });
 
- if (!res.ok) {
-  if (res.status === 403) {
-    throw new Error("Your account has been suspended.");
-  } else if (res.status === 429) {
-    throw new Error("You are starting too many conversations. Please wait a moment.");
-  } else {
-    throw new Error("Unable to start a conversation right now. Please try again.");
-  }
+if (!res.ok) {
+  throw new Error(await getFriendlyApiError(res));
 }
 
 const data = (await res.json()) as ThreadGetOrCreateResponse;
