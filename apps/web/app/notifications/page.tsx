@@ -432,9 +432,6 @@ export default function NotificationsPage() {
           </div>
         )}
 
-        <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
-          MVP note: Notifications are stored in the database (cross-device).
-        </div>
       </div>
     </main>
   );
