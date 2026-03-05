@@ -712,13 +712,7 @@ export default function DiscoverPage() {
                 return (
                   <div
                     key={p.id}
-                    style={{
-                      border: "1px solid #eee",
-                      borderRadius: 16,
-                      overflow: "hidden",
-                      background: "white",
-                      boxShadow: "0 10px 24px rgba(0,0,0,0.04)",
-                    }}
+                  className="card" 
                   >
                     {/* BIG PHOTO */}
                     <Link href={`/profiles/${p.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
