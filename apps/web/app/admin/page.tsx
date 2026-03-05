@@ -169,6 +169,32 @@ async function apiAdminRemovePhoto(token: string, profile_id: string, slot: 1 | 
   return res.json().catch(() => ({}));
 }
 
+async function apiAdminUploadPhoto(
+  token: string,
+  profile_id: string,
+  slot: 1 | 2,
+  file: File
+): Promise<{ url: string }> {
+  const fd = new FormData();
+  fd.append("slot", String(slot));
+  fd.append("file", file);
+
+  const res = await fetch(
+    `${API_BASE}/admin/profiles/${encodeURIComponent(profile_id)}/upload-photo`,
+    {
+      method: "POST",
+      headers: {
+        // IMPORTANT: do NOT set Content-Type when using FormData
+        "X-Admin-Token": token,
+        Authorization: `Bearer ${token}`,
+      },
+      body: fd,
+    }
+  );
+
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return res.json();
+}
 async function apiAdminBan(token: string, profile_id: string, banned: boolean, reason?: string) {
   return apiAdminPatchProfile(token, profile_id, {
     is_banned: banned,
