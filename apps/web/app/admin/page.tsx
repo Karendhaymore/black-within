@@ -119,11 +119,21 @@ async function apiAdminMe(token: string) {
   return res.json() as Promise<{ email: string; role: "admin" | "moderator" }>;
 }
 
-async function apiAdminPatchProfile(
-  token: string,
-  profile_id: string,
-  body: { isAvailable?: boolean; is_banned?: boolean; banned_reason?: string | null }
-) {
+// ✅ Expanded patch body to support editable profile fields
+type AdminProfilePatchBody = {
+  // existing
+  isAvailable?: boolean;
+  is_banned?: boolean;
+  banned_reason?: string | null;
+
+  // editable profile fields
+  displayName?: string;
+  age?: number;
+  city?: string;
+  stateUS?: string;
+};
+
+async function apiAdminPatchProfile(token: string, profile_id: string, body: AdminProfilePatchBody) {
   const res = await fetch(`${API_BASE}/admin/profiles/${encodeURIComponent(profile_id)}`, {
     method: "PATCH",
     headers: buildAdminHeaders(token),
@@ -218,9 +228,18 @@ export default function AdminDashboardPage() {
   const [msgTargetProfile, setMsgTargetProfile] = useState<AdminProfileRow | null>(null);
   const [msgText, setMsgText] = useState("");
   const [msgSending, setMsgSending] = useState(false);
-
-  // Optional: allow subject (defaults if left blank)
   const [msgSubject, setMsgSubject] = useState("Admin message");
+
+  // ✅ Edit modal state (Option A)
+  const [editOpen, setEditOpen] = useState(false);
+  const [editTargetProfile, setEditTargetProfile] = useState<AdminProfileRow | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editAge, setEditAge] = useState<string>(""); // keep as string for input
+  const [editCity, setEditCity] = useState("");
+  const [editStateUS, setEditStateUS] = useState("");
+  const [editIsAvailable, setEditIsAvailable] = useState(true);
 
   // ---- Reports state + polling ----
   const [reportCounts, setReportCounts] = useState<{ open: number; resolved: number }>({
@@ -254,7 +273,7 @@ export default function AdminDashboardPage() {
         setToken(t);
         setTokenInput(t);
         showToast(`Signed in as ${me.email} (${me.role})`);
-      } catch (e: any) {
+      } catch {
         clearAdminToken();
         router.replace("/admin/login");
       }
@@ -395,6 +414,75 @@ export default function AdminDashboardPage() {
     background: "#fff7f7",
   };
 
+  const primaryBtn: React.CSSProperties = {
+    ...btn,
+    border: "1px solid #111",
+    background: "#111",
+    color: "white",
+  };
+
+  function openEditModal(p: AdminProfileRow) {
+    setEditTargetProfile(p);
+    setEditDisplayName(p.displayName || "");
+    setEditAge(String(p.age ?? ""));
+    setEditCity(p.city || "");
+    setEditStateUS(p.stateUS || "");
+    setEditIsAvailable(!!p.isAvailable);
+    setEditOpen(true);
+  }
+
+  async function saveEditModal() {
+    if (!editTargetProfile) return;
+
+    const profileId = editTargetProfile.profile_id;
+
+    const displayName = editDisplayName.trim();
+    const city = editCity.trim();
+    const stateUS = editStateUS.trim();
+
+    const parsedAge = Number(editAge);
+    if (!displayName) {
+      alert("Please enter a display name.");
+      return;
+    }
+    if (!Number.isFinite(parsedAge) || parsedAge <= 0 || parsedAge > 120) {
+      alert("Please enter a valid age.");
+      return;
+    }
+    if (!city) {
+      alert("Please enter a city.");
+      return;
+    }
+    if (!stateUS) {
+      alert("Please enter a state (ex: GA, CA).");
+      return;
+    }
+
+    try {
+      setEditSaving(true);
+      setApiError(null);
+
+      await apiAdminPatchProfile(token, profileId, {
+        displayName,
+        age: parsedAge,
+        city,
+        stateUS,
+        isAvailable: editIsAvailable,
+      });
+
+      showToast("Profile updated.");
+      setEditOpen(false);
+      setEditTargetProfile(null);
+      await refresh();
+    } catch (e: any) {
+      const msg = e?.message || "Failed to update profile.";
+      setApiError(msg);
+      alert(msg);
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   return (
     <>
       <main
@@ -419,8 +507,7 @@ export default function AdminDashboardPage() {
             <div>
               <h1 style={{ fontSize: "2.2rem", marginBottom: 6 }}>Admin Dashboard</h1>
               <div style={{ color: "#666" }}>
-                Profiles: <b>{stats.total}</b> • Visible: <b>{stats.available}</b> • Banned:{" "}
-                <b>{stats.banned}</b>
+                Profiles: <b>{stats.total}</b> • Visible: <b>{stats.available}</b> • Banned: <b>{stats.banned}</b>
               </div>
             </div>
 
@@ -515,9 +602,7 @@ export default function AdminDashboardPage() {
                   Open: <b>{reportCounts.open}</b> • Resolved: <b>{reportCounts.resolved}</b>
                 </div>
 
-                {reportsError ? (
-                  <div style={{ marginTop: 8, color: "#b00020", fontWeight: 700 }}>{reportsError}</div>
-                ) : null}
+                {reportsError ? <div style={{ marginTop: 8, color: "#b00020", fontWeight: 700 }}>{reportsError}</div> : null}
               </div>
 
               <button
@@ -555,9 +640,7 @@ export default function AdminDashboardPage() {
                   <tbody>
                     {openReports.map((r) => (
                       <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
-                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-                          {new Date(r.created_at).toLocaleString()}
-                        </td>
+                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{new Date(r.created_at).toLocaleString()}</td>
                         <td style={{ padding: "10px 8px" }}>{r.category}</td>
                         <td style={{ padding: "10px 8px" }}>{r.reason}</td>
                         <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
@@ -583,9 +666,7 @@ export default function AdminDashboardPage() {
                           ) : null}
                         </td>
                         <td style={{ padding: "10px 8px", maxWidth: 420 }}>
-                          <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>
-                            {r.details || "—"}
-                          </div>
+                          <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>{r.details || "—"}</div>
                         </td>
                         <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
                           <button
@@ -683,7 +764,7 @@ export default function AdminDashboardPage() {
                     <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Photos</th>
                     <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Activity</th>
                     <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Ban</th>
-                    <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Message</th>
+                    <th style={{ padding: "10px 8px", borderBottom: "1px solid #eee" }}>Actions</th>
                   </tr>
                 </thead>
 
@@ -856,8 +937,7 @@ export default function AdminDashboardPage() {
 
                                 if (!p.is_banned) {
                                   const reason =
-                                    window.prompt("Ban reason (optional):", "Violation of community guidelines") ||
-                                    "";
+                                    window.prompt("Ban reason (optional):", "Violation of community guidelines") || "";
                                   await apiAdminBan(token, p.profile_id, true, reason);
                                   showToast("User banned.");
                                 } else {
@@ -880,19 +960,30 @@ export default function AdminDashboardPage() {
                         </td>
 
                         <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
-                          <button
-                            type="button"
-                            style={btn}
-                            disabled={busy}
-                            onClick={() => {
-                              setMsgTargetProfile(p);
-                              setMsgText("");
-                              setMsgSubject("Admin message");
-                              setMsgOpen(true);
-                            }}
-                          >
-                            Message
-                          </button>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              style={btn}
+                              disabled={busy}
+                              onClick={() => {
+                                setMsgTargetProfile(p);
+                                setMsgText("");
+                                setMsgSubject("Admin message");
+                                setMsgOpen(true);
+                              }}
+                            >
+                              Message
+                            </button>
+
+                            <button
+                              type="button"
+                              style={btn}
+                              disabled={busy}
+                              onClick={() => openEditModal(p)}
+                            >
+                              Edit
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -917,6 +1008,153 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       </main>
+
+      {/* ✅ Edit Modal (Option A) */}
+      {editOpen && editTargetProfile ? (
+        <div
+          onClick={() => {
+            if (editSaving) return;
+            setEditOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "grid",
+            placeItems: "center",
+            padding: 20,
+            zIndex: 60,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 620,
+              background: "white",
+              borderRadius: 16,
+              border: "1px solid #eee",
+              padding: 16,
+              boxShadow: "0 10px 40px rgba(0,0,0,0.15)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>Edit Profile</div>
+                <div style={{ color: "#666", fontSize: 13, marginTop: 6 }}>
+                  Profile: <code>{editTargetProfile.profile_id}</code>
+                  <div style={{ marginTop: 4 }}>
+                    User ID: <code>{editTargetProfile.owner_user_id}</code>
+                  </div>
+                </div>
+              </div>
+
+              <button type="button" style={dangerBtn} onClick={() => setEditOpen(false)} disabled={editSaving}>
+                Close
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Display Name</div>
+                <input
+                  value={editDisplayName}
+                  onChange={(e) => setEditDisplayName(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: 10,
+                    borderRadius: 12,
+                    border: "1px solid #ccc",
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Age</div>
+                <input
+                  value={editAge}
+                  onChange={(e) => setEditAge(e.target.value)}
+                  inputMode="numeric"
+                  style={{
+                    width: "100%",
+                    padding: 10,
+                    borderRadius: 12,
+                    border: "1px solid #ccc",
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>City</div>
+                <input
+                  value={editCity}
+                  onChange={(e) => setEditCity(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: 10,
+                    borderRadius: 12,
+                    border: "1px solid #ccc",
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>State (ex: GA)</div>
+                <input
+                  value={editStateUS}
+                  onChange={(e) => setEditStateUS(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: 10,
+                    borderRadius: 12,
+                    border: "1px solid #ccc",
+                    fontSize: 14,
+                    textTransform: "uppercase",
+                  }}
+                />
+              </div>
+
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
+                  <input
+                    type="checkbox"
+                    checked={editIsAvailable}
+                    onChange={(e) => setEditIsAvailable(e.target.checked)}
+                  />
+                  <span style={{ fontWeight: 900, color: "#111" }}>Visible in Discover</span>
+                  <span style={{ color: "#666", fontSize: 12 }}>
+                    (Turning this off hides them from Discover.)
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+              <button
+                type="button"
+                style={btn}
+                onClick={() => {
+                  if (editSaving) return;
+                  openEditModal(editTargetProfile);
+                }}
+                disabled={editSaving}
+                title="Reset fields to current values"
+              >
+                Reset
+              </button>
+
+              <button type="button" style={primaryBtn} onClick={saveEditModal} disabled={editSaving}>
+                {editSaving ? "Saving..." : "Save changes"}
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10, color: "#777", fontSize: 12 }}>Tip: click outside this box to close.</div>
+          </div>
+        </div>
+      ) : null}
 
       {/* ✅ Message Modal */}
       {msgOpen && msgTargetProfile ? (
@@ -963,7 +1201,6 @@ export default function AdminDashboardPage() {
               </button>
             </div>
 
-            {/* Subject (optional but matches backend requirement) */}
             <input
               value={msgSubject}
               onChange={(e) => setMsgSubject(e.target.value)}
