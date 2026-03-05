@@ -95,7 +95,6 @@ async function getFriendlyApiError(res: Response): Promise<string> {
   if (status === 402) return "Messaging is locked right now.";
   if (status >= 500) return "The server is having trouble right now. Please try again shortly.";
 
-  // Try to extract a short detail, but avoid raw dumps
   try {
     const data = await res.json().catch(() => null);
     const detail = data?.detail;
@@ -263,7 +262,6 @@ function parseIdentityPreview(preview: string): { culturalIdentity: string; spir
   const text = (preview || "").replace(/\s+/g, " ").trim();
 
   const getField = (label: string) => {
-    // Capture up to a separator dot, end, or next label
     const re = new RegExp(`${label}\\s*:\\s*([^·|]+?)(?=\\s*(?:·|\\||$))`, "i");
     const m = text.match(re);
     return (m?.[1] || "").trim();
@@ -836,27 +834,40 @@ export default function DiscoverPage() {
           </div>
         )}
 
-        {/* Filters */}
+        {/* Filters (single-line row; scrolls horizontally on small screens) */}
         <div
           style={{
             marginTop: 14,
             display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
             alignItems: "center",
+            gap: 12,
             padding: 12,
             borderRadius: 16,
             border: "1px solid rgba(0,0,0,0.10)",
             background: "rgba(255,255,255,0.86)",
             boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
             backdropFilter: "blur(10px)",
+
+            flexWrap: "nowrap",
+            overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
           }}
         >
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 900, color: "#2a2a2a" }}>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              fontWeight: 900,
+              color: "#2a2a2a",
+              whiteSpace: "nowrap",
+              flex: "0 0 auto",
+            }}
+          >
             <Icon name="filter" /> Filters
           </span>
 
-          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", flex: "0 0 auto" }}>
             Intention:
             <select value={intentionFilter} onChange={(e) => setIntentionFilter(e.target.value)}>
               {intentionOptions.map((opt) => (
@@ -867,10 +878,18 @@ export default function DiscoverPage() {
             </select>
           </label>
 
-          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", flex: "0 0 auto" }}>
             Cultural Identity:
             <select value={culturalIdentityFilter} onChange={(e) => setCulturalIdentityFilter(e.target.value)}>
-              {culturalIdentityOptions.map((opt) => (
+              {[
+                "All",
+                "African-Centered",
+                "Pan-African",
+                "Ancestrally Rooted",
+                "Culturally Sovereign",
+                "Black (Conscious Use)",
+                "African American",
+              ].map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
@@ -878,36 +897,39 @@ export default function DiscoverPage() {
             </select>
           </label>
 
-          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", flex: "0 0 auto" }}>
             Spiritual Framework:
             <select value={spiritualFrameworkFilter} onChange={(e) => setSpiritualFrameworkFilter(e.target.value)}>
-              {spiritualFrameworkOptions.map((opt) => (
+              {[
+                "All",
+                "Afrocentric Spirituality",
+                "Dogon",
+                "Kemetic Philosophy",
+                "Ubuntu",
+                "Sankofa",
+                "Ifa / Orisha Traditions (Yoruba)",
+                "Vodun / Vodou",
+                "Hoodoo / Rootwork",
+                "Hebrew Israelite",
+                "Candomblé",
+                "Obeah",
+                "Pan African Spiritual Movements",
+                "African-Centered Holistic Healing",
+                "Bible Based Christian",
+                "Ancestral Veneration Systems",
+                "Liberated Christianity",
+                "Islam",
+                "New Age Spirituality",
+                "Afrofuturist Spirituality",
+                "Metaphysical Science (African-centered variants)",
+                "Quantum Spirituality",
+              ].map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
               ))}
             </select>
           </label>
-
-          <button
-            onClick={() => {
-              if (!userId) return;
-              refreshLikesStatus(userId).catch(() => {});
-              showToast("Refreshed likes status.");
-            }}
-            style={{
-              padding: "0.55rem 0.85rem",
-              border: "1px solid rgba(0,0,0,0.12)",
-              borderRadius: 999,
-              background: "white",
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 900,
-              boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
-            }}
-          >
-            Refresh likes
-          </button>
         </div>
 
         {/* Grid */}
@@ -1033,7 +1055,7 @@ export default function DiscoverPage() {
                         </div>
                       )}
 
-                      {/* ACTIONS (kept here, upgraded to pill buttons w/ icons) */}
+                      {/* ACTIONS */}
                       <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                         <Link href={`/profiles/${p.id}`} style={pillBtn}>
                           <Icon name="user" /> View
