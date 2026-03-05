@@ -255,8 +255,6 @@ function formatResetHint(status: LikesStatusResponse | null) {
 
 /**
  * ✅ Parse identityPreview into (culturalIdentity, spiritualFramework)
- * Expects text containing labels like:
- *  "Cultural Identity: Pan-African ... · Spiritual Framework: Hebrew Israelite"
  */
 function parseIdentityPreview(preview: string): { culturalIdentity: string; spiritualFramework: string } {
   const text = (preview || "").replace(/\s+/g, " ").trim();
@@ -707,6 +705,37 @@ export default function DiscoverPage() {
   const messagesStyle = totalUnread > 0 ? pillBtnGlow : pillBtn;
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
 
+  // ✅ Compact filter styles (shrunk dropdowns)
+  const filterWrapStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    whiteSpace: "nowrap",
+  };
+
+  const filterLabelStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 900,
+    color: "#2a2a2a",
+    whiteSpace: "nowrap",
+  };
+
+  const selectBase: React.CSSProperties = {
+    height: 32,
+    padding: "0 10px",
+    borderRadius: 10,
+    border: "1px solid rgba(0,0,0,0.14)",
+    background: "white",
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#222",
+    outline: "none",
+  };
+
+  const selectIntention: React.CSSProperties = { ...selectBase, width: 140 };
+  const selectCultural: React.CSSProperties = { ...selectBase, width: 165 };
+  const selectSpiritual: React.CSSProperties = { ...selectBase, width: 190 };
+
   if (gateLoading) {
     return <div style={{ padding: 24, fontWeight: 700 }}>Loading…</div>;
   }
@@ -834,14 +863,14 @@ export default function DiscoverPage() {
           </div>
         )}
 
-        {/* Filters (single-line row; scrolls horizontally on small screens) */}
+        {/* Filters (one line, compact) */}
         <div
           style={{
             marginTop: 14,
             display: "flex",
             alignItems: "center",
-            gap: 12,
-            padding: 12,
+            gap: 10,
+            padding: "10px 12px",
             borderRadius: 16,
             border: "1px solid rgba(0,0,0,0.10)",
             background: "rgba(255,255,255,0.86)",
@@ -849,87 +878,55 @@ export default function DiscoverPage() {
             backdropFilter: "blur(10px)",
 
             flexWrap: "nowrap",
-            overflowX: "auto",
-            WebkitOverflowScrolling: "touch",
+            overflow: "hidden",
           }}
         >
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              fontWeight: 900,
-              color: "#2a2a2a",
-              whiteSpace: "nowrap",
-              flex: "0 0 auto",
-            }}
-          >
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 900, color: "#2a2a2a" }}>
             <Icon name="filter" /> Filters
           </span>
 
-          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", flex: "0 0 auto" }}>
-            Intention:
-            <select value={intentionFilter} onChange={(e) => setIntentionFilter(e.target.value)}>
+          <div style={{ flex: 1 }} />
+
+          <div style={filterWrapStyle}>
+            <span style={filterLabelStyle}>Intention:</span>
+            <select value={intentionFilter} onChange={(e) => setIntentionFilter(e.target.value)} style={selectIntention}>
               {intentionOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
               ))}
             </select>
-          </label>
+          </div>
 
-          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", flex: "0 0 auto" }}>
-            Cultural Identity:
-            <select value={culturalIdentityFilter} onChange={(e) => setCulturalIdentityFilter(e.target.value)}>
-              {[
-                "All",
-                "African-Centered",
-                "Pan-African",
-                "Ancestrally Rooted",
-                "Culturally Sovereign",
-                "Black (Conscious Use)",
-                "African American",
-              ].map((opt) => (
+          <div style={filterWrapStyle}>
+            <span style={filterLabelStyle}>Cultural:</span>
+            <select
+              value={culturalIdentityFilter}
+              onChange={(e) => setCulturalIdentityFilter(e.target.value)}
+              style={selectCultural}
+            >
+              {culturalIdentityOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
               ))}
             </select>
-          </label>
+          </div>
 
-          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", flex: "0 0 auto" }}>
-            Spiritual Framework:
-            <select value={spiritualFrameworkFilter} onChange={(e) => setSpiritualFrameworkFilter(e.target.value)}>
-              {[
-                "All",
-                "Afrocentric Spirituality",
-                "Dogon",
-                "Kemetic Philosophy",
-                "Ubuntu",
-                "Sankofa",
-                "Ifa / Orisha Traditions (Yoruba)",
-                "Vodun / Vodou",
-                "Hoodoo / Rootwork",
-                "Hebrew Israelite",
-                "Candomblé",
-                "Obeah",
-                "Pan African Spiritual Movements",
-                "African-Centered Holistic Healing",
-                "Bible Based Christian",
-                "Ancestral Veneration Systems",
-                "Liberated Christianity",
-                "Islam",
-                "New Age Spirituality",
-                "Afrofuturist Spirituality",
-                "Metaphysical Science (African-centered variants)",
-                "Quantum Spirituality",
-              ].map((opt) => (
+          <div style={filterWrapStyle}>
+            <span style={filterLabelStyle}>Spiritual:</span>
+            <select
+              value={spiritualFrameworkFilter}
+              onChange={(e) => setSpiritualFrameworkFilter(e.target.value)}
+              style={selectSpiritual}
+            >
+              {spiritualFrameworkOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
               ))}
             </select>
-          </label>
+          </div>
         </div>
 
         {/* Grid */}
@@ -983,7 +980,6 @@ export default function DiscoverPage() {
                       backdropFilter: "blur(10px)",
                     }}
                   >
-                    {/* BIG PHOTO */}
                     <Link href={`/profiles/${p.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
                       {p.photo && !brokenImages[p.id] ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -1012,12 +1008,18 @@ export default function DiscoverPage() {
                             color: "#444",
                           }}
                         >
-                          {getInitials(p.displayName)}
+                          {(p.displayName || "")
+                            .trim()
+                            .split(" ")
+                            .filter(Boolean)
+                            .map((w) => w[0])
+                            .join("")
+                            .slice(0, 2)
+                            .toUpperCase()}
                         </div>
                       )}
                     </Link>
 
-                    {/* NAME + LOCATION UNDER PHOTO */}
                     <div style={{ padding: 14 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
                         <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1.1 }}>{p.displayName}</div>
@@ -1055,14 +1057,35 @@ export default function DiscoverPage() {
                         </div>
                       )}
 
-                      {/* ACTIONS */}
                       <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                         <Link href={`/profiles/${p.id}`} style={pillBtn}>
                           <Icon name="user" /> View
                         </Link>
 
                         <button
-                          onClick={() => onToggleSave(p)}
+                          onClick={async () => {
+                            if (!userId) return;
+                            const currentlySaved = savedIds.includes(p.id);
+                            const prev = savedIds;
+
+                            setSavedIds((curr) => (curr.includes(p.id) ? curr.filter((x) => x !== p.id) : [p.id, ...curr]));
+
+                            try {
+                              if (currentlySaved) {
+                                await apiUnsaveProfile(userId, p.id);
+                                showToast("Removed from Saved Profiles.");
+                              } else {
+                                await apiSaveProfile(userId, p.id);
+                                showToast("Saved. You can view it later in Saved Profiles.");
+                              }
+                              await refreshSavedAndLikes(userId);
+                            } catch (e: any) {
+                              setSavedIds(prev);
+                              const msg = toNiceString(e?.message || e) || "Could not update saved status right now.";
+                              setApiError(msg);
+                              showToast(msg);
+                            }
+                          }}
                           disabled={loadingSets}
                           style={{
                             ...pillBtn,
@@ -1105,7 +1128,6 @@ export default function DiscoverPage() {
           )}
         </div>
 
-        {/* Toast */}
         {toast && (
           <div
             style={{
