@@ -61,3 +61,27 @@ body::before {
 main {
   padding-top: 14px;
 }
+
+/* FLOATING CARD STYLE (used across the app) */
+
+.card {
+  background: white;
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,0.05);
+
+  box-shadow:
+    0 4px 10px rgba(0,0,0,0.04),
+    0 12px 30px rgba(0,0,0,0.06);
+
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* subtle hover lift */
+
+.card:hover {
+  transform: translateY(-4px);
+
+  box-shadow:
+    0 8px 20px rgba(0,0,0,0.06),
+    0 18px 40px rgba(0,0,0,0.10);
+}
