@@ -141,9 +141,7 @@ async function apiSaveProfile(userId: string, profileId: string) {
 }
 
 async function apiUnsaveProfile(userId: string, profileId: string) {
-  const url = `${API_BASE}/saved?user_id=${encodeURIComponent(
-    userId
-  )}&profile_id=${encodeURIComponent(profileId)}`;
+  const url = `${API_BASE}/saved?user_id=${encodeURIComponent(userId)}&profile_id=${encodeURIComponent(profileId)}`;
   const res = await fetch(url, { method: "DELETE" });
   if (!res.ok) throw new Error(await getFriendlyApiError(res));
 }
@@ -257,21 +255,34 @@ function formatResetHint(status: LikesStatusResponse | null) {
 }
 
 /**
+ * ✅ Parse identityPreview into (culturalIdentity, spiritualFramework)
+ * Expects text containing labels like:
+ *  "Cultural Identity: Pan-African ... · Spiritual Framework: Hebrew Israelite"
+ */
+function parseIdentityPreview(preview: string): { culturalIdentity: string; spiritualFramework: string } {
+  const text = (preview || "").replace(/\s+/g, " ").trim();
+
+  const getField = (label: string) => {
+    // Capture up to a separator dot, end, or next label
+    const re = new RegExp(`${label}\\s*:\\s*([^·|]+?)(?=\\s*(?:·|\\||$))`, "i");
+    const m = text.match(re);
+    return (m?.[1] || "").trim();
+  };
+
+  const culturalIdentity = getField("Cultural Identity");
+  const spiritualFramework = getField("Spiritual Framework");
+
+  return { culturalIdentity, spiritualFramework };
+}
+
+/**
  * ✅ Tiny inline icons (no extra libraries needed)
  */
 function Icon({
   name,
   size = 16,
 }: {
-  name:
-    | "user"
-    | "bookmark"
-    | "heart"
-    | "bell"
-    | "chat"
-    | "logout"
-    | "filter"
-    | "spark";
+  name: "user" | "bookmark" | "heart" | "bell" | "chat" | "logout" | "filter" | "spark";
   size?: number;
 }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2 };
@@ -354,7 +365,9 @@ export default function DiscoverPage() {
   const [loadingLikesStatus, setLoadingLikesStatus] = useState<boolean>(true);
 
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
-  const [tagFilter, setTagFilter] = useState<string>("All");
+  const [culturalIdentityFilter, setCulturalIdentityFilter] = useState<string>("All");
+  const [spiritualFrameworkFilter, setSpiritualFrameworkFilter] = useState<string>("All");
+
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
   const resetTimerRef = useRef<number | null>(null);
@@ -368,20 +381,61 @@ export default function DiscoverPage() {
     return ["All", ...Array.from(set).sort()];
   }, [availableProfiles]);
 
-  const tagOptions = useMemo(() => {
-    const set = new Set<string>();
-    availableProfiles.forEach((p) => (p.tags || []).forEach((t) => set.add(t)));
-    return ["All", ...Array.from(set).sort()];
-  }, [availableProfiles]);
+  const culturalIdentityOptions = useMemo(
+    () => [
+      "All",
+      "African-Centered",
+      "Pan-African",
+      "Ancestrally Rooted",
+      "Culturally Sovereign",
+      "Black (Conscious Use)",
+      "African American",
+    ],
+    []
+  );
+
+  const spiritualFrameworkOptions = useMemo(
+    () => [
+      "All",
+      "Afrocentric Spirituality",
+      "Dogon",
+      "Kemetic Philosophy",
+      "Ubuntu",
+      "Sankofa",
+      "Ifa / Orisha Traditions (Yoruba)",
+      "Vodun / Vodou",
+      "Hoodoo / Rootwork",
+      "Hebrew Israelite",
+      "Candomblé",
+      "Obeah",
+      "Pan African Spiritual Movements",
+      "African-Centered Holistic Healing",
+      "Bible Based Christian",
+      "Ancestral Veneration Systems",
+      "Liberated Christianity",
+      "Islam",
+      "New Age Spirituality",
+      "Afrofuturist Spirituality",
+      "Metaphysical Science (African-centered variants)",
+      "Quantum Spirituality",
+    ],
+    []
+  );
 
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
       const intentionMatch = intentionFilter === "All" || p.intention === intentionFilter;
-      const tags = Array.isArray(p.tags) ? p.tags : [];
-      const tagMatch = tagFilter === "All" || tags.includes(tagFilter);
-      return intentionMatch && tagMatch;
+
+      const parsed = parseIdentityPreview(p.identityPreview || "");
+      const ci = parsed.culturalIdentity;
+      const sf = parsed.spiritualFramework;
+
+      const culturalMatch = culturalIdentityFilter === "All" || ci === culturalIdentityFilter;
+      const spiritualMatch = spiritualFrameworkFilter === "All" || sf === spiritualFrameworkFilter;
+
+      return intentionMatch && culturalMatch && spiritualMatch;
     });
-  }, [availableProfiles, intentionFilter, tagFilter]);
+  }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter]);
 
   function showToast(msg: any) {
     setToast(typeof msg === "string" ? msg : toNiceString(msg));
@@ -814,9 +868,20 @@ export default function DiscoverPage() {
           </label>
 
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            Tag:
-            <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
-              {tagOptions.map((opt) => (
+            Cultural Identity:
+            <select value={culturalIdentityFilter} onChange={(e) => setCulturalIdentityFilter(e.target.value)}>
+              {culturalIdentityOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            Spiritual Framework:
+            <select value={spiritualFrameworkFilter} onChange={(e) => setSpiritualFrameworkFilter(e.target.value)}>
+              {spiritualFrameworkOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
