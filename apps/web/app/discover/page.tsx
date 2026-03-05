@@ -82,27 +82,34 @@ function toNiceString(x: any): string {
   }
 }
 
-async function safeReadErrorDetail(res: Response): Promise<string> {
+/**
+ * ✅ Friendly error messages (no ugly API dumps)
+ */
+async function getFriendlyApiError(res: Response): Promise<string> {
+  const status = res.status;
+
+  if (status === 401) return "Please log in again.";
+  if (status === 403) return "Your account has been suspended.";
+  if (status === 404) return "That item was not found.";
+  if (status === 429) return "You are doing that too quickly. Please wait a moment and try again.";
+  if (status === 402) return "Messaging is locked right now.";
+  if (status >= 500) return "The server is having trouble right now. Please try again shortly.";
+
+  // Try to extract a short detail, but avoid raw dumps
   try {
-    const data = await res.json();
-    if (data?.detail != null) {
-      if (typeof data.detail === "string") return data.detail;
-      return toNiceString(data.detail);
-    }
-    return toNiceString(data);
+    const data = await res.json().catch(() => null);
+    const detail = data?.detail;
+    if (typeof detail === "string" && detail.trim()) return detail.trim();
   } catch {}
-  try {
-    const text = await res.text();
-    if (text) return text;
-  } catch {}
-  return `Request failed (${res.status}).`;
+
+  return "Something went wrong. Please try again.";
 }
 
 async function apiGetSavedIds(userId: string): Promise<string[]> {
   const res = await fetch(`${API_BASE}/saved?user_id=${encodeURIComponent(userId)}`, {
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
 }
@@ -111,7 +118,7 @@ async function apiGetLikes(userId: string): Promise<string[]> {
   const res = await fetch(`${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`, {
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
 }
@@ -120,7 +127,7 @@ async function apiGetLikesStatus(userId: string): Promise<LikesStatusResponse> {
   const res = await fetch(`${API_BASE}/likes/status?user_id=${encodeURIComponent(userId)}`, {
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
   return (await res.json()) as LikesStatusResponse;
 }
 
@@ -130,7 +137,7 @@ async function apiSaveProfile(userId: string, profileId: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, profile_id: profileId }),
   });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
 }
 
 async function apiUnsaveProfile(userId: string, profileId: string) {
@@ -138,7 +145,7 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
     userId
   )}&profile_id=${encodeURIComponent(profileId)}`;
   const res = await fetch(url, { method: "DELETE" });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
 }
 
 async function apiLikeProfile(userId: string, profileId: string) {
@@ -147,7 +154,7 @@ async function apiLikeProfile(userId: string, profileId: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, profile_id: profileId }),
   });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
 }
 
 async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[]> {
@@ -156,7 +163,7 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
     (excludeOwnerUserId ? `&exclude_owner_user_id=${encodeURIComponent(excludeOwnerUserId)}` : "");
 
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
 
   const json = (await res.json()) as ProfilesResponse;
   return Array.isArray(json?.items) ? json.items : [];
@@ -180,7 +187,7 @@ async function apiGetThreads(userId: string): Promise<ThreadListItem[]> {
   const res = await fetch(`${API_BASE}/threads?user_id=${encodeURIComponent(userId)}&limit=100`, {
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
   const json = (await res.json()) as ThreadsResponse;
   return Array.isArray(json?.items) ? json.items : [];
 }
@@ -215,11 +222,11 @@ async function apiGetOrCreateThread(userId: string, withProfileId: string): Prom
     }),
   });
 
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
 
   const data = (await res.json()) as ThreadGetOrCreateResponse;
   const threadId = data.threadId || data.thread_id || data.id || "";
-  if (!threadId) throw new Error("Thread created, but no thread id returned.");
+  if (!threadId) throw new Error("Conversation could not be started. Please try again.");
   return threadId;
 }
 
@@ -230,7 +237,7 @@ async function apiMessagingAccess(userId: string, threadId: string): Promise<Mes
     `&thread_id=${encodeURIComponent(threadId)}`;
 
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
   return (await res.json()) as MessagingAccessResponse;
 }
 
@@ -238,7 +245,7 @@ async function apiProfileGate(userId: string): Promise<ProfileGateResponse> {
   const res = await fetch(`${API_BASE}/profiles/gate?user_id=${encodeURIComponent(userId)}`, {
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  if (!res.ok) throw new Error(await getFriendlyApiError(res));
   return (await res.json()) as ProfileGateResponse;
 }
 
@@ -247,6 +254,83 @@ function formatResetHint(status: LikesStatusResponse | null) {
   const d = new Date(status.resetsAtUTC);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * ✅ Tiny inline icons (no extra libraries needed)
+ */
+function Icon({
+  name,
+  size = 16,
+}: {
+  name:
+    | "user"
+    | "bookmark"
+    | "heart"
+    | "bell"
+    | "chat"
+    | "logout"
+    | "filter"
+    | "spark";
+  size?: number;
+}) {
+  const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2 };
+  switch (name) {
+    case "user":
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M20 21a8 8 0 0 0-16 0" />
+          <circle cx="12" cy="8" r="4" />
+        </svg>
+      );
+    case "bookmark":
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+        </svg>
+      );
+    case "heart":
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z" />
+        </svg>
+      );
+    case "bell":
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
+          <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+        </svg>
+      );
+    case "chat":
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+        </svg>
+      );
+    case "logout":
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <path d="M16 17l5-5-5-5" />
+          <path d="M21 12H9" />
+        </svg>
+      );
+    case "filter":
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M22 3H2l8 9v7l4 2v-9z" />
+        </svg>
+      );
+    case "spark":
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M12 2l1.5 6L20 10l-6.5 2L12 18l-1.5-6L4 10l6.5-2z" />
+        </svg>
+      );
+    default:
+      return null;
+  }
 }
 
 export default function DiscoverPage() {
@@ -467,8 +551,9 @@ export default function DiscoverPage() {
       await refreshSavedAndLikes(userId);
     } catch (e: any) {
       setSavedIds(prev);
-      setApiError(toNiceString(e?.message || e));
-      showToast("Could not update saved status right now.");
+      const msg = toNiceString(e?.message || e) || "Could not update saved status right now.";
+      setApiError(msg);
+      showToast(msg);
     }
   }
 
@@ -530,34 +615,41 @@ export default function DiscoverPage() {
   }
 
   const navBtnStyle: CSSProperties = {
-    padding: "0.65rem 1rem",
-    border: "1px solid #ccc",
-    borderRadius: 10,
+    padding: "0.6rem 0.9rem",
+    borderRadius: 999,
     textDecoration: "none",
     color: "inherit",
-    background: "white",
-    display: "inline-block",
+    background: "rgba(255,255,255,0.92)",
+    border: "1px solid rgba(0,0,0,0.10)",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    fontWeight: 800,
+    boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+    backdropFilter: "blur(8px)",
   };
 
   const pillBtn: CSSProperties = {
     padding: "0.65rem 1rem",
-    border: "1px solid #0a5411",
+    border: "1px solid rgba(10,84,17,0.35)",
     borderRadius: 999,
     textDecoration: "none",
     color: "#0a5411",
-    background: "white",
+    background: "rgba(255,255,255,0.92)",
     display: "inline-flex",
     alignItems: "center",
-    gap: 6,
-    fontWeight: 800,
+    gap: 8,
+    fontWeight: 900,
+    boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+    backdropFilter: "blur(8px)",
   };
 
   const pillBtnGlow: React.CSSProperties = {
     ...pillBtn,
-    background: "#0a5411",
-    border: "1px solid #0a5411",
+    background: "linear-gradient(135deg, rgba(10,84,17,0.95), rgba(10,84,17,0.80))",
+    border: "1px solid rgba(10,84,17,0.35)",
     color: "white",
-    boxShadow: "0 0 10px rgba(10,85,0,0.5), 0 0 20px rgba(10,85,0,0.3)",
+    boxShadow: "0 0 10px rgba(10,85,0,0.35), 0 10px 24px rgba(0,0,0,0.14)",
   };
 
   const messagesStyle = totalUnread > 0 ? pillBtnGlow : pillBtn;
@@ -568,21 +660,56 @@ export default function DiscoverPage() {
   }
 
   return (
-    <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "1.5rem",
+        display: "grid",
+        placeItems: "start center",
+      }}
+    >
       <div style={{ width: "100%", maxWidth: 1100 }}>
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+            marginBottom: 10,
+          }}
+        >
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <h1 style={{ margin: 0 }}>Discover</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <h1 style={{ margin: 0 }}>Discover</h1>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  background: "rgba(255,255,255,0.85)",
+                  border: "1px solid rgba(0,0,0,0.10)",
+                  boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+                  fontWeight: 900,
+                  fontSize: 12,
+                  color: "#2a2a2a",
+                }}
+              >
+                <Icon name="spark" size={14} /> Curated
+              </span>
+            </div>
 
-            <div style={{ fontSize: 13, color: "#555" }}>
+            <div style={{ fontSize: 13, color: "#444" }}>
               {loadingLikesStatus ? (
                 <span>Likes today: loading…</span>
               ) : likesStatus ? (
                 <span>
                   Likes left: <strong>{likesStatus.likesLeft}</strong> / <strong>{likesStatus.limit}</strong>
                   {resetHint ? (
-                    <span style={{ color: "#777" }}>
+                    <span style={{ color: "#666" }}>
                       {" "}
                       · resets {likesStatus.windowType === "test_seconds" ? "at" : "after"} <strong>{resetHint}</strong>
                     </span>
@@ -594,32 +721,35 @@ export default function DiscoverPage() {
             </div>
           </div>
 
+          {/* ✅ Modern pill buttons w/ icons */}
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <Link href="/profile" style={navBtnStyle}>
-              My Profile
+              <Icon name="user" /> My Profile
             </Link>
             <Link href="/saved" style={navBtnStyle}>
-              Saved
+              <Icon name="bookmark" /> Saved
             </Link>
             <Link href="/liked" style={navBtnStyle}>
-              Liked
+              <Icon name="heart" /> Liked
             </Link>
             <Link href="/notifications" style={navBtnStyle}>
-              Notifications
+              <Icon name="bell" /> Notifications
             </Link>
 
             <Link href="/inbox" style={messagesStyle}>
-              Messages
+              <Icon name="chat" /> Messages
               {totalUnread > 0 && (
                 <span
                   style={{
-                    marginLeft: 6,
+                    marginLeft: 2,
                     fontSize: 12,
                     fontWeight: 900,
                     background: "white",
                     color: "#0a5411",
                     borderRadius: 999,
-                    padding: "2px 6px",
+                    padding: "2px 7px",
+                    lineHeight: "18px",
+                    boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
                   }}
                 >
                   {totalUnread}
@@ -628,7 +758,7 @@ export default function DiscoverPage() {
             </Link>
 
             <button onClick={logout} style={{ ...navBtnStyle, cursor: "pointer" }}>
-              Log out
+              <Icon name="logout" /> Log out
             </button>
           </div>
         </div>
@@ -639,11 +769,13 @@ export default function DiscoverPage() {
             style={{
               marginTop: 12,
               padding: 12,
-              borderRadius: 12,
-              border: "1px solid #f2c7c7",
-              background: "#fff7f7",
+              borderRadius: 14,
+              border: "1px solid rgba(180, 30, 30, 0.25)",
+              background: "rgba(255, 246, 246, 0.92)",
               color: "#7a1b1b",
               whiteSpace: "pre-wrap",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+              backdropFilter: "blur(10px)",
             }}
           >
             <strong>Message:</strong> {apiError}
@@ -651,7 +783,25 @@ export default function DiscoverPage() {
         )}
 
         {/* Filters */}
-        <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div
+          style={{
+            marginTop: 14,
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+            padding: 12,
+            borderRadius: 16,
+            border: "1px solid rgba(0,0,0,0.10)",
+            background: "rgba(255,255,255,0.86)",
+            boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+            backdropFilter: "blur(10px)",
+          }}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 900, color: "#2a2a2a" }}>
+            <Icon name="filter" /> Filters
+          </span>
+
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Intention:
             <select value={intentionFilter} onChange={(e) => setIntentionFilter(e.target.value)}>
@@ -681,12 +831,14 @@ export default function DiscoverPage() {
               showToast("Refreshed likes status.");
             }}
             style={{
-              padding: "0.5rem 0.8rem",
-              border: "1px solid #ccc",
-              borderRadius: 10,
+              padding: "0.55rem 0.85rem",
+              border: "1px solid rgba(0,0,0,0.12)",
+              borderRadius: 999,
               background: "white",
               cursor: "pointer",
               fontSize: 13,
+              fontWeight: 900,
+              boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
             }}
           >
             Refresh likes
@@ -696,11 +848,33 @@ export default function DiscoverPage() {
         {/* Grid */}
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
-            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>Loading profiles…</div>
+            <div
+              style={{
+                padding: 14,
+                border: "1px solid rgba(0,0,0,0.10)",
+                borderRadius: 16,
+                background: "rgba(255,255,255,0.86)",
+                boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+                backdropFilter: "blur(10px)",
+              }}
+            >
+              Loading profiles…
+            </div>
           ) : filteredProfiles.length === 0 ? (
-            <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>No profiles match your filters yet.</div>
+            <div
+              style={{
+                padding: 14,
+                border: "1px solid rgba(0,0,0,0.10)",
+                borderRadius: 16,
+                background: "rgba(255,255,255,0.86)",
+                boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+                backdropFilter: "blur(10px)",
+              }}
+            >
+              No profiles match your filters yet.
+            </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))", gap: 16 }}>
               {filteredProfiles.map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
@@ -712,7 +886,15 @@ export default function DiscoverPage() {
                 return (
                   <div
                     key={p.id}
-                  className="card" 
+                    className="card"
+                    style={{
+                      borderRadius: 18,
+                      overflow: "hidden",
+                      border: "1px solid rgba(0,0,0,0.10)",
+                      background: "rgba(255,255,255,0.90)",
+                      boxShadow: "0 14px 34px rgba(0,0,0,0.12)",
+                      backdropFilter: "blur(10px)",
+                    }}
                   >
                     {/* BIG PHOTO */}
                     <Link href={`/profiles/${p.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
@@ -723,7 +905,7 @@ export default function DiscoverPage() {
                           alt={p.displayName}
                           style={{
                             width: "100%",
-                            height: 280,
+                            height: 320,
                             objectFit: "cover",
                             display: "block",
                             background: "#f2f2f2",
@@ -734,7 +916,7 @@ export default function DiscoverPage() {
                         <div
                           style={{
                             width: "100%",
-                            height: 280,
+                            height: 320,
                             background: "#f2f2f2",
                             display: "grid",
                             placeItems: "center",
@@ -752,7 +934,7 @@ export default function DiscoverPage() {
                     <div style={{ padding: 14 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
                         <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1.1 }}>{p.displayName}</div>
-                        <div style={{ color: "#666", fontWeight: 700 }}>{p.age}</div>
+                        <div style={{ color: "#666", fontWeight: 800 }}>{p.age}</div>
                       </div>
 
                       <div style={{ marginTop: 6, color: "#666", fontSize: 13 }}>
@@ -775,9 +957,9 @@ export default function DiscoverPage() {
                               style={{
                                 fontSize: 12,
                                 padding: "4px 8px",
-                                border: "1px solid #ddd",
+                                border: "1px solid rgba(0,0,0,0.12)",
                                 borderRadius: 999,
-                                background: "#fafafa",
+                                background: "rgba(250,250,250,0.9)",
                               }}
                             >
                               {t}
@@ -786,65 +968,46 @@ export default function DiscoverPage() {
                         </div>
                       )}
 
-                      {/* ACTIONS */}
+                      {/* ACTIONS (kept here, upgraded to pill buttons w/ icons) */}
                       <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        <Link
-                          href={`/profiles/${p.id}`}
-                          style={{
-                            padding: "10px 12px",
-                            borderRadius: 10,
-                            border: "1px solid #ccc",
-                            textDecoration: "none",
-                            color: "inherit",
-                            display: "inline-block",
-                          }}
-                        >
-                          View
+                        <Link href={`/profiles/${p.id}`} style={pillBtn}>
+                          <Icon name="user" /> View
                         </Link>
 
                         <button
                           onClick={() => onToggleSave(p)}
                           disabled={loadingSets}
                           style={{
-                            padding: "10px 12px",
-                            borderRadius: 10,
-                            border: "1px solid #ccc",
-                            background: "white",
+                            ...pillBtn,
                             cursor: loadingSets ? "not-allowed" : "pointer",
                             opacity: loadingSets ? 0.8 : 1,
                           }}
                         >
-                          {isSaved ? "Unsave" : "Save"}
+                          <Icon name="bookmark" /> {isSaved ? "Unsave" : "Save"}
                         </button>
 
                         <button
                           onClick={() => onLike(p)}
                           disabled={likeDisabled}
                           style={{
-                            padding: "10px 12px",
-                            borderRadius: 10,
-                            border: "1px solid #ccc",
-                            background: likeDisabled ? "#f5f5f5" : "white",
+                            ...pillBtn,
                             cursor: likeDisabled ? "not-allowed" : "pointer",
-                            opacity: likeDisabled ? 0.85 : 1,
+                            opacity: likeDisabled ? 0.7 : 1,
                           }}
                         >
-                          {likeLabel}
+                          <Icon name="heart" /> {likeLabel}
                         </button>
 
                         <button
                           onClick={() => onMessage(p)}
                           disabled={loadingSets}
                           style={{
-                            padding: "10px 12px",
-                            borderRadius: 10,
-                            border: "1px solid #ccc",
-                            background: "white",
+                            ...pillBtn,
                             cursor: loadingSets ? "not-allowed" : "pointer",
                             opacity: loadingSets ? 0.8 : 1,
                           }}
                         >
-                          Message
+                          <Icon name="chat" /> Message
                         </button>
                       </div>
                     </div>
@@ -865,12 +1028,13 @@ export default function DiscoverPage() {
               transform: "translateX(-50%)",
               padding: "10px 14px",
               borderRadius: 999,
-              border: "1px solid #ddd",
-              background: "white",
-              boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+              border: "1px solid rgba(0,0,0,0.12)",
+              background: "rgba(255,255,255,0.95)",
+              boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
               zIndex: 9999,
               whiteSpace: "pre-wrap",
               maxWidth: 900,
+              backdropFilter: "blur(10px)",
             }}
           >
             {toast}
