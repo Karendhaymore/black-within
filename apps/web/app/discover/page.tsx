@@ -83,7 +83,6 @@ function toNiceString(x: any): string {
 }
 
 async function safeReadErrorDetail(res: Response): Promise<string> {
-  // FastAPI often returns: { detail: [...] } where detail is an array of objects
   try {
     const data = await res.json();
     if (data?.detail != null) {
@@ -163,22 +162,15 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
   return Array.isArray(json?.items) ? json.items : [];
 }
 
-/**
- * ✅ Fix: refresh unread on focus + visibility change
- */
 type ThreadListItem = {
   thread_id: string;
   other_user_id: string;
-
-  // optional enrichment (your API may include these)
   other_profile_id?: string | null;
   other_display_name?: string | null;
   other_photo?: string | null;
-
   last_message_text?: string | null;
   last_message_at?: string | null;
   updated_at?: string | null;
-
   unread_count?: number;
 };
 
@@ -198,9 +190,6 @@ async function apiGetUnreadTotal(userId: string): Promise<number> {
   return items.reduce((sum, t) => sum + (Number(t.unread_count) || 0), 0);
 }
 
-/**
- * Call this inside your component useEffect to keep unread accurate.
- */
 function startUnreadAutoRefresh(refreshFn: () => void) {
   const onFocus = () => refreshFn();
   const onVis = () => {
@@ -216,10 +205,6 @@ function startUnreadAutoRefresh(refreshFn: () => void) {
   };
 }
 
-/**
- * ✅ Threads API: POST /threads/get-or-create
- * Your backend error showed it expects: { user_id, with_profile_id }
- */
 async function apiGetOrCreateThread(userId: string, withProfileId: string): Promise<string> {
   const res = await fetch(`${API_BASE}/threads/get-or-create`, {
     method: "POST",
@@ -238,10 +223,6 @@ async function apiGetOrCreateThread(userId: string, withProfileId: string): Prom
   return threadId;
 }
 
-/**
- * ✅ Messaging paywall check:
- * GET /messaging/access?user_id=...&thread_id=...
- */
 async function apiMessagingAccess(userId: string, threadId: string): Promise<MessagingAccessResponse> {
   const url =
     `${API_BASE}/messaging/access` +
@@ -253,7 +234,6 @@ async function apiMessagingAccess(userId: string, threadId: string): Promise<Mes
   return (await res.json()) as MessagingAccessResponse;
 }
 
-// ✅ NEW: profile photo gate
 async function apiProfileGate(userId: string): Promise<ProfileGateResponse> {
   const res = await fetch(`${API_BASE}/profiles/gate?user_id=${encodeURIComponent(userId)}`, {
     cache: "no-store",
@@ -274,10 +254,7 @@ export default function DiscoverPage() {
 
   const [userId, setUserId] = useState<string>("");
 
-  // ✅ NEW: photo gate
   const [gateLoading, setGateLoading] = useState(true);
-
-  // NOTE: your UI below uses totalUnread; keeping name consistent
   const [totalUnread, setTotalUnread] = useState(0);
 
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
@@ -299,7 +276,6 @@ export default function DiscoverPage() {
   const resetTimerRef = useRef<number | null>(null);
 
   const availableProfiles = useMemo(() => profiles.filter((p) => p.isAvailable), [profiles]);
-
   const availableProfileIds = useMemo(() => new Set(availableProfiles.map((p) => p.id)), [availableProfiles]);
 
   const intentionOptions = useMemo(() => {
@@ -396,7 +372,6 @@ export default function DiscoverPage() {
     }, 400);
   }
 
-  // ✅ helper inside component
   async function refreshUnread(uid: string) {
     try {
       const total = await apiGetUnreadTotal(uid);
@@ -406,12 +381,6 @@ export default function DiscoverPage() {
     }
   }
 
-  /**
-   * ✅ Single unified boot effect:
-   * - ensures logged-in
-   * - blocks Discover until photo exists
-   * - then loads profiles + saved/likes + likes status
-   */
   useEffect(() => {
     const uid = getLoggedInUserId();
     if (!uid) {
@@ -422,21 +391,19 @@ export default function DiscoverPage() {
     setUserId(uid);
 
     (async () => {
-      // 1) Gate: must have photo
       try {
         setGateLoading(true);
         const gate = await apiProfileGate(uid);
         if (!gate?.hasPhoto) {
           router.replace("/profile?reason=photo_required");
-          return; // stop here
+          return;
         }
       } catch {
-        // If gate endpoint fails, we allow page to continue (fail-open)
+        // fail-open
       } finally {
         setGateLoading(false);
       }
 
-      // 2) Load Discover data
       try {
         setApiError(null);
         setLoadingProfiles(true);
@@ -456,7 +423,6 @@ export default function DiscoverPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
-  // ✅ Unread auto-refresh
   useEffect(() => {
     if (!userId) return;
 
@@ -535,7 +501,6 @@ export default function DiscoverPage() {
     }
   }
 
-  // ✅ Message button handler (correct: uses profile id for with_profile_id)
   async function onMessage(p: ApiProfile) {
     if (!userId) return;
 
@@ -543,20 +508,15 @@ export default function DiscoverPage() {
       setApiError(null);
       showToast("Opening chat…");
 
-      // 1) Create thread based on PROFILE id (backend expects with_profile_id)
       const threadId = await apiGetOrCreateThread(userId, p.id);
 
-      // 2) Optional access check (if it throws, we still navigate)
       let locked = false;
       try {
         const access = await apiMessagingAccess(userId, threadId);
         locked = !access.canMessage;
         if (locked && access.reason) showToast(access.reason);
-      } catch {
-        // ignore access check errors for now
-      }
+      } catch {}
 
-      // 3) Navigate to chat
       window.location.href =
         `/messages?threadId=${encodeURIComponent(threadId)}` +
         `&with=${encodeURIComponent(p.displayName)}` +
@@ -600,12 +560,9 @@ export default function DiscoverPage() {
     boxShadow: "0 0 10px rgba(10,85,0,0.5), 0 0 20px rgba(10,85,0,0.3)",
   };
 
-  // ✅ keep glow conditional strictly on unread
   const messagesStyle = totalUnread > 0 ? pillBtnGlow : pillBtn;
-
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
 
-  // ✅ Gate UI while checking photo requirement
   if (gateLoading) {
     return <div style={{ padding: 24, fontWeight: 700 }}>Loading…</div>;
   }
@@ -613,6 +570,7 @@ export default function DiscoverPage() {
   return (
     <main style={{ minHeight: "100vh", padding: "2rem", display: "grid", placeItems: "start center" }}>
       <div style={{ width: "100%", maxWidth: 1100 }}>
+        {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <h1 style={{ margin: 0 }}>Discover</h1>
@@ -675,6 +633,7 @@ export default function DiscoverPage() {
           </div>
         </div>
 
+        {/* Error */}
         {apiError && (
           <div
             style={{
@@ -691,6 +650,7 @@ export default function DiscoverPage() {
           </div>
         )}
 
+        {/* Filters */}
         <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             Intention:
@@ -733,13 +693,14 @@ export default function DiscoverPage() {
           </button>
         </div>
 
+        {/* Grid */}
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
             <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>Loading profiles…</div>
           ) : filteredProfiles.length === 0 ? (
             <div style={{ padding: 14, border: "1px solid #eee", borderRadius: 12 }}>No profiles match your filters yet.</div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
               {filteredProfiles.map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
@@ -749,127 +710,149 @@ export default function DiscoverPage() {
                 const likeLabel = isLiked ? "Liked" : isLimitReached ? "Limit reached" : "Like";
 
                 return (
-                  <div key={p.id} style={{ border: "1px solid #eee", borderRadius: 14, padding: 14, background: "white" }}>
-                    <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  <div
+                    key={p.id}
+                    style={{
+                      border: "1px solid #eee",
+                      borderRadius: 16,
+                      overflow: "hidden",
+                      background: "white",
+                      boxShadow: "0 10px 24px rgba(0,0,0,0.04)",
+                    }}
+                  >
+                    {/* BIG PHOTO */}
+                    <Link href={`/profiles/${p.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
                       {p.photo && !brokenImages[p.id] ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={p.photo}
                           alt={p.displayName}
-                          width={56}
-                          height={56}
-                          style={{ borderRadius: 14, objectFit: "cover" }}
+                          style={{
+                            width: "100%",
+                            height: 280,
+                            objectFit: "cover",
+                            display: "block",
+                            background: "#f2f2f2",
+                          }}
                           onError={() => setBrokenImages((curr) => ({ ...curr, [p.id]: true }))}
                         />
                       ) : (
                         <div
                           style={{
-                            width: 56,
-                            height: 56,
-                            borderRadius: 14,
-                            border: "1px solid #ddd",
+                            width: "100%",
+                            height: 280,
+                            background: "#f2f2f2",
                             display: "grid",
                             placeItems: "center",
-                            fontWeight: 700,
+                            fontSize: 44,
+                            fontWeight: 900,
+                            color: "#444",
                           }}
                         >
                           {getInitials(p.displayName)}
                         </div>
                       )}
+                    </Link>
 
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                          <div style={{ fontWeight: 800, fontSize: 18 }}>{p.displayName}</div>
-                          <div style={{ color: "#666" }}>{p.age}</div>
-                        </div>
-                        <div style={{ marginTop: 4, color: "#666", fontSize: 13 }}>
-                          {p.city}, {p.stateUS}
-                        </div>
+                    {/* NAME + LOCATION UNDER PHOTO */}
+                    <div style={{ padding: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                        <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1.1 }}>{p.displayName}</div>
+                        <div style={{ color: "#666", fontWeight: 700 }}>{p.age}</div>
                       </div>
-                    </div>
 
-                    <div style={{ marginTop: 10, fontSize: 13 }}>
-                      <strong>Identity:</strong> {p.identityPreview}
-                    </div>
-
-                    <div style={{ marginTop: 8, fontSize: 13 }}>
-                      <strong>Intention:</strong> {p.intention}
-                    </div>
-
-                    {Array.isArray(p.tags) && p.tags.length > 0 && (
-                      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {p.tags.slice(0, 10).map((t, idx) => (
-                          <span
-                            key={`${p.id}-tag-${idx}`}
-                            style={{
-                              fontSize: 12,
-                              padding: "4px 8px",
-                              border: "1px solid #ddd",
-                              borderRadius: 999,
-                              background: "#fafafa",
-                            }}
-                          >
-                            {t}
-                          </span>
-                        ))}
+                      <div style={{ marginTop: 6, color: "#666", fontSize: 13 }}>
+                        {p.city}, {p.stateUS}
                       </div>
-                    )}
 
-                    <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <Link
-                        href={`/profiles/${p.id}`}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          textDecoration: "none",
-                          color: "inherit",
-                          display: "inline-block",
-                        }}
-                      >
-                        View
-                      </Link>
+                      <div style={{ marginTop: 10, fontSize: 13 }}>
+                        <strong>Identity:</strong> {p.identityPreview}
+                      </div>
 
-                      <button
-                        onClick={() => onToggleSave(p)}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          background: "white",
-                          cursor: "pointer",
-                        }}
-                      >
-                        {isSaved ? "Unsave" : "Save"}
-                      </button>
+                      <div style={{ marginTop: 8, fontSize: 13 }}>
+                        <strong>Intention:</strong> {p.intention}
+                      </div>
 
-                      <button
-                        onClick={() => onLike(p)}
-                        disabled={likeDisabled}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          background: likeDisabled ? "#f5f5f5" : "white",
-                          cursor: likeDisabled ? "not-allowed" : "pointer",
-                          opacity: likeDisabled ? 0.85 : 1,
-                        }}
-                      >
-                        {likeLabel}
-                      </button>
+                      {Array.isArray(p.tags) && p.tags.length > 0 && (
+                        <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {p.tags.slice(0, 10).map((t, idx) => (
+                            <span
+                              key={`${p.id}-tag-${idx}`}
+                              style={{
+                                fontSize: 12,
+                                padding: "4px 8px",
+                                border: "1px solid #ddd",
+                                borderRadius: 999,
+                                background: "#fafafa",
+                              }}
+                            >
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
 
-                      <button
-                        onClick={() => onMessage(p)}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          background: "white",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Message
-                      </button>
+                      {/* ACTIONS */}
+                      <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        <Link
+                          href={`/profiles/${p.id}`}
+                          style={{
+                            padding: "10px 12px",
+                            borderRadius: 10,
+                            border: "1px solid #ccc",
+                            textDecoration: "none",
+                            color: "inherit",
+                            display: "inline-block",
+                          }}
+                        >
+                          View
+                        </Link>
+
+                        <button
+                          onClick={() => onToggleSave(p)}
+                          disabled={loadingSets}
+                          style={{
+                            padding: "10px 12px",
+                            borderRadius: 10,
+                            border: "1px solid #ccc",
+                            background: "white",
+                            cursor: loadingSets ? "not-allowed" : "pointer",
+                            opacity: loadingSets ? 0.8 : 1,
+                          }}
+                        >
+                          {isSaved ? "Unsave" : "Save"}
+                        </button>
+
+                        <button
+                          onClick={() => onLike(p)}
+                          disabled={likeDisabled}
+                          style={{
+                            padding: "10px 12px",
+                            borderRadius: 10,
+                            border: "1px solid #ccc",
+                            background: likeDisabled ? "#f5f5f5" : "white",
+                            cursor: likeDisabled ? "not-allowed" : "pointer",
+                            opacity: likeDisabled ? 0.85 : 1,
+                          }}
+                        >
+                          {likeLabel}
+                        </button>
+
+                        <button
+                          onClick={() => onMessage(p)}
+                          disabled={loadingSets}
+                          style={{
+                            padding: "10px 12px",
+                            borderRadius: 10,
+                            border: "1px solid #ccc",
+                            background: "white",
+                            cursor: loadingSets ? "not-allowed" : "pointer",
+                            opacity: loadingSets ? 0.8 : 1,
+                          }}
+                        >
+                          Message
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -878,6 +861,7 @@ export default function DiscoverPage() {
           )}
         </div>
 
+        {/* Toast */}
         {toast && (
           <div
             style={{
