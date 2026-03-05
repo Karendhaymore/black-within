@@ -18,6 +18,11 @@ type AdminProfileRow = {
   city: string;
   stateUS: string;
 
+  // ✅ Added optional fields for “full profile edit”
+  identityPreview?: string | null;
+  intention?: string | null;
+  tags?: string[] | null;
+
   photo?: string | null;
   photo2?: string | null;
 
@@ -95,7 +100,7 @@ function buildAdminHeaders(token: string): Record<string, string> {
   };
 }
 
-// ---- Admin API helpers (aligned to backend routes) ----
+// ---- Admin API helpers ----
 
 async function apiAdminListProfiles(token: string): Promise<AdminProfileRow[]> {
   const res = await fetch(`${API_BASE}/admin/profiles?limit=200`, {
@@ -119,18 +124,25 @@ async function apiAdminMe(token: string) {
   return res.json() as Promise<{ email: string; role: "admin" | "moderator" }>;
 }
 
-// ✅ Expanded patch body to support editable profile fields
+// ✅ Expanded patch body to support full profile edits
 type AdminProfilePatchBody = {
   // existing
   isAvailable?: boolean;
   is_banned?: boolean;
   banned_reason?: string | null;
 
-  // editable profile fields
+  // profile fields
   displayName?: string;
   age?: number;
   city?: string;
   stateUS?: string;
+
+  intention?: string | null;
+  identityPreview?: string | null;
+  tags?: string[];
+
+  photo?: string | null;
+  photo2?: string | null;
 };
 
 async function apiAdminPatchProfile(token: string, profile_id: string, body: AdminProfilePatchBody) {
@@ -164,10 +176,6 @@ async function apiAdminBan(token: string, profile_id: string, banned: boolean, r
   });
 }
 
-/**
- * ✅ FIXED: Backend expects { user_id, subject, body }
- * (NOT { target_profile_id, text })
- */
 async function apiAdminSendMessage(token: string, user_id: string, subject: string, body: string) {
   const res = await fetch(`${API_BASE}/admin/messages/send`, {
     method: "POST",
@@ -209,6 +217,24 @@ async function apiAdminResolveReport(adminToken: string, reportId: string, note?
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
 }
 
+// ---- tiny helpers ----
+function tagsToString(tags: any): string {
+  if (!Array.isArray(tags)) return "";
+  return tags.filter(Boolean).join(", ");
+}
+function parseTags(s: string): string[] {
+  return (s || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 40);
+}
+function normalizeUrl(s: string): string {
+  const v = (s || "").trim();
+  if (!v) return "";
+  return v;
+}
+
 export default function AdminDashboardPage() {
   const router = useRouter();
 
@@ -236,10 +262,17 @@ export default function AdminDashboardPage() {
   const [editSaving, setEditSaving] = useState(false);
 
   const [editDisplayName, setEditDisplayName] = useState("");
-  const [editAge, setEditAge] = useState<string>(""); // keep as string for input
+  const [editAge, setEditAge] = useState<string>("");
   const [editCity, setEditCity] = useState("");
   const [editStateUS, setEditStateUS] = useState("");
   const [editIsAvailable, setEditIsAvailable] = useState(true);
+
+  // ✅ new editable fields
+  const [editIntention, setEditIntention] = useState("");
+  const [editIdentityPreview, setEditIdentityPreview] = useState("");
+  const [editTags, setEditTags] = useState(""); // comma separated
+  const [editPhoto, setEditPhoto] = useState("");
+  const [editPhoto2, setEditPhoto2] = useState("");
 
   // ---- Reports state + polling ----
   const [reportCounts, setReportCounts] = useState<{ open: number; resolved: number }>({
@@ -247,10 +280,8 @@ export default function AdminDashboardPage() {
     resolved: 0,
   });
   const [openReports, setOpenReports] = useState<ReportItem[]>([]);
-
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportsError, setReportsError] = useState<string | null>(null);
-
   const reportsLoadingRef = useRef(false);
 
   const adminToken = token;
@@ -423,11 +454,19 @@ export default function AdminDashboardPage() {
 
   function openEditModal(p: AdminProfileRow) {
     setEditTargetProfile(p);
+
     setEditDisplayName(p.displayName || "");
     setEditAge(String(p.age ?? ""));
     setEditCity(p.city || "");
     setEditStateUS(p.stateUS || "");
     setEditIsAvailable(!!p.isAvailable);
+
+    setEditIntention((p.intention || "").trim());
+    setEditIdentityPreview((p.identityPreview || "").trim());
+    setEditTags(tagsToString(p.tags));
+    setEditPhoto((p.photo || "").trim());
+    setEditPhoto2((p.photo2 || "").trim());
+
     setEditOpen(true);
   }
 
@@ -438,25 +477,18 @@ export default function AdminDashboardPage() {
 
     const displayName = editDisplayName.trim();
     const city = editCity.trim();
-    const stateUS = editStateUS.trim();
+    const stateUS = editStateUS.trim().toUpperCase();
+    const intention = editIntention.trim();
+    const identityPreview = editIdentityPreview.trim();
+    const tags = parseTags(editTags);
+    const photo = normalizeUrl(editPhoto);
+    const photo2 = normalizeUrl(editPhoto2);
 
     const parsedAge = Number(editAge);
-    if (!displayName) {
-      alert("Please enter a display name.");
-      return;
-    }
-    if (!Number.isFinite(parsedAge) || parsedAge <= 0 || parsedAge > 120) {
-      alert("Please enter a valid age.");
-      return;
-    }
-    if (!city) {
-      alert("Please enter a city.");
-      return;
-    }
-    if (!stateUS) {
-      alert("Please enter a state (ex: GA, CA).");
-      return;
-    }
+    if (!displayName) return alert("Please enter a display name.");
+    if (!Number.isFinite(parsedAge) || parsedAge <= 0 || parsedAge > 120) return alert("Please enter a valid age.");
+    if (!city) return alert("Please enter a city.");
+    if (!stateUS) return alert("Please enter a state (ex: GA, CA).");
 
     try {
       setEditSaving(true);
@@ -468,6 +500,14 @@ export default function AdminDashboardPage() {
         city,
         stateUS,
         isAvailable: editIsAvailable,
+
+        intention: intention || null,
+        identityPreview: identityPreview || null,
+        tags,
+
+        // photo URLs (optional)
+        photo: photo || null,
+        photo2: photo2 || null,
       });
 
       showToast("Profile updated.");
@@ -601,7 +641,6 @@ export default function AdminDashboardPage() {
                 <div style={{ color: "#666", marginTop: 4 }}>
                   Open: <b>{reportCounts.open}</b> • Resolved: <b>{reportCounts.resolved}</b>
                 </div>
-
                 {reportsError ? <div style={{ marginTop: 8, color: "#b00020", fontWeight: 700 }}>{reportsError}</div> : null}
               </div>
 
@@ -975,12 +1014,7 @@ export default function AdminDashboardPage() {
                               Message
                             </button>
 
-                            <button
-                              type="button"
-                              style={btn}
-                              disabled={busy}
-                              onClick={() => openEditModal(p)}
-                            >
+                            <button type="button" style={btn} disabled={busy} onClick={() => openEditModal(p)}>
                               Edit
                             </button>
                           </div>
@@ -1030,7 +1064,7 @@ export default function AdminDashboardPage() {
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
-              maxWidth: 620,
+              maxWidth: 760,
               background: "white",
               borderRadius: 16,
               border: "1px solid #eee",
@@ -1060,13 +1094,7 @@ export default function AdminDashboardPage() {
                 <input
                   value={editDisplayName}
                   onChange={(e) => setEditDisplayName(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: 10,
-                    borderRadius: 12,
-                    border: "1px solid #ccc",
-                    fontSize: 14,
-                  }}
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
                 />
               </div>
 
@@ -1076,13 +1104,7 @@ export default function AdminDashboardPage() {
                   value={editAge}
                   onChange={(e) => setEditAge(e.target.value)}
                   inputMode="numeric"
-                  style={{
-                    width: "100%",
-                    padding: 10,
-                    borderRadius: 12,
-                    border: "1px solid #ccc",
-                    fontSize: 14,
-                  }}
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
                 />
               </div>
 
@@ -1091,13 +1113,7 @@ export default function AdminDashboardPage() {
                 <input
                   value={editCity}
                   onChange={(e) => setEditCity(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: 10,
-                    borderRadius: 12,
-                    border: "1px solid #ccc",
-                    fontSize: 14,
-                  }}
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
                 />
               </div>
 
@@ -1117,17 +1133,111 @@ export default function AdminDashboardPage() {
                 />
               </div>
 
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Intention</div>
+                <input
+                  value={editIntention}
+                  onChange={(e) => setEditIntention(e.target.value)}
+                  placeholder="ex: Conscious companionship"
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
+                />
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Tags (comma separated)</div>
+                <input
+                  value={editTags}
+                  onChange={(e) => setEditTags(e.target.value)}
+                  placeholder="ex: African-Centered, Spiritual, Conscious"
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
+                />
+              </div>
+
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Identity Preview</div>
+                <textarea
+                  value={editIdentityPreview}
+                  onChange={(e) => setEditIdentityPreview(e.target.value)}
+                  placeholder="Short identity description shown on Discover…"
+                  style={{
+                    width: "100%",
+                    padding: 12,
+                    borderRadius: 12,
+                    border: "1px solid #ccc",
+                    fontSize: 14,
+                    minHeight: 90,
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 1 URL</div>
+                <input
+                  value={editPhoto}
+                  onChange={(e) => setEditPhoto(e.target.value)}
+                  placeholder="https://…"
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
+                />
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    style={dangerBtn}
+                    disabled={editSaving || !editTargetProfile.photo}
+                    onClick={async () => {
+                      const ok = window.confirm("Remove Photo 1 from this profile?");
+                      if (!ok) return;
+                      try {
+                        await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 1);
+                        setEditPhoto("");
+                        showToast("Photo 1 removed.");
+                        await refresh();
+                      } catch (e: any) {
+                        alert(e?.message || "Could not remove photo 1.");
+                      }
+                    }}
+                  >
+                    Remove P1
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 2 URL</div>
+                <input
+                  value={editPhoto2}
+                  onChange={(e) => setEditPhoto2(e.target.value)}
+                  placeholder="https://…"
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
+                />
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    style={dangerBtn}
+                    disabled={editSaving || !editTargetProfile.photo2}
+                    onClick={async () => {
+                      const ok = window.confirm("Remove Photo 2 from this profile?");
+                      if (!ok) return;
+                      try {
+                        await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 2);
+                        setEditPhoto2("");
+                        showToast("Photo 2 removed.");
+                        await refresh();
+                      } catch (e: any) {
+                        alert(e?.message || "Could not remove photo 2.");
+                      }
+                    }}
+                  >
+                    Remove P2
+                  </button>
+                </div>
+              </div>
+
               <div style={{ gridColumn: "1 / -1" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
-                  <input
-                    type="checkbox"
-                    checked={editIsAvailable}
-                    onChange={(e) => setEditIsAvailable(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={editIsAvailable} onChange={(e) => setEditIsAvailable(e.target.checked)} />
                   <span style={{ fontWeight: 900, color: "#111" }}>Visible in Discover</span>
-                  <span style={{ color: "#666", fontSize: 12 }}>
-                    (Turning this off hides them from Discover.)
-                  </span>
+                  <span style={{ color: "#666", fontSize: 12 }}>(Turning this off hides them from Discover.)</span>
                 </label>
               </div>
             </div>
@@ -1137,11 +1247,10 @@ export default function AdminDashboardPage() {
                 type="button"
                 style={btn}
                 onClick={() => {
-                  if (editSaving) return;
+                  if (!editTargetProfile || editSaving) return;
                   openEditModal(editTargetProfile);
                 }}
                 disabled={editSaving}
-                title="Reset fields to current values"
               >
                 Reset
               </button>
@@ -1205,14 +1314,7 @@ export default function AdminDashboardPage() {
               value={msgSubject}
               onChange={(e) => setMsgSubject(e.target.value)}
               placeholder="Subject…"
-              style={{
-                width: "100%",
-                marginTop: 12,
-                padding: 10,
-                borderRadius: 12,
-                border: "1px solid #ccc",
-                fontSize: 14,
-              }}
+              style={{ width: "100%", marginTop: 12, padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
             />
 
             <textarea
@@ -1244,18 +1346,9 @@ export default function AdminDashboardPage() {
                     const subject = (msgSubject || "Admin message").trim();
                     const body = msgText.trim();
 
-                    if (!userId) {
-                      alert("Missing user_id for this profile. Refresh the page and try again.");
-                      return;
-                    }
-                    if (!subject) {
-                      alert("Please enter a subject.");
-                      return;
-                    }
-                    if (!body) {
-                      alert("Please enter a message.");
-                      return;
-                    }
+                    if (!userId) return alert("Missing user_id for this profile. Refresh the page and try again.");
+                    if (!subject) return alert("Please enter a subject.");
+                    if (!body) return alert("Please enter a message.");
 
                     await apiAdminSendMessage(token, userId, subject, body);
 
