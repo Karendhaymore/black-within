@@ -85,3 +85,71 @@ main {
     0 8px 20px rgba(0,0,0,0.06),
     0 18px 40px rgba(0,0,0,0.10);
 }
+
+/* MODERN PILL BUTTONS */
+
+.btn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 8px 14px;
+  border-radius: 999px;
+
+  font-size: 14px;
+  font-weight: 600;
+
+  border: 1px solid #e2e2e2;
+  background: white;
+
+  cursor: pointer;
+
+  transition: all 0.15s ease;
+}
+
+/* Hover lift */
+
+.btn-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+}
+
+/* Like button */
+
+.btn-like {
+  border-color: #f3b6b6;
+}
+
+.btn-like:hover {
+  background: #ffecec;
+}
+
+/* Save button */
+
+.btn-save {
+  border-color: #cddfcf;
+}
+
+.btn-save:hover {
+  background: #eef8f0;
+}
+
+/* Message button */
+
+.btn-message {
+  border-color: #c7d3f7;
+}
+
+.btn-message:hover {
+  background: #eef2ff;
+}
+
+/* View button */
+
+.btn-view {
+  border-color: #ddd;
+}
+
+.btn-view:hover {
+  background: #f6f6f6;
+}
