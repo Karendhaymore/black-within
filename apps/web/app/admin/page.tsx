@@ -300,6 +300,10 @@ export default function AdminDashboardPage() {
   const [editPhoto, setEditPhoto] = useState("");
   const [editPhoto2, setEditPhoto2] = useState("");
 
+  const [uploadingSlot, setUploadingSlot] = useState<null | 1 | 2>(null);
+  const fileInputP1Ref = useRef<HTMLInputElement | null>(null);
+  const fileInputP2Ref = useRef<HTMLInputElement | null>(null);
+  
   // ---- Reports state + polling ----
   const [reportCounts, setReportCounts] = useState<{ open: number; resolved: number }>({
     open: 0,
