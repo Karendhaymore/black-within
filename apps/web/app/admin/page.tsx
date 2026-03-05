@@ -1201,67 +1201,170 @@ export default function AdminDashboardPage() {
                 />
               </div>
 
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 1 URL</div>
-                <input
-                  value={editPhoto}
-                  onChange={(e) => setEditPhoto(e.target.value)}
-                  placeholder="https://…"
-                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
-                />
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    style={dangerBtn}
-                    disabled={editSaving || !editTargetProfile.photo}
-                    onClick={async () => {
-                      const ok = window.confirm("Remove Photo 1 from this profile?");
-                      if (!ok) return;
-                      try {
-                        await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 1);
-                        setEditPhoto("");
-                        showToast("Photo 1 removed.");
-                        await refresh();
-                      } catch (e: any) {
-                        alert(e?.message || "Could not remove photo 1.");
-                      }
-                    }}
-                  >
-                    Remove P1
-                  </button>
-                </div>
-              </div>
+              {/* ---------- Photos (P1 + P2) ---------- */}
+<div>
+  <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 1</div>
 
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 2 URL</div>
-                <input
-                  value={editPhoto2}
-                  onChange={(e) => setEditPhoto2(e.target.value)}
-                  placeholder="https://…"
-                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #ccc", fontSize: 14 }}
-                />
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    style={dangerBtn}
-                    disabled={editSaving || !editTargetProfile.photo2}
-                    onClick={async () => {
-                      const ok = window.confirm("Remove Photo 2 from this profile?");
-                      if (!ok) return;
-                      try {
-                        await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 2);
-                        setEditPhoto2("");
-                        showToast("Photo 2 removed.");
-                        await refresh();
-                      } catch (e: any) {
-                        alert(e?.message || "Could not remove photo 2.");
-                      }
-                    }}
-                  >
-                    Remove P2
-                  </button>
-                </div>
-              </div>
+  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+    <input
+      value={editPhoto}
+      onChange={(e) => setEditPhoto(e.target.value)}
+      placeholder="https://… (or use Upload)"
+      style={{
+        flex: 1,
+        minWidth: 220,
+        padding: 10,
+        borderRadius: 12,
+        border: "1px solid #ccc",
+        fontSize: 14,
+      }}
+    />
+
+    <input
+      ref={fileInputP1Ref}
+      type="file"
+      accept="image/*"
+      style={{ display: "none" }}
+      onChange={async (e) => {
+        const f = e.target.files?.[0];
+        if (!f || !editTargetProfile) return;
+
+        try {
+          setUploadingSlot(1);
+          const out = await apiAdminUploadPhoto(token, editTargetProfile.profile_id, 1, f);
+          if (!out?.url) throw new Error("Upload succeeded but no url returned.");
+          setEditPhoto(out.url);
+          showToast("Photo 1 uploaded.");
+        } catch (err: any) {
+          alert(err?.message || "Photo 1 upload failed.");
+        } finally {
+          setUploadingSlot(null);
+          if (fileInputP1Ref.current) fileInputP1Ref.current.value = "";
+        }
+      }}
+    />
+
+    <button
+      type="button"
+      style={{
+        padding: "10px 12px",
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        background: uploadingSlot === 1 ? "#f3f3f3" : "white",
+        cursor: uploadingSlot === 1 ? "not-allowed" : "pointer",
+        fontWeight: 800,
+      }}
+      disabled={editSaving || uploadingSlot !== null}
+      onClick={() => fileInputP1Ref.current?.click()}
+    >
+      {uploadingSlot === 1 ? "Uploading..." : "Upload P1"}
+    </button>
+  </div>
+
+  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <button
+      type="button"
+      style={dangerBtn}
+      disabled={editSaving || !editTargetProfile.photo}
+      onClick={async () => {
+        const ok = window.confirm("Remove Photo 1 from this profile?");
+        if (!ok) return;
+        try {
+          await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 1);
+          setEditPhoto("");
+          showToast("Photo 1 removed.");
+          await refresh();
+        } catch (e: any) {
+          alert(e?.message || "Could not remove photo 1.");
+        }
+      }}
+    >
+      Remove P1
+    </button>
+  </div>
+</div>
+
+<div style={{ marginTop: 14 }}>
+  <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 2</div>
+
+  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+    <input
+      value={editPhoto2}
+      onChange={(e) => setEditPhoto2(e.target.value)}
+      placeholder="https://… (or use Upload)"
+      style={{
+        flex: 1,
+        minWidth: 220,
+        padding: 10,
+        borderRadius: 12,
+        border: "1px solid #ccc",
+        fontSize: 14,
+      }}
+    />
+
+    <input
+      ref={fileInputP2Ref}
+      type="file"
+      accept="image/*"
+      style={{ display: "none" }}
+      onChange={async (e) => {
+        const f = e.target.files?.[0];
+        if (!f || !editTargetProfile) return;
+
+        try {
+          setUploadingSlot(2);
+          const out = await apiAdminUploadPhoto(token, editTargetProfile.profile_id, 2, f);
+          if (!out?.url) throw new Error("Upload succeeded but no url returned.");
+          setEditPhoto2(out.url);
+          showToast("Photo 2 uploaded.");
+        } catch (err: any) {
+          alert(err?.message || "Photo 2 upload failed.");
+        } finally {
+          setUploadingSlot(null);
+          if (fileInputP2Ref.current) fileInputP2Ref.current.value = "";
+        }
+      }}
+    />
+
+    <button
+      type="button"
+      style={{
+        padding: "10px 12px",
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        background: uploadingSlot === 2 ? "#f3f3f3" : "white",
+        cursor: uploadingSlot === 2 ? "not-allowed" : "pointer",
+        fontWeight: 800,
+      }}
+      disabled={editSaving || uploadingSlot !== null}
+      onClick={() => fileInputP2Ref.current?.click()}
+    >
+      {uploadingSlot === 2 ? "Uploading..." : "Upload P2"}
+    </button>
+  </div>
+
+  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <button
+      type="button"
+      style={dangerBtn}
+      disabled={editSaving || !editTargetProfile.photo2}
+      onClick={async () => {
+        const ok = window.confirm("Remove Photo 2 from this profile?");
+        if (!ok) return;
+        try {
+          await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 2);
+          setEditPhoto2("");
+          showToast("Photo 2 removed.");
+          await refresh();
+        } catch (e: any) {
+          alert(e?.message || "Could not remove photo 2.");
+        }
+      }}
+    >
+      Remove P2
+    </button>
+  </div>
+</div>
 
               <div style={{ gridColumn: "1 / -1" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
