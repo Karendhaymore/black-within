@@ -9,6 +9,15 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
+/**
+ * ✅ Public profile route (used for the new “View profile” option)
+ * Change this if your public profile URL is different:
+ *  - `/discover/` (default below)
+ *  - `/profile/`
+ *  - `/profiles/`
+ */
+const PUBLIC_PROFILE_PATH_PREFIX = "/discover/";
+
 type AdminProfileRow = {
   profile_id: string;
   owner_user_id: string;
@@ -179,18 +188,15 @@ async function apiAdminUploadPhoto(
   fd.append("slot", String(slot));
   fd.append("file", file);
 
-  const res = await fetch(
-    `${API_BASE}/admin/profiles/${encodeURIComponent(profile_id)}/upload-photo`,
-    {
-      method: "POST",
-      headers: {
-        // IMPORTANT: do NOT set Content-Type when using FormData
-        "X-Admin-Token": token,
-        Authorization: `Bearer ${token}`,
-      },
-      body: fd,
-    }
-  );
+  const res = await fetch(`${API_BASE}/admin/profiles/${encodeURIComponent(profile_id)}/upload-photo`, {
+    method: "POST",
+    headers: {
+      // IMPORTANT: do NOT set Content-Type when using FormData
+      "X-Admin-Token": token,
+      Authorization: `Bearer ${token}`,
+    },
+    body: fd,
+  });
 
   if (!res.ok) throw new Error(await safeReadErrorDetail(res));
   return res.json();
@@ -261,6 +267,10 @@ function normalizeUrl(s: string): string {
   return v;
 }
 
+function buildPublicProfileUrl(profileId: string): string {
+  return `${PUBLIC_PROFILE_PATH_PREFIX}${encodeURIComponent(profileId)}`;
+}
+
 export default function AdminDashboardPage() {
   const router = useRouter();
 
@@ -303,7 +313,7 @@ export default function AdminDashboardPage() {
   const [uploadingSlot, setUploadingSlot] = useState<null | 1 | 2>(null);
   const fileInputP1Ref = useRef<HTMLInputElement | null>(null);
   const fileInputP2Ref = useRef<HTMLInputElement | null>(null);
-  
+
   // ---- Reports state + polling ----
   const [reportCounts, setReportCounts] = useState<{ open: number; resolved: number }>({
     open: 0,
@@ -322,36 +332,37 @@ export default function AdminDashboardPage() {
   }
 
   function goToProfileFromReport(target: { profileId?: string | null; userId?: string | null }) {
-  const profileId = (target.profileId || "").trim();
-  const userId = (target.userId || "").trim();
+    const profileId = (target.profileId || "").trim();
+    const userId = (target.userId || "").trim();
 
-  // Prefer profileId because it's the most precise
-  const q = profileId || userId;
-  if (!q) {
-    alert("This report does not include a profile_id or user_id to jump to.");
-    return;
+    // Prefer profileId because it's the most precise
+    const q = profileId || userId;
+    if (!q) {
+      alert("This report does not include a profile_id or user_id to jump to.");
+      return;
+    }
+
+    // 1) filter the Profiles list so the correct row is visible
+    setQuery(q);
+
+    // 2) after React re-renders, scroll to the row if we have profileId
+    window.setTimeout(() => {
+      if (!profileId) return;
+
+      const el = document.getElementById(`profile-row-${profileId}`);
+      if (!el) return;
+
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      // Optional: brief highlight
+      const prev = el.style.background;
+      el.style.background = "rgba(255, 241, 163, 0.6)";
+      window.setTimeout(() => {
+        el.style.background = prev;
+      }, 1400);
+    }, 80);
   }
 
-  // 1) filter the Profiles list so the correct row is visible
-  setQuery(q);
-
-  // 2) after React re-renders, scroll to the row if we have profileId
-  window.setTimeout(() => {
-    if (!profileId) return;
-
-    const el = document.getElementById(`profile-row-${profileId}`);
-    if (!el) return;
-
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-
-    // Optional: brief highlight
-    const prev = el.style.background;
-    el.style.background = "rgba(255, 241, 163, 0.6)";
-    window.setTimeout(() => {
-      el.style.background = prev;
-    }, 1400);
-  }, 80);
-}
   useEffect(() => {
     const t = getAdminToken();
     if (!t) {
@@ -702,7 +713,9 @@ export default function AdminDashboardPage() {
                 <div style={{ color: "#666", marginTop: 4 }}>
                   Open: <b>{reportCounts.open}</b> • Resolved: <b>{reportCounts.resolved}</b>
                 </div>
-                {reportsError ? <div style={{ marginTop: 8, color: "#b00020", fontWeight: 700 }}>{reportsError}</div> : null}
+                {reportsError ? (
+                  <div style={{ marginTop: 8, color: "#b00020", fontWeight: 700 }}>{reportsError}</div>
+                ) : null}
               </div>
 
               <button
@@ -738,83 +751,118 @@ export default function AdminDashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {openReports.map((r) => (
-                      <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
-                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{new Date(r.created_at).toLocaleString()}</td>
-                        <td style={{ padding: "10px 8px" }}>{r.category}</td>
-                        <td style={{ padding: "10px 8px" }}>{r.reason}</td>
-                        <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
-                          {r.reported_user_id ? (
-                            <>
-                              user: <b>{r.reported_user_id}</b>
-                            </>
-                          ) : null}
-                          {r.reported_profile_id ? (
-                            <div>
-                              profile: <b>{r.reported_profile_id}</b>
-                            </div>
-                          ) : null}
-                          {r.thread_id ? (
-                            <div>
-                              thread: <b>{r.thread_id}</b>
-                            </div>
-                          ) : null}
-                          {r.message_id ? (
-                            <div>
-                              msg: <b>{r.message_id}</b>
-                            </div>
-                          ) : null}
-                        </td>
-                        <td style={{ padding: "10px 8px", maxWidth: 420 }}>
-                          <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>{r.details || "—"}</div>
-                        </td>
-                      <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-    <button
-      onClick={() =>
-        goToProfileFromReport({
-          profileId: (r as any).reported_profile_id || (r as any).reportedProfileId || null,
-          userId: (r as any).reported_user_id || (r as any).reportedUserId || null,
-        })
-      }
-      style={{
-        padding: "8px 10px",
-        borderRadius: 10,
-        border: "1px solid #ddd",
-        background: "white",
-        fontWeight: 800,
-        cursor: "pointer",
-      }}
-    >
-      Go to profile
-    </button>
+                    {openReports.map((r) => {
+                      const reportedProfileId =
+                        ((r as any).reported_profile_id || (r as any).reportedProfileId || null) as string | null;
 
-    <button
-      onClick={async () => {
-        const note = window.prompt("Resolve note (optional):", "");
-        try {
-          await apiAdminResolveReport(adminToken, r.id, note || "");
-          await refreshReports();
-          await refreshReportCountsOnly();
-        } catch (e: any) {
-          alert(e?.message || "Resolve failed");
-        }
-      }}
-      style={{
-        padding: "8px 10px",
-        borderRadius: 10,
-        border: "1px solid #ddd",
-        background: "white",
-        fontWeight: 800,
-        cursor: "pointer",
-      }}
-    >
-      Resolve
-    </button>
-  </div>
-</td> 
-                      </tr>
-                    ))}
+                      const publicProfileUrl = reportedProfileId ? buildPublicProfileUrl(reportedProfileId) : null;
+
+                      return (
+                        <tr key={r.id} style={{ borderTop: "1px solid #eee" }}>
+                          <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                            {new Date(r.created_at).toLocaleString()}
+                          </td>
+                          <td style={{ padding: "10px 8px" }}>{r.category}</td>
+                          <td style={{ padding: "10px 8px" }}>{r.reason}</td>
+                          <td style={{ padding: "10px 8px", fontSize: 12, color: "#444" }}>
+                            {r.reported_user_id ? (
+                              <>
+                                user: <b>{r.reported_user_id}</b>
+                              </>
+                            ) : null}
+                            {r.reported_profile_id ? (
+                              <div>
+                                profile: <b>{r.reported_profile_id}</b>
+                              </div>
+                            ) : null}
+                            {r.thread_id ? (
+                              <div>
+                                thread: <b>{r.thread_id}</b>
+                              </div>
+                            ) : null}
+                            {r.message_id ? (
+                              <div>
+                                msg: <b>{r.message_id}</b>
+                              </div>
+                            ) : null}
+                          </td>
+                          <td style={{ padding: "10px 8px", maxWidth: 420 }}>
+                            <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>{r.details || "—"}</div>
+                          </td>
+
+                          <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button
+                                onClick={() =>
+                                  goToProfileFromReport({
+                                    profileId: reportedProfileId,
+                                    userId: ((r as any).reported_user_id || (r as any).reportedUserId || null) as
+                                      | string
+                                      | null,
+                                  })
+                                }
+                                style={{
+                                  padding: "8px 10px",
+                                  borderRadius: 10,
+                                  border: "1px solid #ddd",
+                                  background: "white",
+                                  fontWeight: 800,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Go to profile
+                              </button>
+
+                              {/* ✅ NEW: View public profile */}
+                              {publicProfileUrl ? (
+                                <a
+                                  href={publicProfileUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{
+                                    padding: "8px 10px",
+                                    borderRadius: 10,
+                                    border: "1px solid #ddd",
+                                    background: "white",
+                                    fontWeight: 800,
+                                    cursor: "pointer",
+                                    textDecoration: "none",
+                                    color: "inherit",
+                                    display: "inline-block",
+                                  }}
+                                  title="Open the user’s public profile in a new tab"
+                                >
+                                  View profile
+                                </a>
+                              ) : null}
+
+                              <button
+                                onClick={async () => {
+                                  const note = window.prompt("Resolve note (optional):", "");
+                                  try {
+                                    await apiAdminResolveReport(adminToken, r.id, note || "");
+                                    await refreshReports();
+                                    await refreshReportCountsOnly();
+                                  } catch (e: any) {
+                                    alert(e?.message || "Resolve failed");
+                                  }
+                                }}
+                                style={{
+                                  padding: "8px 10px",
+                                  borderRadius: 10,
+                                  border: "1px solid #ddd",
+                                  background: "white",
+                                  fontWeight: 800,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Resolve
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -896,11 +944,10 @@ export default function AdminDashboardPage() {
                     const saved = p.saved_count ?? 0;
                     const threads = p.threads_count ?? 0;
 
+                    const publicProfileUrl = p.profile_id ? buildPublicProfileUrl(p.profile_id) : null;
+
                     return (
-                      <tr
-                        key={p.profile_id}
-                        id={`profile-row-${p.profile_id}`}
-                      >
+                      <tr key={p.profile_id} id={`profile-row-${p.profile_id}`}>
                         <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
                           <div style={{ fontWeight: 800 }}>{p.displayName}</div>
                           <div style={{ color: "#666", fontSize: 12 }}>{p.owner_user_id}</div>
@@ -1102,6 +1149,19 @@ export default function AdminDashboardPage() {
                             <button type="button" style={btn} disabled={busy} onClick={() => openEditModal(p)}>
                               Edit
                             </button>
+
+                            {/* ✅ NEW: View public profile */}
+                            {publicProfileUrl ? (
+                              <a
+                                href={publicProfileUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ ...btn, textDecoration: "none", color: "inherit", display: "inline-block" }}
+                                title="Open the user’s public profile in a new tab"
+                              >
+                                View profile
+                              </a>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -1229,7 +1289,9 @@ export default function AdminDashboardPage() {
               </div>
 
               <div>
-                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Tags (comma separated)</div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>
+                  Tags (comma separated)
+                </div>
                 <input
                   value={editTags}
                   onChange={(e) => setEditTags(e.target.value)}
@@ -1257,169 +1319,169 @@ export default function AdminDashboardPage() {
               </div>
 
               {/* ---------- Photos (P1 + P2) ---------- */}
-<div>
-  <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 1</div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 1</div>
 
-  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-    <input
-      value={editPhoto}
-      onChange={(e) => setEditPhoto(e.target.value)}
-      placeholder="https://… (or use Upload)"
-      style={{
-        flex: 1,
-        minWidth: 220,
-        padding: 10,
-        borderRadius: 12,
-        border: "1px solid #ccc",
-        fontSize: 14,
-      }}
-    />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    value={editPhoto}
+                    onChange={(e) => setEditPhoto(e.target.value)}
+                    placeholder="https://… (or use Upload)"
+                    style={{
+                      flex: 1,
+                      minWidth: 220,
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid #ccc",
+                      fontSize: 14,
+                    }}
+                  />
 
-    <input
-      ref={fileInputP1Ref}
-      type="file"
-      accept="image/*"
-      style={{ display: "none" }}
-      onChange={async (e) => {
-        const f = e.target.files?.[0];
-        if (!f || !editTargetProfile) return;
+                  <input
+                    ref={fileInputP1Ref}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (!f || !editTargetProfile) return;
 
-        try {
-          setUploadingSlot(1);
-          const out = await apiAdminUploadPhoto(token, editTargetProfile.profile_id, 1, f);
-          if (!out?.url) throw new Error("Upload succeeded but no url returned.");
-          setEditPhoto(out.url);
-          showToast("Photo 1 uploaded.");
-        } catch (err: any) {
-          alert(err?.message || "Photo 1 upload failed.");
-        } finally {
-          setUploadingSlot(null);
-          if (fileInputP1Ref.current) fileInputP1Ref.current.value = "";
-        }
-      }}
-    />
+                      try {
+                        setUploadingSlot(1);
+                        const out = await apiAdminUploadPhoto(token, editTargetProfile.profile_id, 1, f);
+                        if (!out?.url) throw new Error("Upload succeeded but no url returned.");
+                        setEditPhoto(out.url);
+                        showToast("Photo 1 uploaded.");
+                      } catch (err: any) {
+                        alert(err?.message || "Photo 1 upload failed.");
+                      } finally {
+                        setUploadingSlot(null);
+                        if (fileInputP1Ref.current) fileInputP1Ref.current.value = "";
+                      }
+                    }}
+                  />
 
-    <button
-      type="button"
-      style={{
-        padding: "10px 12px",
-        borderRadius: 10,
-        border: "1px solid #ddd",
-        background: uploadingSlot === 1 ? "#f3f3f3" : "white",
-        cursor: uploadingSlot === 1 ? "not-allowed" : "pointer",
-        fontWeight: 800,
-      }}
-      disabled={editSaving || uploadingSlot !== null}
-      onClick={() => fileInputP1Ref.current?.click()}
-    >
-      {uploadingSlot === 1 ? "Uploading..." : "Upload P1"}
-    </button>
-  </div>
+                  <button
+                    type="button"
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      background: uploadingSlot === 1 ? "#f3f3f3" : "white",
+                      cursor: uploadingSlot === 1 ? "not-allowed" : "pointer",
+                      fontWeight: 800,
+                    }}
+                    disabled={editSaving || uploadingSlot !== null}
+                    onClick={() => fileInputP1Ref.current?.click()}
+                  >
+                    {uploadingSlot === 1 ? "Uploading..." : "Upload P1"}
+                  </button>
+                </div>
 
-  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-    <button
-      type="button"
-      style={dangerBtn}
-      disabled={editSaving || !editTargetProfile.photo}
-      onClick={async () => {
-        const ok = window.confirm("Remove Photo 1 from this profile?");
-        if (!ok) return;
-        try {
-          await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 1);
-          setEditPhoto("");
-          showToast("Photo 1 removed.");
-          await refresh();
-        } catch (e: any) {
-          alert(e?.message || "Could not remove photo 1.");
-        }
-      }}
-    >
-      Remove P1
-    </button>
-  </div>
-</div>
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    style={dangerBtn}
+                    disabled={editSaving || !editTargetProfile.photo}
+                    onClick={async () => {
+                      const ok = window.confirm("Remove Photo 1 from this profile?");
+                      if (!ok) return;
+                      try {
+                        await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 1);
+                        setEditPhoto("");
+                        showToast("Photo 1 removed.");
+                        await refresh();
+                      } catch (e: any) {
+                        alert(e?.message || "Could not remove photo 1.");
+                      }
+                    }}
+                  >
+                    Remove P1
+                  </button>
+                </div>
+              </div>
 
-<div style={{ marginTop: 14 }}>
-  <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 2</div>
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#333", marginBottom: 6 }}>Photo 2</div>
 
-  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-    <input
-      value={editPhoto2}
-      onChange={(e) => setEditPhoto2(e.target.value)}
-      placeholder="https://… (or use Upload)"
-      style={{
-        flex: 1,
-        minWidth: 220,
-        padding: 10,
-        borderRadius: 12,
-        border: "1px solid #ccc",
-        fontSize: 14,
-      }}
-    />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    value={editPhoto2}
+                    onChange={(e) => setEditPhoto2(e.target.value)}
+                    placeholder="https://… (or use Upload)"
+                    style={{
+                      flex: 1,
+                      minWidth: 220,
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid #ccc",
+                      fontSize: 14,
+                    }}
+                  />
 
-    <input
-      ref={fileInputP2Ref}
-      type="file"
-      accept="image/*"
-      style={{ display: "none" }}
-      onChange={async (e) => {
-        const f = e.target.files?.[0];
-        if (!f || !editTargetProfile) return;
+                  <input
+                    ref={fileInputP2Ref}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (!f || !editTargetProfile) return;
 
-        try {
-          setUploadingSlot(2);
-          const out = await apiAdminUploadPhoto(token, editTargetProfile.profile_id, 2, f);
-          if (!out?.url) throw new Error("Upload succeeded but no url returned.");
-          setEditPhoto2(out.url);
-          showToast("Photo 2 uploaded.");
-        } catch (err: any) {
-          alert(err?.message || "Photo 2 upload failed.");
-        } finally {
-          setUploadingSlot(null);
-          if (fileInputP2Ref.current) fileInputP2Ref.current.value = "";
-        }
-      }}
-    />
+                      try {
+                        setUploadingSlot(2);
+                        const out = await apiAdminUploadPhoto(token, editTargetProfile.profile_id, 2, f);
+                        if (!out?.url) throw new Error("Upload succeeded but no url returned.");
+                        setEditPhoto2(out.url);
+                        showToast("Photo 2 uploaded.");
+                      } catch (err: any) {
+                        alert(err?.message || "Photo 2 upload failed.");
+                      } finally {
+                        setUploadingSlot(null);
+                        if (fileInputP2Ref.current) fileInputP2Ref.current.value = "";
+                      }
+                    }}
+                  />
 
-    <button
-      type="button"
-      style={{
-        padding: "10px 12px",
-        borderRadius: 10,
-        border: "1px solid #ddd",
-        background: uploadingSlot === 2 ? "#f3f3f3" : "white",
-        cursor: uploadingSlot === 2 ? "not-allowed" : "pointer",
-        fontWeight: 800,
-      }}
-      disabled={editSaving || uploadingSlot !== null}
-      onClick={() => fileInputP2Ref.current?.click()}
-    >
-      {uploadingSlot === 2 ? "Uploading..." : "Upload P2"}
-    </button>
-  </div>
+                  <button
+                    type="button"
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      background: uploadingSlot === 2 ? "#f3f3f3" : "white",
+                      cursor: uploadingSlot === 2 ? "not-allowed" : "pointer",
+                      fontWeight: 800,
+                    }}
+                    disabled={editSaving || uploadingSlot !== null}
+                    onClick={() => fileInputP2Ref.current?.click()}
+                  >
+                    {uploadingSlot === 2 ? "Uploading..." : "Upload P2"}
+                  </button>
+                </div>
 
-  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-    <button
-      type="button"
-      style={dangerBtn}
-      disabled={editSaving || !editTargetProfile.photo2}
-      onClick={async () => {
-        const ok = window.confirm("Remove Photo 2 from this profile?");
-        if (!ok) return;
-        try {
-          await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 2);
-          setEditPhoto2("");
-          showToast("Photo 2 removed.");
-          await refresh();
-        } catch (e: any) {
-          alert(e?.message || "Could not remove photo 2.");
-        }
-      }}
-    >
-      Remove P2
-    </button>
-  </div>
-</div>
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    style={dangerBtn}
+                    disabled={editSaving || !editTargetProfile.photo2}
+                    onClick={async () => {
+                      const ok = window.confirm("Remove Photo 2 from this profile?");
+                      if (!ok) return;
+                      try {
+                        await apiAdminRemovePhoto(token, editTargetProfile.profile_id, 2);
+                        setEditPhoto2("");
+                        showToast("Photo 2 removed.");
+                        await refresh();
+                      } catch (e: any) {
+                        alert(e?.message || "Could not remove photo 2.");
+                      }
+                    }}
+                  >
+                    Remove P2
+                  </button>
+                </div>
+              </div>
 
               <div style={{ gridColumn: "1 / -1" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
