@@ -131,6 +131,26 @@ function pickTargetProfile(r: ReportItem): string | null {
   return (r.reported_profile_id || r.profile_id || r.target_profile_id || null) as any;
 }
 
+/**
+ * ✅ NEW: Build an admin "go to" link that takes you to your admin dashboard context
+ * (instead of the public discover page).
+ *
+ * Preferred: focusProfileId
+ * Fallback: focusUserId
+ *
+ * NOTE: This just creates the link. Your /admin page can optionally implement auto-scroll
+ * using these query params, but even without that it still takes you to /admin with context in URL.
+ */
+function buildAdminGoToLink(targetProfile: string | null, targetUser: string | null): string {
+  if (targetProfile && String(targetProfile).trim()) {
+    return `/admin?focusProfileId=${encodeURIComponent(String(targetProfile).trim())}`;
+  }
+  if (targetUser && String(targetUser).trim()) {
+    return `/admin?focusUserId=${encodeURIComponent(String(targetUser).trim())}`;
+  }
+  return "/admin";
+}
+
 export default function AdminReportsPage() {
   const router = useRouter();
 
@@ -637,6 +657,9 @@ export default function AdminReportsPage() {
                       ? `${PUBLIC_PROFILE_PATH_PREFIX}${encodeURIComponent(targetProfile)}`
                       : null;
 
+                    // ✅ NEW: Admin go-to link (goes to /admin with context)
+                    const adminGoToUrl = buildAdminGoToLink(targetProfile, targetUser);
+
                     // Determine suspended state (best effort)
                     const suspendedFromRow =
                       typeof r.target_user_suspended === "boolean" ? r.target_user_suspended : undefined;
@@ -664,7 +687,8 @@ export default function AdminReportsPage() {
                             status: <b>{uiStatus}</b>
                           </div>
                           <div style={{ marginTop: 6, fontSize: 11, color: "#777" }}>
-                            id: <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>{r.id}</span>
+                            id:{" "}
+                            <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>{r.id}</span>
                           </div>
                         </td>
 
@@ -761,6 +785,15 @@ export default function AdminReportsPage() {
                         {/* Actions */}
                         <td style={{ padding: "10px 8px", whiteSpace: "nowrap", minWidth: 240 }}>
                           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {/* ✅ NEW: Go to Admin Profile (does NOT replace your public View profile) */}
+                            <Link
+                              href={adminGoToUrl}
+                              style={{ ...subtleBtn, textAlign: "center" }}
+                              title="Go to this user/profile inside the Admin Dashboard"
+                            >
+                              Go to admin profile
+                            </Link>
+
                             {publicProfileUrl ? (
                               <a
                                 href={publicProfileUrl}
