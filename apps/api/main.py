@@ -2244,6 +2244,56 @@ async def admin_upload_profile_photo(
     profile_id: str,
     slot: int = Form(...),
     file: UploadFile = File(...),
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    # ✅ Admin auth (same style as your other admin routes)
+    require_admin(authorization, x_admin_token=x_admin_token, allowed_roles=["admin", "moderator"])
+
+    # slot must be 1 or 2
+    if slot not in (1, 2):
+        raise HTTPException(status_code=400, detail="slot must be 1 or 2")
+
+    # Same file validation as /upload/photo
+    ext = (file.filename or "").split(".")[-1].lower()
+    if ext not in ["jpg", "jpeg", "png", "webp"]:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    filename = f"{secrets.token_hex(8)}.{ext}"
+    file_path = os.path.join(UPLOAD_DIR, filename)
+
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+
+    photo_url = f"{BASE_URL}/photos/{filename}"
+
+    # Save photo_url into the profile record
+    with Session(engine) as session:
+        prof = session.execute(select(Profile).where(Profile.id == profile_id)).scalar_one_or_none()
+        if not prof:
+            # cleanup file if profile doesn't exist
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        if slot == 1:
+            prof.photo = photo_url
+        else:
+            prof.photo2 = photo_url
+
+        session.add(prof)
+        session.commit()
+
+    return {"url": photo_url}
+
+@app.post("/admin/profiles/{profile_id}/upload-photo")
+async def admin_upload_profile_photo(
+    profile_id: str,
+    slot: int = Form(...),
+    file: UploadFile = File(...),
     admin=Depends(require_admin),  # <-- IMPORTANT: adjust this if your admin dependency has a different name
 ):
     # slot must be 1 or 2
