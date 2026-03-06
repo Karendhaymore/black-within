@@ -23,6 +23,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from fastapi import UploadFile, File, Form
 
 from sqlalchemy import (
     create_engine,
