@@ -16,7 +16,7 @@ const API_BASE =
  *  - `/profile/`
  *  - `/profiles/`
  */
-const PUBLIC_PROFILE_PATH_PREFIX = "/discover/";
+const PUBLIC_PROFILE_PATH_PREFIX = "/profiles/";
 
 type AdminProfileRow = {
   profile_id: string;
