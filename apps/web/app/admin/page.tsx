@@ -845,7 +845,10 @@ export default function AdminDashboardPage() {
                     const threads = p.threads_count ?? 0;
 
                     return (
-                      <tr key={p.profile_id}>
+                      <tr
+                        key={p.profile_id}
+                        id={`profile-row-${p.profile_id}`}
+                      >
                         <td style={{ padding: "10px 8px", borderBottom: "1px solid #f3f3f3" }}>
                           <div style={{ fontWeight: 800 }}>{p.displayName}</div>
                           <div style={{ color: "#666", fontSize: 12 }}>{p.owner_user_id}</div>
