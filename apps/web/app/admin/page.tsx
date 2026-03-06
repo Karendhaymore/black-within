@@ -768,30 +768,51 @@ export default function AdminDashboardPage() {
                         <td style={{ padding: "10px 8px", maxWidth: 420 }}>
                           <div style={{ fontSize: 12, color: "#333", whiteSpace: "pre-wrap" }}>{r.details || "—"}</div>
                         </td>
-                        <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-                          <button
-                            onClick={async () => {
-                              const note = window.prompt("Resolve note (optional):", "");
-                              try {
-                                await apiAdminResolveReport(adminToken, r.id, note || "");
-                                await refreshReports();
-                                await refreshReportCountsOnly();
-                              } catch (e: any) {
-                                alert(e?.message || "Resolve failed");
-                              }
-                            }}
-                            style={{
-                              padding: "8px 10px",
-                              borderRadius: 10,
-                              border: "1px solid #ddd",
-                              background: "white",
-                              fontWeight: 800,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Resolve
-                          </button>
-                        </td>
+                      <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <button
+      onClick={() =>
+        goToProfileFromReport({
+          profileId: (r as any).reported_profile_id || (r as any).reportedProfileId || null,
+          userId: (r as any).reported_user_id || (r as any).reportedUserId || null,
+        })
+      }
+      style={{
+        padding: "8px 10px",
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        background: "white",
+        fontWeight: 800,
+        cursor: "pointer",
+      }}
+    >
+      Go to profile
+    </button>
+
+    <button
+      onClick={async () => {
+        const note = window.prompt("Resolve note (optional):", "");
+        try {
+          await apiAdminResolveReport(adminToken, r.id, note || "");
+          await refreshReports();
+          await refreshReportCountsOnly();
+        } catch (e: any) {
+          alert(e?.message || "Resolve failed");
+        }
+      }}
+      style={{
+        padding: "8px 10px",
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        background: "white",
+        fontWeight: 800,
+        cursor: "pointer",
+      }}
+    >
+      Resolve
+    </button>
+  </div>
+</td> 
                       </tr>
                     ))}
                   </tbody>
