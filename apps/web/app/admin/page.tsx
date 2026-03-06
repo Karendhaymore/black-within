@@ -321,6 +321,37 @@ export default function AdminDashboardPage() {
     window.setTimeout(() => setToast(null), 2200);
   }
 
+  function goToProfileFromReport(target: { profileId?: string | null; userId?: string | null }) {
+  const profileId = (target.profileId || "").trim();
+  const userId = (target.userId || "").trim();
+
+  // Prefer profileId because it's the most precise
+  const q = profileId || userId;
+  if (!q) {
+    alert("This report does not include a profile_id or user_id to jump to.");
+    return;
+  }
+
+  // 1) filter the Profiles list so the correct row is visible
+  setQuery(q);
+
+  // 2) after React re-renders, scroll to the row if we have profileId
+  window.setTimeout(() => {
+    if (!profileId) return;
+
+    const el = document.getElementById(`profile-row-${profileId}`);
+    if (!el) return;
+
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    // Optional: brief highlight
+    const prev = el.style.background;
+    el.style.background = "rgba(255, 241, 163, 0.6)";
+    window.setTimeout(() => {
+      el.style.background = prev;
+    }, 1400);
+  }, 80);
+}
   useEffect(() => {
     const t = getAdminToken();
     if (!t) {
