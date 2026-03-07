@@ -34,6 +34,14 @@ type ApiProfile = {
 type ProfilesResponse = { items: ApiProfile[] };
 type IdListResponse = { ids: string[] };
 
+// ✅ Messaging access response
+type MessagingAccessResponse = {
+  canMessage: boolean;
+  isPremium: boolean;
+  unlockedUntilUTC?: string | null;
+  reason?: string | null;
+};
+
 // -----------------------------
 // Local notification helper (client-only)
 // -----------------------------
@@ -141,7 +149,6 @@ async function apiGetOrCreateThread(
   userId: string,
   withProfileId: string
 ): Promise<string> {
-  // Use apiFetch so we don't leak raw API messages to the user
   const data = (await apiFetch("/threads/get-or-create", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -154,6 +161,21 @@ async function apiGetOrCreateThread(
   const threadId = data.threadId || data.thread_id || data.id || "";
   if (!threadId) throw new Error("Conversation could not be started. Please try again.");
   return threadId;
+}
+
+// ✅ Same messaging access check used by your other pages
+async function apiMessagingAccess(
+  userId: string,
+  threadId: string
+): Promise<MessagingAccessResponse> {
+  const data = (await apiFetch(
+    `/messaging/access?user_id=${encodeURIComponent(userId)}&thread_id=${encodeURIComponent(threadId)}`,
+    {
+      method: "GET",
+    }
+  )) as MessagingAccessResponse;
+
+  return data;
 }
 
 // -----------------------------
@@ -360,7 +382,7 @@ export default function ProfileDetailPage() {
     }
   }
 
-  // ✅ Message button creates a real thread, then navigates with withProfileId included.
+  // ✅ Updated to match the Discover page lock/payment flow
   async function onMessage() {
     if (!profile) return;
     if (!userId) return;
@@ -369,14 +391,22 @@ export default function ProfileDetailPage() {
       setApiError(null);
       showToast("Opening chat…");
 
-      // Create/get a real thread id
       const threadId = await apiGetOrCreateThread(userId, profile.id);
 
-      // Navigate with required params for unlock flow
+      let locked = false;
+      try {
+        const access = await apiMessagingAccess(userId, threadId);
+        locked = !access.canMessage;
+        if (locked && access.reason) showToast(access.reason);
+      } catch {
+        // fail open if access check has a temporary issue
+      }
+
       window.location.href =
         `/messages?threadId=${encodeURIComponent(threadId)}` +
         `&with=${encodeURIComponent(profile.displayName)}` +
-        `&withProfileId=${encodeURIComponent(profile.id)}`;
+        `&withProfileId=${encodeURIComponent(profile.id)}` +
+        (locked ? "&locked=1" : "");
     } catch (e: any) {
       const msg = e?.message || "Could not start a chat right now.";
       setApiError(msg);
@@ -701,7 +731,6 @@ export default function ProfileDetailPage() {
                     background: "rgba(255,255,255,0.04)",
                   }}
                   onError={() => {
-                    // if expanded image breaks, close modal (prevents blank overlay)
                     closeLightbox();
                   }}
                 />
@@ -840,10 +869,6 @@ export default function ProfileDetailPage() {
               >
                 Back to Discover
               </Link>
-            </div>
-
-            <div style={{ marginTop: "0.9rem", color: "#777", fontSize: "0.92rem" }}>
-              Messaging opens later. Likes notify, but conversations remain locked.
             </div>
           </div>
         </div>
