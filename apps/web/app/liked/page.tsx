@@ -378,11 +378,6 @@ export default function LikedProfilesPage() {
           </div>
         )}
 
-        <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
-          MVP note: Liked Profiles are computed from the likes table (who liked
-          your profile) and displayed via the API.
-        </div>
-      </div>
     </main>
   );
 }
