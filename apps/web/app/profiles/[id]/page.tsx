@@ -416,35 +416,35 @@ export default function ProfileDetailPage() {
 
   // ✅ Updated to match the Discover page lock/payment flow
   async function onMessage() {
-    if (!profile) return;
-    if (!userId) return;
+  if (!profile) return;
+  if (!userId) return;
 
+  try {
+    setApiError(null);
+    showToast("Opening chat…");
+
+    const threadId = await apiGetOrCreateThread(userId, profile.id);
+
+    let locked = false;
     try {
-      setApiError(null);
-      showToast("Opening chat…");
-
-      const threadId = await apiGetOrCreateThread(userId, profile.id);
-
-      let locked = false;
-      try {
-        const access = await apiMessagingAccess(userId, threadId);
-        locked = !access.canMessage;
-        if (locked && access.reason) showToast(access.reason);
-      } catch {
-        // fail open if access check has a temporary issue
-      }
-
-      window.location.href =
-        `/messages?threadId=${encodeURIComponent(threadId)}` +
-        `&with=${encodeURIComponent(profile.displayName)}` +
-        `&withProfileId=${encodeURIComponent(profile.id)}` +
-        (locked ? "&locked=1" : "");
-    } catch (e: any) {
-      const msg = e?.message || "Could not start a chat right now.";
-      setApiError(msg);
-      showToast(msg);
+      const access = await apiMessagingAccess(userId, threadId);
+      locked = !access.canMessage;
+      if (locked && access.reason) showToast(access.reason);
+    } catch {
+      // fail open if access check has a temporary issue
     }
+
+    window.location.href =
+      `/messages?threadId=${encodeURIComponent(threadId)}` +
+      `&with=${encodeURIComponent(profile.displayName)}` +
+      `&withProfileId=${encodeURIComponent(profile.id)}` +
+      (locked ? "&locked=1" : "");
+  } catch (e: any) {
+    const msg = e?.message || "Could not start a chat right now.";
+    setApiError(msg);
+    showToast(msg);
   }
+}
 
   if (loading) {
     return (
