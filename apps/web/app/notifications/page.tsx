@@ -139,22 +139,6 @@ export default function NotificationsPage() {
             <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
               Notifications
             </h1>
-            <p style={{ color: "#555" }}>
-              Likes notify the recipient. Messaging stays locked for now.
-            </p>
-
-            <div
-              style={{
-                marginTop: "0.85rem",
-                padding: "0.85rem",
-                borderRadius: 12,
-                border: "1px solid #eee",
-                color: "#555",
-              }}
-            >
-              Tip: You’ll only see a “like” notification if someone likes a
-              profile you own (from a different browser/user).
-            </div>
           </div>
 
           <div
@@ -338,7 +322,6 @@ export default function NotificationsPage() {
                       alignItems: "center",
                     }}
                   >
-                    {/* photo / initials */}
                     {showFallback ? (
                       <div
                         style={{
@@ -431,7 +414,6 @@ export default function NotificationsPage() {
             })}
           </div>
         )}
-
       </div>
     </main>
   );
