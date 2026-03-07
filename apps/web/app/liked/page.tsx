@@ -200,19 +200,6 @@ export default function LikedProfilesPage() {
           </div>
         )}
 
-        <div
-          style={{
-            marginTop: "1.25rem",
-            padding: "0.85rem",
-            borderRadius: 12,
-            border: "1px solid #eee",
-            color: "#555",
-          }}
-        >
-          Tip: In preview mode, you only see “Liked you” if someone with a
-          different browser/device likes the profile you own.
-        </div>
-
         {loading ? (
           <div
             style={{
