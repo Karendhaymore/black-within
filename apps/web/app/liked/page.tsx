@@ -346,7 +346,14 @@ export default function LikedProfilesPage() {
                       ))}
                     </div>
 
-                    <div style={{ marginTop: "1rem" }}>
+                    <div
+                      style={{
+                        marginTop: "1rem",
+                        display: "flex",
+                        gap: "0.6rem",
+                        flexWrap: "wrap",
+                      }}
+                    >
                       <Link
                         href={`/profiles/${p.id}`}
                         style={{
@@ -360,6 +367,22 @@ export default function LikedProfilesPage() {
                       >
                         View
                       </Link>
+
+                      <Link
+                        href={`/messages?withProfileId=${encodeURIComponent(p.id)}&with=${encodeURIComponent(
+                          p.displayName
+                        )}`}
+                        style={{
+                          padding: "0.6rem 0.9rem",
+                          borderRadius: 10,
+                          border: "1px solid #ccc",
+                          textDecoration: "none",
+                          color: "inherit",
+                          display: "inline-block",
+                        }}
+                      >
+                        Message
+                      </Link>
                     </div>
 
                     <div
@@ -369,7 +392,7 @@ export default function LikedProfilesPage() {
                         fontSize: "0.9rem",
                       }}
                     >
-                        This person liked you.
+                      This person liked you.
                     </div>
                   </div>
                 </div>
@@ -377,6 +400,7 @@ export default function LikedProfilesPage() {
             })}
           </div>
         )}
-
       </div>
     </main>
+  );
+}
