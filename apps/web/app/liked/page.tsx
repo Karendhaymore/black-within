@@ -369,7 +369,7 @@ export default function LikedProfilesPage() {
                         fontSize: "0.9rem",
                       }}
                     >
-                      This person liked you.
+                        This person liked you.
                     </div>
                   </div>
                 </div>
@@ -378,4 +378,5 @@ export default function LikedProfilesPage() {
           </div>
         )}
 
+      </div>
     </main>
