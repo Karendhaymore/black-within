@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { getOrCreateUserId } from "../../lib/user";
 import { apiFetch } from "../../lib/api";
 
 const API_BASE =
@@ -41,6 +40,18 @@ type MessagingAccessResponse = {
   unlockedUntilUTC?: string | null;
   reason?: string | null;
 };
+
+function getLoggedInUserId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const uid = window.localStorage.getItem("bw_user_id");
+    const loggedIn = window.localStorage.getItem("bw_logged_in") === "1";
+    if (!loggedIn) return null;
+    return uid && uid.trim() ? uid.trim() : null;
+  } catch {
+    return null;
+  }
+}
 
 // -----------------------------
 // Local notification helper (client-only)
@@ -305,9 +316,14 @@ export default function ProfileDetailPage() {
     }
   }
 
-  // Load user id + profiles
+  // Load real logged-in user id + profiles
   useEffect(() => {
-    const uid = getOrCreateUserId();
+    const uid = getLoggedInUserId();
+    if (!uid) {
+      router.replace("/auth/login");
+      return;
+    }
+
     setUserId(uid);
 
     (async () => {
@@ -328,7 +344,7 @@ export default function ProfileDetailPage() {
       await refreshSavedAndLikes(uid);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [router]);
 
   // When profiles load and availableProfileIds changes, re-filter saved/likes
   useEffect(() => {
