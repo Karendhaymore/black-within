@@ -168,14 +168,20 @@ async function apiMessagingAccess(
   userId: string,
   threadId: string
 ): Promise<MessagingAccessResponse> {
-  const data = (await apiFetch(
-    `/messaging/access?user_id=${encodeURIComponent(userId)}&thread_id=${encodeURIComponent(threadId)}`,
+  const res = await fetch(
+    `${API_BASE}/messaging/access?user_id=${encodeURIComponent(userId)}&thread_id=${encodeURIComponent(threadId)}`,
     {
       method: "GET",
+      cache: "no-store",
     }
-  )) as MessagingAccessResponse;
+  );
 
-  return data;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to check messaging access (${res.status}). ${text}`);
+  }
+
+  return (await res.json()) as MessagingAccessResponse;
 }
 
 // -----------------------------
