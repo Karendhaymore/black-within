@@ -160,17 +160,27 @@ async function apiGetOrCreateThread(
   userId: string,
   withProfileId: string
 ): Promise<string> {
-  const data = (await apiFetch("/threads/get-or-create", {
+  const res = await fetch(`${API_BASE}/threads/get-or-create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       user_id: userId,
       with_profile_id: withProfileId,
     }),
-  })) as ThreadGetOrCreateResponse;
+  });
 
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || "Conversation could not be started. Please try again.");
+  }
+
+  const data = (await res.json()) as ThreadGetOrCreateResponse;
   const threadId = data.threadId || data.thread_id || data.id || "";
-  if (!threadId) throw new Error("Conversation could not be started. Please try again.");
+
+  if (!threadId) {
+    throw new Error("Conversation could not be started. Please try again.");
+  }
+
   return threadId;
 }
 
