@@ -128,6 +128,19 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
   if (!res.ok) throw new Error(`Unsave failed (${res.status}).`);
 }
 
+async function apiBlockUser(userId: string, profileId: string) {
+  const res = await fetch(`${API_BASE}/blocks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, profile_id: profileId }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Block failed (${res.status}).`);
+  }
+}
+
 // NOTE: backend currently ignores recipient_user_id, but passing it is future-proof.
 async function apiLikeProfile(
   userId: string,
