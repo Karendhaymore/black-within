@@ -2075,9 +2075,29 @@ def _coerce_alignment_fields(payload: UpsertMyProfilePayload):
     return cultural_list, spiritual_list, rel_intent, dating_challenge, personal_truth
 
 
+def _get_blocked_user_ids(session: Session, user_id: Optional[str]):
+    uid = (user_id or "").strip()
+    if not uid:
+        return set()
+
+    users_i_blocked = session.execute(
+        select(BlockedUser.blocked_user_id).where(BlockedUser.user_id == uid)
+    ).all()
+
+    users_who_blocked_me = session.execute(
+        select(BlockedUser.user_id).where(BlockedUser.blocked_user_id == uid)
+    ).all()
+
+    blocked_ids = {row[0] for row in users_i_blocked}
+    blocked_ids.update({row[0] for row in users_who_blocked_me})
+    return blocked_ids
+
+
 @app.get("/profiles", response_model=ProfilesResponse)
 def list_profiles(exclude_owner_user_id: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=200)):
     with Session(engine) as session:
+        blocked_user_ids = _get_blocked_user_ids(session, exclude_owner_user_id)
+
         q = (
             select(Profile)
             .where(Profile.is_available == True)
@@ -2085,8 +2105,12 @@ def list_profiles(exclude_owner_user_id: Optional[str] = Query(default=None), li
             .order_by(Profile.updated_at.desc())
             .limit(limit)
         )
+
         if exclude_owner_user_id:
             q = q.where(Profile.owner_user_id != exclude_owner_user_id)
+
+        if blocked_user_ids:
+            q = q.where(Profile.owner_user_id.not_in(blocked_user_ids))
 
         rows = session.execute(q).scalars().all()
 
@@ -2395,7 +2419,6 @@ def save_profile(payload: ProfileAction):
             return {"ok": True}
 
     return {"ok": True}
-
 
 @app.delete("/saved")
 def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
