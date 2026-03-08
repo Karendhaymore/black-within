@@ -23,7 +23,7 @@ type ApiProfile = {
   city: string;
   stateUS: string;
   photo?: string | null;
-  photo2?: string | null; // ✅ NEW
+  photo2?: string | null;
   identityPreview: string;
   intention: string;
   tags: string[];
@@ -33,7 +33,6 @@ type ApiProfile = {
 type ProfilesResponse = { items: ApiProfile[] };
 type IdListResponse = { ids: string[] };
 
-// ✅ Messaging access response
 type MessagingAccessResponse = {
   canMessage: boolean;
   isPremium: boolean;
@@ -53,9 +52,6 @@ function getLoggedInUserId(): string | null {
   }
 }
 
-// -----------------------------
-// Local notification helper (client-only)
-// -----------------------------
 function addNotificationLocal(message: string) {
   try {
     const key = "bw_notifications";
@@ -75,9 +71,6 @@ function addNotificationLocal(message: string) {
   }
 }
 
-// -----------------------------
-// API helpers
-// -----------------------------
 async function apiListProfiles(): Promise<ApiProfile[]> {
   const res = await fetch(`${API_BASE}/profiles?limit=200`, {
     cache: "no-store",
@@ -141,7 +134,6 @@ async function apiBlockUser(userId: string, profileId: string) {
   }
 }
 
-// NOTE: backend currently ignores recipient_user_id, but passing it is future-proof.
 async function apiLikeProfile(
   userId: string,
   profileId: string,
@@ -158,11 +150,6 @@ async function apiLikeProfile(
   });
 }
 
-/**
- * ✅ Threads API: POST /threads/get-or-create
- * Backend expects: { user_id, with_profile_id }
- * Returns one of: { threadId } | { thread_id } | { id }
- */
 type ThreadGetOrCreateResponse = {
   threadId?: string;
   thread_id?: string;
@@ -197,13 +184,14 @@ async function apiGetOrCreateThread(
   return threadId;
 }
 
-// ✅ Same messaging access check used by your other pages
 async function apiMessagingAccess(
   userId: string,
   threadId: string
 ): Promise<MessagingAccessResponse> {
   const res = await fetch(
-    `${API_BASE}/messaging/access?user_id=${encodeURIComponent(userId)}&thread_id=${encodeURIComponent(threadId)}`,
+    `${API_BASE}/messaging/access?user_id=${encodeURIComponent(
+      userId
+    )}&thread_id=${encodeURIComponent(threadId)}`,
     {
       method: "GET",
       cache: "no-store",
@@ -218,9 +206,6 @@ async function apiMessagingAccess(
   return (await res.json()) as MessagingAccessResponse;
 }
 
-// -----------------------------
-// Identity Preview formatting
-// -----------------------------
 function normalizeHeading(label: string) {
   const x = (label || "").trim().toLowerCase();
   if (x.startsWith("cultural identity")) return "Cultural Identity";
@@ -234,14 +219,12 @@ function parseIdentityPreview(raw: string): { title: string; body: string }[] {
   const text = (raw || "").trim();
   if (!text) return [];
 
-  // Expect blocks separated by blank lines
   const blocks = text
     .split(/\n\s*\n/g)
     .map((b) => b.trim())
     .filter(Boolean);
 
   return blocks.map((b) => {
-    // If it looks like "Label: content" on the first line, split once
     const idx = b.indexOf(":");
     if (idx > 0 && idx < 60) {
       const label = b.slice(0, idx).trim();
@@ -261,7 +244,6 @@ export default function ProfileDetailPage() {
   const profileId = (params?.id || "").toString();
 
   const [userId, setUserId] = useState<string>("");
-
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
@@ -269,11 +251,7 @@ export default function ProfileDetailPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingSets, setLoadingSets] = useState<boolean>(true);
-
-  // ✅ For thumbnail error fallback (per-src)
   const [brokenSrcs, setBrokenSrcs] = useState<Record<string, boolean>>({});
-
-  // ---------- Photo gallery (2 photos) + lightbox ----------
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string>("");
 
@@ -339,7 +317,6 @@ export default function ProfileDetailPage() {
     }
   }
 
-  // Load real logged-in user id + profiles
   useEffect(() => {
     const uid = getLoggedInUserId();
     if (!uid) {
@@ -366,14 +343,11 @@ export default function ProfileDetailPage() {
 
       await refreshSavedAndLikes(uid);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
-  // When profiles load and availableProfileIds changes, re-filter saved/likes
   useEffect(() => {
     if (!userId) return;
     refreshSavedAndLikes(userId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableProfileIds]);
 
   async function onToggleSave() {
@@ -415,9 +389,7 @@ export default function ProfileDetailPage() {
 
     try {
       await apiLikeProfile(userId, profile.id, profile.owner_user_id);
-
       await refreshSavedAndLikes(userId);
-
       addNotificationLocal("Someone liked your profile.");
       showToast("Like sent.");
     } catch (e: any) {
@@ -427,59 +399,59 @@ export default function ProfileDetailPage() {
     }
   }
 
-  // ✅ Updated to match the Discover page lock/payment flow
   async function onMessage() {
-  if (!profile) return;
-  if (!userId) return;
+    if (!profile) return;
+    if (!userId) return;
 
- async function onBlock() {
-  if (!profile) return;
-  if (!userId) return;
-
-  const ok = window.confirm(
-    `Block ${profile.displayName}? They will no longer appear in Discover or messages.`
-  );
-  if (!ok) return;
-
-  try {
-    setApiError(null);
-    await apiBlockUser(userId, profile.id);
-    showToast(`${profile.displayName} has been blocked.`);
-    window.setTimeout(() => {
-      window.location.href = "/discover";
-    }, 700);
-  } catch (e: any) {
-    const msg = e?.message || "Could not block right now.";
-    setApiError(msg);
-    showToast(msg);
-  }
-}   
-  try {
-    setApiError(null);
-    showToast("Opening chat…");
-
-    const threadId = await apiGetOrCreateThread(userId, profile.id);
-
-    let locked = false;
     try {
-      const access = await apiMessagingAccess(userId, threadId);
-      locked = !access.canMessage;
-      if (locked && access.reason) showToast(access.reason);
-    } catch {
-      // fail open if access check has a temporary issue
-    }
+      setApiError(null);
+      showToast("Opening chat…");
 
-    window.location.href =
-      `/messages?threadId=${encodeURIComponent(threadId)}` +
-      `&with=${encodeURIComponent(profile.displayName)}` +
-      `&withProfileId=${encodeURIComponent(profile.id)}` +
-      (locked ? "&locked=1" : "");
-  } catch (e: any) {
-    const msg = e?.message || "Could not start a chat right now.";
-    setApiError(msg);
-    showToast(msg);
+      const threadId = await apiGetOrCreateThread(userId, profile.id);
+
+      let locked = false;
+      try {
+        const access = await apiMessagingAccess(userId, threadId);
+        locked = !access.canMessage;
+        if (locked && access.reason) showToast(access.reason);
+      } catch {
+        // fail open if access check has a temporary issue
+      }
+
+      window.location.href =
+        `/messages?threadId=${encodeURIComponent(threadId)}` +
+        `&with=${encodeURIComponent(profile.displayName)}` +
+        `&withProfileId=${encodeURIComponent(profile.id)}` +
+        (locked ? "&locked=1" : "");
+    } catch (e: any) {
+      const msg = e?.message || "Could not start a chat right now.";
+      setApiError(msg);
+      showToast(msg);
+    }
   }
-}
+
+  async function onBlock() {
+    if (!profile) return;
+    if (!userId) return;
+
+    const ok = window.confirm(
+      `Block ${profile.displayName}? They will no longer appear in Discover or messages.`
+    );
+    if (!ok) return;
+
+    try {
+      setApiError(null);
+      await apiBlockUser(userId, profile.id);
+      showToast(`${profile.displayName} has been blocked.`);
+      window.setTimeout(() => {
+        window.location.href = "/discover";
+      }, 700);
+    } catch (e: any) {
+      const msg = e?.message || "Could not block right now.";
+      setApiError(msg);
+      showToast(msg);
+    }
+  }
 
   if (loading) {
     return (
@@ -642,7 +614,6 @@ export default function ProfileDetailPage() {
             background: "white",
           }}
         >
-          {/* Photos (thumbnails) */}
           <div style={{ padding: "1.25rem", borderBottom: "1px solid #eee" }}>
             <div style={{ fontWeight: 800, marginBottom: 10 }}>Photos</div>
 
@@ -715,7 +686,6 @@ export default function ProfileDetailPage() {
                           {getInitials(profile.displayName)}
                         </div>
                       ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={src}
                           alt={`${profile.displayName} photo`}
@@ -737,7 +707,6 @@ export default function ProfileDetailPage() {
             )}
           </div>
 
-          {/* Lightbox modal */}
           {lightboxOpen ? (
             <div
               onClick={closeLightbox}
@@ -784,7 +753,6 @@ export default function ProfileDetailPage() {
                   ×
                 </button>
 
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={lightboxSrc}
                   alt="Expanded photo"
@@ -805,9 +773,7 @@ export default function ProfileDetailPage() {
             </div>
           ) : null}
 
-          {/* Body */}
           <div style={{ padding: "1.25rem" }}>
-            {/* Identity sections */}
             {identitySections.length > 0 ? (
               <div style={{ display: "grid", gap: "0.85rem" }}>
                 {identitySections.map((sec, idx) => (
@@ -869,7 +835,6 @@ export default function ProfileDetailPage() {
               </div>
             )}
 
-            {/* Actions */}
             <div
               style={{
                 marginTop: "1.1rem",
@@ -908,36 +873,36 @@ export default function ProfileDetailPage() {
                 {isLiked ? "Liked" : "Like"}
               </button>
 
-            <button
-  onClick={onMessage}
-  disabled={loadingSets}
-  style={{
-    padding: "0.7rem 1rem",
-    borderRadius: 10,
-    border: "1px solid #ccc",
-    background: "white",
-    cursor: loadingSets ? "not-allowed" : "pointer",
-    opacity: loadingSets ? 0.75 : 1,
-  }}
->
-  Message
-</button>
+              <button
+                onClick={onMessage}
+                disabled={loadingSets}
+                style={{
+                  padding: "0.7rem 1rem",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  background: "white",
+                  cursor: loadingSets ? "not-allowed" : "pointer",
+                  opacity: loadingSets ? 0.75 : 1,
+                }}
+              >
+                Message
+              </button>
 
-<button
-  onClick={onBlock}
-  disabled={loadingSets}
-  style={{
-    padding: "0.7rem 1rem",
-    borderRadius: 10,
-    border: "1px solid #d9b3b3",
-    background: "#fff7f7",
-    color: "#8a2d2d",
-    cursor: loadingSets ? "not-allowed" : "pointer",
-    opacity: loadingSets ? 0.75 : 1,
-  }}
->
-  Block
-</button> 
+              <button
+                onClick={onBlock}
+                disabled={loadingSets}
+                style={{
+                  padding: "0.7rem 1rem",
+                  borderRadius: 10,
+                  border: "1px solid #d9b3b3",
+                  background: "#fff7f7",
+                  color: "#8a2d2d",
+                  cursor: loadingSets ? "not-allowed" : "pointer",
+                  opacity: loadingSets ? 0.75 : 1,
+                }}
+              >
+                Block
+              </button>
 
               <Link
                 href="/discover"
