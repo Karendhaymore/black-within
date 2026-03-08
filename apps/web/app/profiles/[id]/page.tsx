@@ -432,6 +432,28 @@ export default function ProfileDetailPage() {
   if (!profile) return;
   if (!userId) return;
 
+ async function onBlock() {
+  if (!profile) return;
+  if (!userId) return;
+
+  const ok = window.confirm(
+    `Block ${profile.displayName}? They will no longer appear in Discover or messages.`
+  );
+  if (!ok) return;
+
+  try {
+    setApiError(null);
+    await apiBlockUser(userId, profile.id);
+    showToast(`${profile.displayName} has been blocked.`);
+    window.setTimeout(() => {
+      window.location.href = "/discover";
+    }, 700);
+  } catch (e: any) {
+    const msg = e?.message || "Could not block right now.";
+    setApiError(msg);
+    showToast(msg);
+  }
+}   
   try {
     setApiError(null);
     showToast("Opening chat…");
