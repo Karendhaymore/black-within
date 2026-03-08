@@ -908,20 +908,36 @@ export default function ProfileDetailPage() {
                 {isLiked ? "Liked" : "Like"}
               </button>
 
-              <button
-                onClick={onMessage}
-                disabled={loadingSets}
-                style={{
-                  padding: "0.7rem 1rem",
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                  background: "white",
-                  cursor: loadingSets ? "not-allowed" : "pointer",
-                  opacity: loadingSets ? 0.75 : 1,
-                }}
-              >
-                Message
-              </button>
+            <button
+  onClick={onMessage}
+  disabled={loadingSets}
+  style={{
+    padding: "0.7rem 1rem",
+    borderRadius: 10,
+    border: "1px solid #ccc",
+    background: "white",
+    cursor: loadingSets ? "not-allowed" : "pointer",
+    opacity: loadingSets ? 0.75 : 1,
+  }}
+>
+  Message
+</button>
+
+<button
+  onClick={onBlock}
+  disabled={loadingSets}
+  style={{
+    padding: "0.7rem 1rem",
+    borderRadius: 10,
+    border: "1px solid #d9b3b3",
+    background: "#fff7f7",
+    color: "#8a2d2d",
+    cursor: loadingSets ? "not-allowed" : "pointer",
+    opacity: loadingSets ? 0.75 : 1,
+  }}
+>
+  Block
+</button> 
 
               <Link
                 href="/discover"
