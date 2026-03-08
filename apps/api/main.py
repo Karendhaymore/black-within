@@ -2779,6 +2779,19 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
         if other_user_id == user_id:
             raise HTTPException(status_code=400, detail="You cannot message yourself.")
 
+        # ✅ Do not allow messaging if either person has blocked the other
+        block_exists = session.execute(
+            select(BlockedUser).where(
+                or_(
+                    and_(BlockedUser.user_id == user_id, BlockedUser.blocked_user_id == other_user_id),
+                    and_(BlockedUser.user_id == other_user_id, BlockedUser.blocked_user_id == user_id),
+                )
+            )
+        ).scalar_one_or_none()
+
+        if block_exists:
+            raise HTTPException(status_code=403, detail="Conversation unavailable.")
+
         low, high = _sorted_pair(user_id, other_user_id)
         existing = session.execute(
             select(Thread).where(Thread.user_low == low, Thread.user_high == high)
