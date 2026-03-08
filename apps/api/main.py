@@ -2874,13 +2874,12 @@ def mark_thread_read(payload: MarkReadPayload):
         session.commit()
         return {"ok": True, "lastReadAt": read_at.isoformat()}
 
-
 @app.post("/threads/get-or-create", response_model=ThreadItem)
 def threads_get_or_create(payload: ThreadGetOrCreatePayload):
     user_id = _ensure_user(payload.user_id)
 
     with Session(engine) as session:
-        # ✅ Block banned users from starting or accessing threads
+        # Block banned users from starting or accessing threads
         _require_not_banned(session, user_id)
 
         prof = session.get(Profile, (payload.with_profile_id or "").strip())
@@ -2893,19 +2892,6 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
         if other_user_id == user_id:
             raise HTTPException(status_code=400, detail="You cannot message yourself.")
 
-        # ✅ Do not allow messaging if either person has blocked the other
-        block_exists = session.execute(
-            select(BlockedUser).where(
-                or_(
-                    and_(BlockedUser.user_id == user_id, BlockedUser.blocked_user_id == other_user_id),
-                    and_(BlockedUser.user_id == other_user_id, BlockedUser.blocked_user_id == user_id),
-                )
-            )
-        ).scalar_one_or_none()
-
-        if block_exists:
-            raise HTTPException(status_code=403, detail="Conversation unavailable.")
-
         low, high = _sorted_pair(user_id, other_user_id)
         existing = session.execute(
             select(Thread).where(Thread.user_low == low, Thread.user_high == high)
@@ -2916,7 +2902,6 @@ def threads_get_or_create(payload: ThreadGetOrCreatePayload):
         if existing:
             thread = existing
         else:
-            # ✅ Limit brand-new conversations to 10 per hour
             _enforce_thread_creation_limit(session, user_id)
 
             thread = Thread(
