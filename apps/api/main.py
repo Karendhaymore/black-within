@@ -2420,6 +2420,7 @@ def save_profile(payload: ProfileAction):
 
     return {"ok": True}
 
+
 @app.delete("/saved")
 def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
     user_id = _ensure_user(user_id)
@@ -2429,6 +2430,80 @@ def unsave_profile(user_id: str = Query(...), profile_id: str = Query(...)):
 
     with Session(engine) as session:
         session.execute(delete(SavedProfile).where(SavedProfile.user_id == user_id, SavedProfile.profile_id == profile_id))
+        session.commit()
+
+    return {"ok": True}
+
+
+@app.post("/blocks")
+def block_user(payload: ProfileAction):
+    user_id = _ensure_user(payload.user_id)
+    profile_id = (payload.profile_id or "").strip()
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
+    with Session(engine) as session:
+        _require_not_banned(session, user_id)
+
+        prof = session.get(Profile, profile_id)
+        if not prof:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        blocked_user_id = (prof.owner_user_id or "").strip()
+        if not blocked_user_id:
+            raise HTTPException(status_code=400, detail="That profile is missing an owner_user_id.")
+        if blocked_user_id == user_id:
+            raise HTTPException(status_code=400, detail="You cannot block yourself.")
+
+        existing = session.execute(
+            select(BlockedUser).where(
+                BlockedUser.user_id == user_id,
+                BlockedUser.blocked_user_id == blocked_user_id
+            )
+        ).scalar_one_or_none()
+
+        if existing:
+            return {"ok": True}
+
+        session.add(
+            BlockedUser(
+                user_id=user_id,
+                blocked_user_id=blocked_user_id,
+                created_at=datetime.utcnow(),
+            )
+        )
+
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            return {"ok": True}
+
+    return {"ok": True}
+
+
+@app.delete("/blocks")
+def unblock_user(user_id: str = Query(...), profile_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+    profile_id = (profile_id or "").strip()
+    if not profile_id:
+        raise HTTPException(status_code=400, detail="profile_id is required")
+
+    with Session(engine) as session:
+        prof = session.get(Profile, profile_id)
+        if not prof:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        blocked_user_id = (prof.owner_user_id or "").strip()
+        if not blocked_user_id:
+            raise HTTPException(status_code=400, detail="That profile is missing an owner_user_id.")
+
+        session.execute(
+            delete(BlockedUser).where(
+                BlockedUser.user_id == user_id,
+                BlockedUser.blocked_user_id == blocked_user_id
+            )
+        )
         session.commit()
 
     return {"ok": True}
@@ -2518,6 +2593,13 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
         if not liker_user_ids:
             return ProfilesListResponse(items=[])
 
+        blocked_user_ids = _get_blocked_user_ids(session, user_id)
+        if blocked_user_ids:
+            liker_user_ids = [uid for uid in liker_user_ids if uid not in blocked_user_ids]
+
+        if not liker_user_ids:
+            return ProfilesListResponse(items=[])
+
         prof_rows = (
             session.execute(
                 select(Profile)
@@ -2591,6 +2673,21 @@ def like(payload: ProfileAction):
         prof = session.get(Profile, profile_id)
         if not prof or getattr(prof, "is_banned", False):
             raise HTTPException(status_code=404, detail="Profile not found")
+
+        if (prof.owner_user_id or "").strip() == liker_user_id:
+            raise HTTPException(status_code=400, detail="You cannot like yourself.")
+
+        block_exists = session.execute(
+            select(BlockedUser).where(
+                or_(
+                    and_(BlockedUser.user_id == liker_user_id, BlockedUser.blocked_user_id == prof.owner_user_id),
+                    and_(BlockedUser.user_id == prof.owner_user_id, BlockedUser.blocked_user_id == liker_user_id),
+                )
+            )
+        ).scalar_one_or_none()
+
+        if block_exists:
+            raise HTTPException(status_code=403, detail="Action unavailable.")
 
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
         counter.count = int(counter.count) + 1
