@@ -321,6 +321,15 @@ class UserReport(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
+class BlockedUser(Base):
+    __tablename__ = "blocked_users"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(40), index=True)
+    blocked_user_id: Mapped[str] = mapped_column(String(40), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    __table_args__ = (UniqueConstraint("user_id", "blocked_user_id", name="uq_blocked_user_pair"),)
+
+
 class UserClaimToken(Base):
     __tablename__ = "user_claim_tokens"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
