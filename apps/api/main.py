@@ -2928,13 +2928,26 @@ def threads_inbox(user_id: str = Query(...), limit: int = Query(default=50, ge=1
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        rows = session.execute(select(Thread).where((Thread.user_low == user_id) | (Thread.user_high == user_id)).order_by(Thread.updated_at.desc()).limit(limit)).scalars().all()
+        blocked_user_ids = _get_blocked_user_ids(session, user_id)
+
+        rows = session.execute(
+            select(Thread)
+            .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
+            .order_by(Thread.updated_at.desc())
+            .limit(limit)
+        ).scalars().all()
 
         items: List[ThreadItem] = []
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
+
+            if other_user_id in blocked_user_ids:
+                continue
+
             other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
-            last_msg = session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1)).scalar_one_or_none()
+            last_msg = session.execute(
+                select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1)
+            ).scalar_one_or_none()
 
             items.append(
                 ThreadItem(
@@ -2956,18 +2969,37 @@ def get_threads(user_id: str = Query(...), limit: int = Query(default=50, ge=1, 
     user_id = _ensure_user(user_id)
 
     with Session(engine) as session:
-        rows = session.execute(select(Thread).where((Thread.user_low == user_id) | (Thread.user_high == user_id)).order_by(Thread.updated_at.desc()).limit(limit)).scalars().all()
+        blocked_user_ids = _get_blocked_user_ids(session, user_id)
+
+        rows = session.execute(
+            select(Thread)
+            .where((Thread.user_low == user_id) | (Thread.user_high == user_id))
+            .order_by(Thread.updated_at.desc())
+            .limit(limit)
+        ).scalars().all()
+
         items: List[ThreadListItem] = []
 
         for t in rows:
             other_user_id = t.user_high if t.user_low == user_id else t.user_low
-            other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
-            last_msg = session.execute(select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1)).scalar_one_or_none()
 
-            my_read = session.execute(select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == t.id)).scalar_one_or_none()
+            if other_user_id in blocked_user_ids:
+                continue
+
+            other_profile = session.execute(select(Profile).where(Profile.owner_user_id == other_user_id)).scalar_one_or_none()
+            last_msg = session.execute(
+                select(Message).where(Message.thread_id == t.id).order_by(Message.created_at.desc()).limit(1)
+            ).scalar_one_or_none()
+
+            my_read = session.execute(
+                select(ThreadRead).where(ThreadRead.user_id == user_id, ThreadRead.thread_id == t.id)
+            ).scalar_one_or_none()
             my_last_read_at = my_read.last_read_at if my_read else None
 
-            unread_count_q = select(func.count()).select_from(Message).where(Message.thread_id == t.id, Message.sender_user_id != user_id)
+            unread_count_q = select(func.count()).select_from(Message).where(
+                Message.thread_id == t.id,
+                Message.sender_user_id != user_id
+            )
             if my_last_read_at:
                 unread_count_q = unread_count_q.where(Message.created_at > my_last_read_at)
 
