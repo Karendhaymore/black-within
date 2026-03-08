@@ -717,21 +717,21 @@ def _auto_migrate_admin_messages_table():
             )
         )
        
- def _auto_migrate_blocked_users_table():
+def _auto_migrate_blocked_users_table():
     with engine.begin() as conn:
         conn.execute(
             text(
                 """
                 CREATE TABLE IF NOT EXISTS blocked_users (
-                  id SERIAL PRIMARY KEY,
-                  user_id VARCHAR(40),
-                  blocked_user_id VARCHAR(40),
-                  created_at TIMESTAMP DEFAULT NOW(),
-                  CONSTRAINT uq_blocked_user_pair UNIQUE (user_id, blocked_user_id)
+                    id SERIAL PRIMARY KEY,
+                    user_id VARCHAR(40),
+                    blocked_user_id VARCHAR(40),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    CONSTRAINT uq_blocked_user_pair UNIQUE (user_id, blocked_user_id)
                 );
                 """
             )
-        )       
+        ) 
         
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_user_id ON admin_messages(user_id);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_created_at ON admin_messages(created_at);"))
