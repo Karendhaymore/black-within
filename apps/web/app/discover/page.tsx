@@ -607,34 +607,40 @@ export default function DiscoverPage() {
     }
   }
 
-  async function onLike(p: ApiProfile) {
-    if (!userId) return;
-    if (likedIds.includes(p.id)) return;
+ async function onLike(profile: ApiProfile) {
+  if (!userId) return;
+  if (!profile) return;
+  if (likedIds.includes(profile.id)) return;
 
-    if (likesStatus && likesStatus.likesLeft <= 0) {
-      showToast(
-        likesStatus.windowType === "test_seconds"
-          ? `Daily like limit reached (${likesStatus.limit}). Resets soon.`
-          : `Daily like limit reached (${likesStatus.limit}). Try again tomorrow.`
-      );
-      return;
-    }
+  const prev = likedIds;
 
-    const prev = likedIds;
-    setLikedIds((curr) => (curr.includes(p.id) ? curr : [p.id, ...curr]));
+  setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
 
-    try {
-      await apiLikeProfile(userId, p.id);
-      await Promise.all([refreshSavedAndLikes(userId), refreshLikesStatus(userId)]);
-      showToast("Like sent.");
-    } catch (e: any) {
-      setLikedIds(prev);
-      const msg = toNiceString(e?.message || e) || "Like failed.";
-      setApiError(msg);
-      showToast(msg);
-      refreshLikesStatus(userId).catch(() => {});
+  try {
+    await apiLikeProfile(userId, profile.id, profile.owner_user_id);
+
+    await refreshSavedAndLikes(userId);
+
+    addNotificationLocal("Someone liked your profile.");
+    showToast("Like sent.");
+  } catch (e: any) {
+    setLikedIds(prev);
+
+    const msg = e?.message || e?.detail || "";
+
+    if (
+      msg.includes("Daily like limit") ||
+      msg.includes("Limit reached") ||
+      msg.includes("429")
+    ) {
+      showToast("Upgrade to Premium for unlimited likes.");
+      setApiError("Upgrade to Premium for unlimited likes.");
+    } else {
+      showToast(msg || "Could not like right now. Please try again.");
+      setApiError(msg || "Like failed.");
     }
   }
+} 
 
   async function onMessage(p: ApiProfile) {
     if (!userId) return;
