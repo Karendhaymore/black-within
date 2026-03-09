@@ -617,7 +617,7 @@ export default function DiscoverPage() {
   setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
 
   try {
-    await apiLikeProfile(userId, profile.id, profile.owner_user_id);
+    await apiLikeProfile(userId, profile.id);
 
     await refreshSavedAndLikes(userId);
 
@@ -640,7 +640,7 @@ export default function DiscoverPage() {
       setApiError(msg || "Like failed.");
     }
   }
-} 
+}
 
   async function onMessage(p: ApiProfile) {
     if (!userId) return;
