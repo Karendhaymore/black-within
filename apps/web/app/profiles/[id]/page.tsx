@@ -378,34 +378,43 @@ export default function ProfileDetailPage() {
     }
   }
 
-  async function onLike() {
-    if (!profile) return;
-    if (!userId) return;
-    if (likedIds.includes(profile.id)) return;
+ async function onLike() {
+  if (!profile) return;
+  if (!userId) return;
+  if (likedIds.includes(profile.id)) return;
 
-    const prev = likedIds;
+  const prev = likedIds;
 
-    setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
+  setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
 
-    try {
-      await apiLikeProfile(userId, profile.id, profile.owner_user_id);
-      await refreshSavedAndLikes(userId);
-      addNotificationLocal("Someone liked your profile.");
-      showToast("Like sent.");
-    } catch (e: any) {
-  setLikedIds(prev);
+  try {
+    await apiLikeProfile(userId, profile.id, profile.owner_user_id);
 
-  const msg = e?.message || "";
+    await refreshSavedAndLikes(userId);
 
-  if (msg.includes("Daily like limit") || msg.includes("Limit reached")) {
-    showToast("Upgrade to Premium for unlimited likes.");
-  } else {
-    showToast(msg || "Could not like right now. Please try again.");
+    addNotificationLocal("Someone liked your profile.");
+    showToast("Like sent.");
+  } catch (e: any) {
+    setLikedIds(prev);
+
+    const msg =
+      e?.message ||
+      e?.detail ||
+      "";
+
+    if (
+      msg.includes("Daily like limit") ||
+      msg.includes("Limit reached") ||
+      msg.includes("429")
+    ) {
+      showToast("Upgrade to Premium for unlimited likes.");
+      setApiError("Upgrade to Premium for unlimited likes.");
+    } else {
+      showToast(msg || "Could not like right now. Please try again.");
+      setApiError(msg || "Like failed.");
+    }
   }
-
-  setApiError(msg || "Like failed.");
 }
-  }
 
   async function onMessage() {
     if (!profile) return;
