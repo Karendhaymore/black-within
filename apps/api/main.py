@@ -2682,10 +2682,17 @@ def like(payload: ProfileAction):
 
         if existing:
             return {"ok": True, "likesLeft": likes_left_now, "resetsAtUTC": reset_at.isoformat()}
+
         if int(counter.count) >= FREE_LIKES_PER_DAY:
             if window_type == "test_seconds":
-                raise HTTPException(status_code=429, detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds.")
-            raise HTTPException(status_code=429, detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow.")
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Limit reached ({FREE_LIKES_PER_DAY} likes). Resets in about {LIKES_RESET_TEST_SECONDS} seconds."
+                )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Daily like limit reached ({FREE_LIKES_PER_DAY}/day). Try again tomorrow."
+            )
 
         prof = session.get(Profile, profile_id)
         if not prof or getattr(prof, "is_banned", False):
@@ -2693,18 +2700,6 @@ def like(payload: ProfileAction):
 
         if (prof.owner_user_id or "").strip() == liker_user_id:
             raise HTTPException(status_code=400, detail="You cannot like yourself.")
-
-        block_exists = session.execute(
-            select(BlockedUser).where(
-                or_(
-                    and_(BlockedUser.user_id == liker_user_id, BlockedUser.blocked_user_id == prof.owner_user_id),
-                    and_(BlockedUser.user_id == prof.owner_user_id, BlockedUser.blocked_user_id == liker_user_id),
-                )
-            )
-        ).scalar_one_or_none()
-
-        if block_exists:
-            raise HTTPException(status_code=403, detail="Action unavailable.")
 
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
         counter.count = int(counter.count) + 1
@@ -2715,7 +2710,9 @@ def like(payload: ProfileAction):
                 counter.window_started_at = datetime.utcnow()
 
         recipient_user_id = prof.owner_user_id
-        actor_profile = session.execute(select(Profile).where(Profile.owner_user_id == liker_user_id)).scalar_one_or_none()
+        actor_profile = session.execute(
+            select(Profile).where(Profile.owner_user_id == liker_user_id)
+        ).scalar_one_or_none()
 
         if recipient_user_id and recipient_user_id != liker_user_id:
             session.add(
@@ -2739,7 +2736,6 @@ def like(payload: ProfileAction):
 
         counter2, likes_left_final, reset_at2, window_type2 = _get_likes_window(session, liker_user_id)
         return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
-
 
 def _sorted_pair(a: str, b: str) -> Tuple[str, str]:
     a = (a or "").strip()
