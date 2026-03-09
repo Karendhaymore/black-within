@@ -1579,11 +1579,12 @@ def _get_or_create_daily_like_counter(session: Session, user_id: str, day: date)
 
 def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, int, datetime, str]:
     now = datetime.utcnow()
+    today = now.date()
 
+    counter = _get_or_create_daily_like_counter(session, user_id, today)
+
+    # Test mode: short reset window for easier testing
     if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
-        today = now.date()
-        counter = _get_or_create_daily_like_counter(session, user_id, today)
-
         if not counter.window_started_at:
             counter.window_started_at = now
             counter.updated_at = now
@@ -1601,11 +1602,23 @@ def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, i
         likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
         return counter, likes_left, reset_at, "test_seconds"
 
-    today = now.date()
-    counter = _get_or_create_daily_like_counter(session, user_id, today)
-    reset_at = _next_utc_midnight(now)
+    # Production mode: true rolling 24-hour window
+    if not counter.window_started_at:
+        counter.window_started_at = now
+        counter.updated_at = now
+        session.commit()
+
+    reset_at = counter.window_started_at + timedelta(hours=24)
+
+    if now >= reset_at:
+        counter.count = 0
+        counter.window_started_at = now
+        counter.updated_at = now
+        session.commit()
+        reset_at = counter.window_started_at + timedelta(hours=24)
+
     likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
-    return counter, likes_left, reset_at, "daily_utc"
+    return counter, likes_left, reset_at, "rolling_24h"
 
 
 # -----------------------------
