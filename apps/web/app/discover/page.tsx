@@ -11,8 +11,8 @@ import { useRouter } from "next/navigation";
  */
 
 type ApiProfile = {
-  id: string; // profile id
-  owner_user_id: string; // user id of the owner (may exist, but not required for thread create)
+  id: string;
+  owner_user_id: string;
   displayName: string;
   age: number;
   city: string;
@@ -27,22 +27,19 @@ type ApiProfile = {
 type IdListResponse = { ids: string[] };
 type ProfilesResponse = { items: ApiProfile[] };
 
-// Matches /likes/status
 type LikesStatusResponse = {
   likesLeft: number;
   limit: number;
-  windowType: "daily_utc" | "test_seconds";
-  resetsAtUTC: string; // ISO datetime string
+  windowType: "daily_utc" | "test_seconds" | "rolling_24h";
+  resetsAtUTC: string;
 };
 
-// Threads/get-or-create response (support a few possible shapes)
 type ThreadGetOrCreateResponse = {
   threadId?: string;
   thread_id?: string;
   id?: string;
 };
 
-// Messaging access response
 type MessagingAccessResponse = {
   canMessage: boolean;
   isPremium: boolean;
@@ -50,10 +47,23 @@ type MessagingAccessResponse = {
   reason?: string | null;
 };
 
-// ✅ Profile gate response
 type ProfileGateResponse = {
   hasPhoto?: boolean;
 };
+
+type ThreadListItem = {
+  thread_id: string;
+  other_user_id: string;
+  other_profile_id?: string | null;
+  other_display_name?: string | null;
+  other_photo?: string | null;
+  last_message_text?: string | null;
+  last_message_at?: string | null;
+  updated_at?: string | null;
+  unread_count?: number;
+};
+
+type ThreadsResponse = { items: ThreadListItem[] };
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
@@ -72,7 +82,7 @@ function getLoggedInUserId(): string | null {
   }
 }
 
-function toNiceString(x: any): string {
+function toNiceString(x: unknown): string {
   if (x == null) return "";
   if (typeof x === "string") return x;
   try {
@@ -82,24 +92,23 @@ function toNiceString(x: any): string {
   }
 }
 
-/**
- * ✅ Friendly error messages (no ugly API dumps)
- */
 async function getFriendlyApiError(res: Response): Promise<string> {
   const status = res.status;
-
-  if (status === 401) return "Please log in again.";
-  if (status === 403) return "Your account has been suspended.";
-  if (status === 404) return "That item was not found.";
-  if (status === 429) return "You are doing that too quickly. Please wait a moment and try again.";
-  if (status === 402) return "Messaging is locked right now.";
-  if (status >= 500) return "The server is having trouble right now. Please try again shortly.";
 
   try {
     const data = await res.json().catch(() => null);
     const detail = data?.detail;
-    if (typeof detail === "string" && detail.trim()) return detail.trim();
+    if (typeof detail === "string" && detail.trim()) {
+      return detail.trim();
+    }
   } catch {}
+
+  if (status === 401) return "Please log in again.";
+  if (status === 403) return "Your account has been suspended.";
+  if (status === 404) return "That item was not found.";
+  if (status === 429) return "Daily like limit reached.";
+  if (status === 402) return "Messaging is locked right now.";
+  if (status >= 500) return "The server is having trouble right now. Please try again shortly.";
 
   return "Something went wrong. Please try again.";
 }
@@ -165,20 +174,6 @@ async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[
   const json = (await res.json()) as ProfilesResponse;
   return Array.isArray(json?.items) ? json.items : [];
 }
-
-type ThreadListItem = {
-  thread_id: string;
-  other_user_id: string;
-  other_profile_id?: string | null;
-  other_display_name?: string | null;
-  other_photo?: string | null;
-  last_message_text?: string | null;
-  last_message_at?: string | null;
-  updated_at?: string | null;
-  unread_count?: number;
-};
-
-type ThreadsResponse = { items: ThreadListItem[] };
 
 async function apiGetThreads(userId: string): Promise<ThreadListItem[]> {
   const res = await fetch(`${API_BASE}/threads?user_id=${encodeURIComponent(userId)}&limit=100`, {
@@ -253,9 +248,6 @@ function formatResetHint(status: LikesStatusResponse | null) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-/**
- * ✅ Parse identityPreview into (culturalIdentity, spiritualFramework)
- */
 function parseIdentityPreview(preview: string): { culturalIdentity: string; spiritualFramework: string } {
   const text = (preview || "").replace(/\s+/g, " ").trim();
 
@@ -271,9 +263,6 @@ function parseIdentityPreview(preview: string): { culturalIdentity: string; spir
   return { culturalIdentity, spiritualFramework };
 }
 
-/**
- * ✅ Tiny inline icons (no extra libraries needed)
- */
 function Icon({
   name,
   size = 16,
@@ -344,28 +333,21 @@ export default function DiscoverPage() {
   const router = useRouter();
 
   const [userId, setUserId] = useState<string>("");
-
   const [gateLoading, setGateLoading] = useState(true);
   const [totalUnread, setTotalUnread] = useState(0);
-
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [likesStatus, setLikesStatus] = useState<LikesStatusResponse | null>(null);
-
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
-
   const [loadingProfiles, setLoadingProfiles] = useState<boolean>(true);
   const [loadingSets, setLoadingSets] = useState<boolean>(true);
   const [loadingLikesStatus, setLoadingLikesStatus] = useState<boolean>(true);
-
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [culturalIdentityFilter, setCulturalIdentityFilter] = useState<string>("All");
   const [spiritualFrameworkFilter, setSpiritualFrameworkFilter] = useState<string>("All");
-
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
-
   const resetTimerRef = useRef<number | null>(null);
 
   const availableProfiles = useMemo(() => profiles.filter((p) => p.isAvailable), [profiles]);
@@ -433,20 +415,9 @@ export default function DiscoverPage() {
     });
   }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter]);
 
-  function showToast(msg: any) {
+  function showToast(msg: unknown) {
     setToast(typeof msg === "string" ? msg : toNiceString(msg));
     window.setTimeout(() => setToast(null), 2400);
-  }
-
-  function getInitials(displayName: string) {
-    return (displayName || "")
-      .trim()
-      .split(" ")
-      .filter(Boolean)
-      .map((w) => w[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase();
   }
 
   async function refreshSavedAndLikes(uid: string) {
@@ -553,8 +524,6 @@ export default function DiscoverPage() {
 
       await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
     })();
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   useEffect(() => {
@@ -564,13 +533,11 @@ export default function DiscoverPage() {
     refreshUnread(userId);
 
     return cleanup;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   useEffect(() => {
     if (!userId) return;
     refreshSavedAndLikes(userId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableProfileIds]);
 
   useEffect(() => {
@@ -582,65 +549,39 @@ export default function DiscoverPage() {
     };
   }, []);
 
-  async function onToggleSave(p: ApiProfile) {
+  async function onLike(profile: ApiProfile) {
     if (!userId) return;
+    if (!profile) return;
+    if (likedIds.includes(profile.id)) return;
 
-    const currentlySaved = savedIds.includes(p.id);
-    const prev = savedIds;
-
-    setSavedIds((curr) => (curr.includes(p.id) ? curr.filter((x) => x !== p.id) : [p.id, ...curr]));
+    const prev = likedIds;
+    setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
 
     try {
-      if (currentlySaved) {
-        await apiUnsaveProfile(userId, p.id);
-        showToast("Removed from Saved Profiles.");
-      } else {
-        await apiSaveProfile(userId, p.id);
-        showToast("Saved. You can view it later in Saved Profiles.");
-      }
-      await refreshSavedAndLikes(userId);
+      await apiLikeProfile(userId, profile.id);
+      await Promise.all([refreshSavedAndLikes(userId), refreshLikesStatus(userId)]);
+      showToast("Like sent.");
     } catch (e: any) {
-      setSavedIds(prev);
-      const msg = toNiceString(e?.message || e) || "Could not update saved status right now.";
-      setApiError(msg);
-      showToast(msg);
+      setLikedIds(prev);
+
+      const msg = toNiceString(e?.message || e?.detail || e || "");
+
+      if (
+        msg.includes("Daily like limit") ||
+        msg.includes("Limit reached") ||
+        msg.includes("429") ||
+        msg.toLowerCase().includes("like limit")
+      ) {
+        showToast("Upgrade to Premium for unlimited likes.");
+        setApiError("Upgrade to Premium for unlimited likes.");
+      } else {
+        showToast(msg || "Could not like right now. Please try again.");
+        setApiError(msg || "Like failed.");
+      }
+
+      await refreshLikesStatus(userId).catch(() => {});
     }
   }
-
- async function onLike(profile: ApiProfile) {
-  if (!userId) return;
-  if (!profile) return;
-  if (likedIds.includes(profile.id)) return;
-
-  const prev = likedIds;
-
-  setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
-
-  try {
-    await apiLikeProfile(userId, profile.id);
-
-    await refreshSavedAndLikes(userId);
-
-    addNotificationLocal("Someone liked your profile.");
-    showToast("Like sent.");
-  } catch (e: any) {
-    setLikedIds(prev);
-
-    const msg = e?.message || e?.detail || "";
-
-    if (
-      msg.includes("Daily like limit") ||
-      msg.includes("Limit reached") ||
-      msg.includes("429")
-    ) {
-      showToast("Upgrade to Premium for unlimited likes.");
-      setApiError("Upgrade to Premium for unlimited likes.");
-    } else {
-      showToast(msg || "Could not like right now. Please try again.");
-      setApiError(msg || "Like failed.");
-    }
-  }
-}
 
   async function onMessage(p: ApiProfile) {
     if (!userId) return;
@@ -711,7 +652,6 @@ export default function DiscoverPage() {
   const messagesStyle = totalUnread > 0 ? pillBtnGlow : pillBtn;
   const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
 
-  // ✅ Compact filter styles (shrunk dropdowns)
   const filterWrapStyle: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
@@ -756,7 +696,6 @@ export default function DiscoverPage() {
       }}
     >
       <div style={{ width: "100%", maxWidth: 1100 }}>
-        {/* Header */}
         <div
           style={{
             display: "flex",
@@ -808,7 +747,6 @@ export default function DiscoverPage() {
             </div>
           </div>
 
-          {/* ✅ Modern pill buttons w/ icons */}
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <Link href="/profile" style={navBtnStyle}>
               <Icon name="user" /> My Profile
@@ -850,7 +788,6 @@ export default function DiscoverPage() {
           </div>
         </div>
 
-        {/* Error */}
         {apiError && (
           <div
             style={{
@@ -869,7 +806,6 @@ export default function DiscoverPage() {
           </div>
         )}
 
-        {/* Filters (one line, compact) */}
         <div
           style={{
             marginTop: 14,
@@ -882,7 +818,6 @@ export default function DiscoverPage() {
             background: "rgba(255,255,255,0.86)",
             boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
             backdropFilter: "blur(10px)",
-
             flexWrap: "nowrap",
             overflow: "hidden",
           }}
@@ -935,7 +870,6 @@ export default function DiscoverPage() {
           </div>
         </div>
 
-        {/* Grid */}
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
             <div
@@ -968,7 +902,6 @@ export default function DiscoverPage() {
               {filteredProfiles.map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
-
                 const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
                 const likeDisabled = isLiked || loadingLikesStatus || isLimitReached;
                 const likeLabel = isLiked ? "Liked" : isLimitReached ? "Limit reached" : "Like";
@@ -988,7 +921,6 @@ export default function DiscoverPage() {
                   >
                     <Link href={`/profiles/${p.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
                       {p.photo && !brokenImages[p.id] ? (
-                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={p.photo}
                           alt={p.displayName}
