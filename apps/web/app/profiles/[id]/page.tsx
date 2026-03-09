@@ -393,10 +393,18 @@ export default function ProfileDetailPage() {
       addNotificationLocal("Someone liked your profile.");
       showToast("Like sent.");
     } catch (e: any) {
-      setLikedIds(prev);
-      showToast(e?.message || "Could not like right now. Please try again.");
-      setApiError(e?.message || "Like failed.");
-    }
+  setLikedIds(prev);
+
+  const msg = e?.message || "";
+
+  if (msg.includes("Daily like limit") || msg.includes("Limit reached")) {
+    showToast("Upgrade to Premium for unlimited likes.");
+  } else {
+    showToast(msg || "Could not like right now. Please try again.");
+  }
+
+  setApiError(msg || "Like failed.");
+}
   }
 
   async function onMessage() {
