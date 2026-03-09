@@ -10,14 +10,9 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
-/**
- * IMPORTANT:
- * This type matches what your API returns (camelCase fields).
- * Do NOT import Profile from sampleProfiles here.
- */
 type ApiProfile = {
-  id: string; // profile id
-  owner_user_id: string; // user id of the owner
+  id: string;
+  owner_user_id: string;
   displayName: string;
   age: number;
   city: string;
@@ -38,6 +33,13 @@ type MessagingAccessResponse = {
   isPremium: boolean;
   unlockedUntilUTC?: string | null;
   reason?: string | null;
+};
+
+type LikesStatusResponse = {
+  likesLeft: number;
+  limit: number;
+  windowType: "daily_utc" | "test_seconds" | "rolling_24h";
+  resetsAtUTC: string;
 };
 
 function getLoggedInUserId(): string | null {
@@ -71,6 +73,18 @@ function addNotificationLocal(message: string) {
   }
 }
 
+async function safeReadErrorDetail(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    if (data?.detail) return String(data.detail);
+  } catch {}
+  try {
+    const text = await res.text();
+    if (text) return text;
+  } catch {}
+  return `Request failed (${res.status}).`;
+}
+
 async function apiListProfiles(): Promise<ApiProfile[]> {
   const res = await fetch(`${API_BASE}/profiles?limit=200`, {
     cache: "no-store",
@@ -101,6 +115,15 @@ async function apiGetLikes(userId: string): Promise<string[]> {
   if (!res.ok) throw new Error(`Failed to load likes (${res.status}).`);
   const json = (await res.json()) as IdListResponse;
   return Array.isArray(json?.ids) ? json.ids : [];
+}
+
+async function apiGetLikesStatus(userId: string): Promise<LikesStatusResponse> {
+  const res = await fetch(
+    `${API_BASE}/likes/status?user_id=${encodeURIComponent(userId)}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  return (await res.json()) as LikesStatusResponse;
 }
 
 async function apiSaveProfile(userId: string, profileId: string) {
@@ -247,6 +270,8 @@ export default function ProfileDetailPage() {
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
+  const [likesStatus, setLikesStatus] = useState<LikesStatusResponse | null>(null);
+  const [loadingLikesStatus, setLoadingLikesStatus] = useState<boolean>(true);
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -317,6 +342,18 @@ export default function ProfileDetailPage() {
     }
   }
 
+  async function refreshLikesStatus(uid: string) {
+    try {
+      setLoadingLikesStatus(true);
+      const status = await apiGetLikesStatus(uid);
+      setLikesStatus(status);
+    } catch {
+      setLikesStatus(null);
+    } finally {
+      setLoadingLikesStatus(false);
+    }
+  }
+
   useEffect(() => {
     const uid = getLoggedInUserId();
     if (!uid) {
@@ -341,7 +378,7 @@ export default function ProfileDetailPage() {
         setLoading(false);
       }
 
-      await refreshSavedAndLikes(uid);
+      await Promise.all([refreshSavedAndLikes(uid), refreshLikesStatus(uid)]);
     })();
   }, [router]);
 
@@ -378,43 +415,41 @@ export default function ProfileDetailPage() {
     }
   }
 
- async function onLike() {
-  if (!profile) return;
-  if (!userId) return;
-  if (likedIds.includes(profile.id)) return;
+  async function onLike() {
+    if (!profile) return;
+    if (!userId) return;
+    if (likedIds.includes(profile.id)) return;
 
-  const prev = likedIds;
+    const prev = likedIds;
 
-  setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
+    setLikedIds((curr) => (curr.includes(profile.id) ? curr : [profile.id, ...curr]));
 
-  try {
-    await apiLikeProfile(userId, profile.id, profile.owner_user_id);
+    try {
+      await apiLikeProfile(userId, profile.id, profile.owner_user_id);
+      await Promise.all([refreshSavedAndLikes(userId), refreshLikesStatus(userId)]);
+      addNotificationLocal("Someone liked your profile.");
+      showToast("Like sent.");
+    } catch (e: any) {
+      setLikedIds(prev);
 
-    await refreshSavedAndLikes(userId);
+      const msg = e?.message || e?.detail || "";
 
-    addNotificationLocal("Someone liked your profile.");
-    showToast("Like sent.");
-  } catch (e: any) {
-    setLikedIds(prev);
+      if (
+        msg.includes("Daily like limit") ||
+        msg.includes("Limit reached") ||
+        msg.includes("429") ||
+        msg.toLowerCase().includes("like limit")
+      ) {
+        showToast("Upgrade to Premium for unlimited likes.");
+        setApiError("Upgrade to Premium for unlimited likes.");
+      } else {
+        showToast(msg || "Could not like right now. Please try again.");
+        setApiError(msg || "Like failed.");
+      }
 
-    const msg =
-      e?.message ||
-      e?.detail ||
-      "";
-
-    if (
-      msg.includes("Daily like limit") ||
-      msg.includes("Limit reached") ||
-      msg.includes("429")
-    ) {
-      showToast("Upgrade to Premium for unlimited likes.");
-      setApiError("Upgrade to Premium for unlimited likes.");
-    } else {
-      showToast(msg || "Could not like right now. Please try again.");
-      setApiError(msg || "Like failed.");
+      await refreshLikesStatus(userId).catch(() => {});
     }
   }
-}
 
   async function onMessage() {
     if (!profile) return;
@@ -432,7 +467,7 @@ export default function ProfileDetailPage() {
         locked = !access.canMessage;
         if (locked && access.reason) showToast(access.reason);
       } catch {
-        // fail open if access check has a temporary issue
+        // fail open
       }
 
       window.location.href =
@@ -533,6 +568,9 @@ export default function ProfileDetailPage() {
 
   const isSaved = savedIds.includes(profile.id);
   const isLiked = likedIds.includes(profile.id);
+  const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
+  const likeDisabled = isLiked || loadingLikesStatus || isLimitReached;
+  const likeLabel = isLiked ? "Liked" : isLimitReached ? "Limit reached" : "Like";
   const tags = Array.isArray(profile.tags) ? profile.tags : [];
 
   return (
@@ -877,17 +915,17 @@ export default function ProfileDetailPage() {
 
               <button
                 onClick={onLike}
-                disabled={isLiked || loadingSets}
+                disabled={likeDisabled}
                 style={{
                   padding: "0.7rem 1rem",
                   borderRadius: 10,
                   border: "1px solid #ccc",
                   background: "white",
-                  cursor: isLiked || loadingSets ? "not-allowed" : "pointer",
-                  opacity: isLiked || loadingSets ? 0.6 : 1,
+                  cursor: likeDisabled ? "not-allowed" : "pointer",
+                  opacity: likeDisabled ? 0.6 : 1,
                 }}
               >
-                {isLiked ? "Liked" : "Like"}
+                {likeLabel}
               </button>
 
               <button
