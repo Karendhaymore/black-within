@@ -243,9 +243,27 @@ async function apiProfileGate(userId: string): Promise<ProfileGateResponse> {
 
 function formatResetHint(status: LikesStatusResponse | null) {
   if (!status?.resetsAtUTC) return "";
-  const d = new Date(status.resetsAtUTC);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const resetAt = new Date(status.resetsAtUTC).getTime();
+  if (Number.isNaN(resetAt)) return "";
+
+  const diffMs = resetAt - Date.now();
+  if (diffMs <= 0) return "soon";
+
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+
+  return `${seconds}s`;
 }
 
 function parseIdentityPreview(preview: string): { culturalIdentity: string; spiritualFramework: string } {
