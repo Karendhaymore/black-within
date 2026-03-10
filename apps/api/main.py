@@ -263,6 +263,13 @@ class Entitlement(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(40), index=True, unique=True)
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    premium_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    premium_cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
+    premium_current_period_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
