@@ -2043,12 +2043,19 @@ def claim_user(body: ClaimIn):
         return ClaimOut(user_id=ct.user_id, profile_id=ct.profile_id)
 
 
-@app.get("/likes/status", response_model=LikesStatusResponse)
+@app.get("/likes/status")
 def likes_status(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
+
     with Session(engine) as session:
         counter, likes_left, reset_at, window_type = _get_likes_window(session, user_id)
-        return LikesStatusResponse(likesLeft=likes_left, limit=FREE_LIKES_PER_DAY, windowType=window_type, resetsAtUTC=reset_at.isoformat())
+
+        return {
+            "likesLeft": likes_left,
+            "limit": FREE_LIKES_PER_DAY,
+            "windowType": window_type,
+            "resetsAtUTC": reset_at.isoformat(),
+        }
 
 
 @app.get("/profiles/{profile_id}", response_model=ProfileItem)
