@@ -347,7 +347,15 @@ class UserClaimToken(Base):
     claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
+class CancelPremiumPayload(BaseModel):
+    user_id: str
 
+
+class PremiumStatusResponse(BaseModel):
+    isPremium: bool
+    premiumStatus: Optional[str] = None
+    cancelAtPeriodEnd: bool = False
+    currentPeriodEndUTC: Optional[str] = None
 
 # -----------------------------
 # Migrations
