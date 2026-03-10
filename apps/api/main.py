@@ -2734,9 +2734,14 @@ def like(payload: ProfileAction):
             raise HTTPException(status_code=400, detail="You cannot like yourself.")
 
         session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+
+        if not counter.window_started_at:
+            counter.window_started_at = datetime.utcnow()
+
         counter.count = int(counter.count) + 1
         counter.updated_at = datetime.utcnow()
-
+        counter.day = datetime.utcnow().date()
+        
         if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
             if not counter.window_started_at:
                 counter.window_started_at = datetime.utcnow()
