@@ -1579,43 +1579,62 @@ def _get_or_create_daily_like_counter(session: Session, user_id: str, day: date)
 
 def _get_likes_window(session: Session, user_id: str) -> Tuple[DailyLikeCount, int, datetime, str]:
     now = datetime.utcnow()
-    today = now.date()
 
-    counter = _get_or_create_daily_like_counter(session, user_id, today)
+    # Get the most recent counter for this user
+    counter = session.execute(
+        select(DailyLikeCount)
+        .where(DailyLikeCount.user_id == user_id)
+        .order_by(DailyLikeCount.updated_at.desc(), DailyLikeCount.id.desc())
+    ).scalars().first()
 
-    # Test mode: short reset window for easier testing
+    # If user has never liked before, create a fresh counter row
+    if not counter:
+        counter = DailyLikeCount(
+            user_id=user_id,
+            day=now.date(),
+            count=0,
+            updated_at=now,
+            window_started_at=None,
+        )
+        session.add(counter)
+        session.commit()
+        session.refresh(counter)
+
+    # TEST MODE
     if LIKES_RESET_TEST_SECONDS and LIKES_RESET_TEST_SECONDS > 0:
-        if not counter.window_started_at:
+        if not counter.window_started_at and int(counter.count) > 0:
             counter.window_started_at = now
             counter.updated_at = now
             session.commit()
 
-        reset_at = counter.window_started_at + timedelta(seconds=LIKES_RESET_TEST_SECONDS)
-
-        if now >= reset_at:
-            counter.count = 0
-            counter.window_started_at = now
-            counter.updated_at = now
-            session.commit()
+        if counter.window_started_at:
             reset_at = counter.window_started_at + timedelta(seconds=LIKES_RESET_TEST_SECONDS)
+            if now >= reset_at:
+                counter.count = 0
+                counter.day = now.date()
+                counter.window_started_at = None
+                counter.updated_at = now
+                session.commit()
+                reset_at = now + timedelta(seconds=LIKES_RESET_TEST_SECONDS)
+        else:
+            reset_at = now + timedelta(seconds=LIKES_RESET_TEST_SECONDS)
 
         likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
         return counter, likes_left, reset_at, "test_seconds"
 
-    # Production mode: true rolling 24-hour window
-    if not counter.window_started_at:
-        counter.window_started_at = now
-        counter.updated_at = now
-        session.commit()
-
-    reset_at = counter.window_started_at + timedelta(hours=24)
-
-    if now >= reset_at:
-        counter.count = 0
-        counter.window_started_at = now
-        counter.updated_at = now
-        session.commit()
+    # PRODUCTION MODE: true rolling 24-hour window
+    if counter.window_started_at:
         reset_at = counter.window_started_at + timedelta(hours=24)
+
+        if now >= reset_at:
+            counter.count = 0
+            counter.day = now.date()
+            counter.window_started_at = None
+            counter.updated_at = now
+            session.commit()
+            reset_at = now + timedelta(hours=24)
+    else:
+        reset_at = now + timedelta(hours=24)
 
     likes_left = max(0, FREE_LIKES_PER_DAY - int(counter.count))
     return counter, likes_left, reset_at, "rolling_24h"
