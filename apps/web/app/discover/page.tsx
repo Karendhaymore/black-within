@@ -241,13 +241,13 @@ async function apiProfileGate(userId: string): Promise<ProfileGateResponse> {
   return (await res.json()) as ProfileGateResponse;
 }
 
-function formatResetHint(status: LikesStatusResponse | null) {
+function formatResetHint(status: LikesStatusResponse | null, nowMs: number) {
   if (!status?.resetsAtUTC) return "";
 
   const resetAt = new Date(status.resetsAtUTC).getTime();
   if (Number.isNaN(resetAt)) return "";
 
-  const diffMs = resetAt - Date.now();
+  const diffMs = resetAt - nowMs;
   if (diffMs <= 0) return "soon";
 
   const totalSeconds = Math.floor(diffMs / 1000);
@@ -255,15 +255,11 @@ function formatResetHint(status: LikesStatusResponse | null) {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
+  const hh = String(hours).padStart(2, "0");
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
 
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-
-  return `${seconds}s`;
+  return `${hh}h ${mm}m ${ss}s`;
 }
 
 function parseIdentityPreview(preview: string): { culturalIdentity: string; spiritualFramework: string } {
@@ -366,6 +362,7 @@ export default function DiscoverPage() {
   const [culturalIdentityFilter, setCulturalIdentityFilter] = useState<string>("All");
   const [spiritualFrameworkFilter, setSpiritualFrameworkFilter] = useState<string>("All");
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
+  const [nowMs, setNowMs] = useState<number>(Date.now());
   const resetTimerRef = useRef<number | null>(null);
 
   const availableProfiles = useMemo(() => profiles.filter((p) => p.isAvailable), [profiles]);
@@ -559,6 +556,16 @@ export default function DiscoverPage() {
   }, [availableProfileIds]);
 
   useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (resetTimerRef.current) {
         window.clearTimeout(resetTimerRef.current);
@@ -668,7 +675,7 @@ export default function DiscoverPage() {
   };
 
   const messagesStyle = totalUnread > 0 ? pillBtnGlow : pillBtn;
-  const resetHint = likesStatus ? formatResetHint(likesStatus) : "";
+  const resetHint = likesStatus ? formatResetHint(likesStatus, nowMs) : "";
 
   const filterWrapStyle: React.CSSProperties = {
     display: "inline-flex",
