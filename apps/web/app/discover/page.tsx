@@ -721,16 +721,24 @@ export default function DiscoverPage() {
       }}
     >
       <div style={{ width: "100%", maxWidth: 1100 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            alignItems: "center",
-            flexWrap: "wrap",
-            marginBottom: 10,
-          }}
-        >
+       <div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    alignItems: "center",
+    flexWrap: "wrap",
+    marginBottom: 10,
+    position: "sticky",
+    top: 0,
+    zIndex: 50,
+    paddingTop: 8,
+    paddingBottom: 8,
+    background: "rgba(255,255,255,0.92)",
+    backdropFilter: "blur(10px)",
+    borderBottom: "1px solid rgba(0,0,0,0.08)",
+  }}
+>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <h1 style={{ margin: 0 }}>Discover</h1>
