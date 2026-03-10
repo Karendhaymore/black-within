@@ -4297,7 +4297,16 @@ def stripe_checkout_thread_unlock(payload: ThreadUnlockCheckoutPayload):
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             mode="payment",
-            line_items=[{"price_data": {"currency": "usd", "unit_amount": 199, "product_data": {"name": "Unlock Chat Conversation"}}, "quantity": 1}],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": 199,
+                        "product_data": {"name": "Unlock Chat Conversation"},
+                    },
+                    "quantity": 1,
+                }
+            ],
             success_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=success",
             cancel_url=f"{WEB_BASE_URL}/messages?threadId={thread_id}&checkout=cancel",
             metadata={"kind": "thread_unlock", "user_id": user_id, "thread_id": thread_id},
@@ -4346,19 +4355,91 @@ def create_unlock_session(payload: CreateUnlockSessionPayload):
                 {
                     "price_data": {
                         "currency": "usd",
-                        "product_data": {"name": "Black Within — Conversation Unlock", "description": "Unlock messaging with this person forever"},
+                        "product_data": {
+                            "name": "Black Within — Conversation Unlock",
+                            "description": "Unlock messaging with this person forever",
+                        },
                         "unit_amount": 199,
                     },
                     "quantity": 1,
                 }
             ],
-            metadata={"kind": "thread_unlock", "user_id": user_id, "target_profile_id": payload.target_profile_id, "thread_id": payload.thread_id},
+            metadata={
+                "kind": "thread_unlock",
+                "user_id": user_id,
+                "target_profile_id": payload.target_profile_id,
+                "thread_id": payload.thread_id,
+            },
             success_url="https://meetblackwithin.com/messages?success=true",
             cancel_url="https://meetblackwithin.com/messages?canceled=true",
         )
         return {"checkout_url": session_obj.url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/stripe/premium-status", response_model=PremiumStatusResponse)
+def stripe_premium_status(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+
+    with Session(engine) as db:
+        ent = _get_entitlement(db, user_id)
+
+        return PremiumStatusResponse(
+            isPremium=bool(ent.is_premium),
+            premiumStatus=(ent.premium_status or None),
+            cancelAtPeriodEnd=bool(getattr(ent, "premium_cancel_at_period_end", False)),
+            currentPeriodEndUTC=(
+                ent.premium_current_period_end.isoformat()
+                if getattr(ent, "premium_current_period_end", None)
+                else None
+            ),
+        )
+
+
+@app.post("/stripe/cancel-premium")
+def stripe_cancel_premium(payload: CancelPremiumPayload):
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="Stripe is not configured.")
+
+    user_id = _ensure_user(payload.user_id)
+
+    with Session(engine) as db:
+        ent = _get_entitlement(db, user_id)
+
+        subscription_id = (getattr(ent, "stripe_subscription_id", None) or "").strip()
+        if not subscription_id:
+            raise HTTPException(status_code=404, detail="No active premium subscription found.")
+
+        try:
+            sub = stripe.Subscription.modify(
+                subscription_id,
+                cancel_at_period_end=True,
+            )
+
+            current_period_end_ts = sub.get("current_period_end")
+            current_period_end_dt = (
+                datetime.utcfromtimestamp(current_period_end_ts)
+                if current_period_end_ts
+                else getattr(ent, "premium_current_period_end", None)
+            )
+
+            ent.is_premium = True
+            ent.premium_status = sub.get("status") or "active"
+            ent.premium_cancel_at_period_end = True
+            ent.premium_current_period_end = current_period_end_dt
+            ent.updated_at = datetime.utcnow()
+
+            db.commit()
+
+            return {
+                "ok": True,
+                "message": "Premium will cancel at the end of the current billing period.",
+                "cancelAtPeriodEnd": True,
+                "currentPeriodEndUTC": current_period_end_dt.isoformat() if current_period_end_dt else None,
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Stripe cancel error: {str(e)}")
 
 
 @app.post("/stripe/webhook")
@@ -4376,42 +4457,112 @@ async def stripe_webhook(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Webhook error: {str(e)}")
 
-    if event.get("type") != "checkout.session.completed":
-        return {"status": "ignored"}
+    event_type = event.get("type")
 
-    session_obj = event["data"]["object"]
-    metadata = session_obj.get("metadata", {}) or {}
-    kind = metadata.get("kind")
+    if event_type == "checkout.session.completed":
+        session_obj = event["data"]["object"]
+        metadata = session_obj.get("metadata", {}) or {}
+        kind = metadata.get("kind")
 
-    with Session(engine) as db:
-        if kind == "thread_unlock":
-            user_id = (metadata.get("user_id") or "").strip()
-            thread_id = (metadata.get("thread_id") or "").strip()
-            if not user_id or not thread_id:
-                raise HTTPException(status_code=400, detail="Missing user_id or thread_id")
+        with Session(engine) as db:
+            if kind == "thread_unlock":
+                user_id = (metadata.get("user_id") or "").strip()
+                thread_id = (metadata.get("thread_id") or "").strip()
+                if not user_id or not thread_id:
+                    raise HTTPException(status_code=400, detail="Missing user_id or thread_id")
 
-            now = datetime.utcnow()
-            db.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=now, updated_at=now))
-            try:
+                now = datetime.utcnow()
+                db.add(ThreadUnlock(user_id=user_id, thread_id=thread_id, created_at=now, updated_at=now))
+                try:
+                    db.commit()
+                except IntegrityError:
+                    db.rollback()
+
+                return {"status": "success"}
+
+            if kind == "premium":
+                user_id = (metadata.get("user_id") or "").strip() or (session_obj.get("client_reference_id") or "").strip()
+                if not user_id:
+                    raise HTTPException(status_code=400, detail="Missing user_id for premium")
+
+                ent = _get_entitlement(db, user_id)
+
+                subscription_id = (session_obj.get("subscription") or "").strip()
+                customer_id = (session_obj.get("customer") or "").strip()
+
+                premium_status = "active"
+                premium_cancel_at_period_end = False
+                premium_current_period_end = None
+
+                if subscription_id:
+                    try:
+                        sub = stripe.Subscription.retrieve(subscription_id)
+                        premium_status = sub.get("status") or "active"
+                        premium_cancel_at_period_end = bool(sub.get("cancel_at_period_end", False))
+
+                        current_period_end_ts = sub.get("current_period_end")
+                        if current_period_end_ts:
+                            premium_current_period_end = datetime.utcfromtimestamp(current_period_end_ts)
+                    except Exception:
+                        pass
+
+                ent.is_premium = True
+                ent.stripe_customer_id = customer_id or getattr(ent, "stripe_customer_id", None)
+                ent.stripe_subscription_id = subscription_id or getattr(ent, "stripe_subscription_id", None)
+                ent.premium_status = premium_status
+                ent.premium_cancel_at_period_end = premium_cancel_at_period_end
+                ent.premium_current_period_end = premium_current_period_end
+                ent.updated_at = datetime.utcnow()
                 db.commit()
-            except IntegrityError:
-                db.rollback()
 
-            return {"status": "success"}
+                return {"status": "success"}
 
-        if kind == "premium":
-            user_id = (metadata.get("user_id") or "").strip() or (session_obj.get("client_reference_id") or "").strip()
-            if not user_id:
-                raise HTTPException(status_code=400, detail="Missing user_id for premium")
+    if event_type == "customer.subscription.updated":
+        sub = event["data"]["object"]
+        subscription_id = (sub.get("id") or "").strip()
 
-            ent = _get_entitlement(db, user_id)
-            ent.is_premium = True
-            ent.updated_at = datetime.utcnow()
-            db.commit()
+        if subscription_id:
+            with Session(engine) as db:
+                ent = db.execute(
+                    select(Entitlement).where(Entitlement.stripe_subscription_id == subscription_id)
+                ).scalar_one_or_none()
 
-            return {"status": "success"}
+                if ent:
+                    current_period_end_ts = sub.get("current_period_end")
+                    ent.premium_status = sub.get("status") or getattr(ent, "premium_status", None)
+                    ent.premium_cancel_at_period_end = bool(sub.get("cancel_at_period_end", False))
+                    ent.premium_current_period_end = (
+                        datetime.utcfromtimestamp(current_period_end_ts) if current_period_end_ts else None
+                    )
+                    ent.is_premium = ent.premium_status in {"active", "trialing"} or bool(ent.premium_cancel_at_period_end)
+                    ent.updated_at = datetime.utcnow()
+                    db.commit()
+
+        return {"status": "success"}
+
+    if event_type == "customer.subscription.deleted":
+        sub = event["data"]["object"]
+        subscription_id = (sub.get("id") or "").strip()
+
+        if subscription_id:
+            with Session(engine) as db:
+                ent = db.execute(
+                    select(Entitlement).where(Entitlement.stripe_subscription_id == subscription_id)
+                ).scalar_one_or_none()
+
+                if ent:
+                    ent.is_premium = False
+                    ent.premium_status = sub.get("status") or "canceled"
+                    ent.premium_cancel_at_period_end = False
+                    ent.premium_current_period_end = None
+                    ent.updated_at = datetime.utcnow()
+                    db.commit()
+
+        return {"status": "success"}
 
     return {"status": "ignored"}
+
+    
 from pydantic import BaseModel
 from fastapi import HTTPException, Depends
 from sqlalchemy import text
