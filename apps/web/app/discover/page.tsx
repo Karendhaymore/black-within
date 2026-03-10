@@ -755,7 +755,7 @@ export default function DiscoverPage() {
                   {resetHint ? (
                     <span style={{ color: "#666" }}>
                       {" "}
-                      · resets {likesStatus.windowType === "test_seconds" ? "at" : "after"} <strong>{resetHint}</strong>
+                      · resets in <strong>{resetHint}</strong>
                     </span>
                   ) : null}
                 </span>
