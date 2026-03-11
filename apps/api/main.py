@@ -744,6 +744,9 @@ def _auto_migrate_admin_messages_table():
             """
             )
         )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_user_id ON admin_messages(user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_created_at ON admin_messages(created_at);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_read_at ON admin_messages(read_at);"))
        
 def _auto_migrate_blocked_users_table():
     with engine.begin() as conn:
