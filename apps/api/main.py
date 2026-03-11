@@ -762,11 +762,9 @@ def _auto_migrate_blocked_users_table():
                 );
                 """
             )
-        ) 
-        
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_user_id ON admin_messages(user_id);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_created_at ON admin_messages(created_at);"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_messages_read_at ON admin_messages(read_at);"))
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_blocked_users_user_id ON blocked_users(user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_blocked_users_blocked_user_id ON blocked_users(blocked_user_id);"))
 
 # -----------------------------
 # Migrations
