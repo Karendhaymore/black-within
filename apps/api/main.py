@@ -403,12 +403,25 @@ def _auto_migrate_threads_messages_tables():
               id SERIAL PRIMARY KEY,
               user_id VARCHAR(40) UNIQUE,
               is_premium BOOLEAN DEFAULT FALSE,
+              stripe_customer_id VARCHAR(120),
+              stripe_subscription_id VARCHAR(120),
+              premium_status VARCHAR(40),
+              premium_cancel_at_period_end BOOLEAN DEFAULT FALSE,
+              premium_current_period_end TIMESTAMP NULL,
               updated_at TIMESTAMP DEFAULT NOW()
             );
         """
             )
         )
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_user_id ON messaging_entitlements(user_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_customer_id ON messaging_entitlements(stripe_customer_id);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messaging_entitlements_subscription_id ON messaging_entitlements(stripe_subscription_id);"))
+
+        conn.execute(text("ALTER TABLE messaging_entitlements ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(120);"))
+        conn.execute(text("ALTER TABLE messaging_entitlements ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(120);"))
+        conn.execute(text("ALTER TABLE messaging_entitlements ADD COLUMN IF NOT EXISTS premium_status VARCHAR(40);"))
+        conn.execute(text("ALTER TABLE messaging_entitlements ADD COLUMN IF NOT EXISTS premium_cancel_at_period_end BOOLEAN DEFAULT FALSE;"))
+        conn.execute(text("ALTER TABLE messaging_entitlements ADD COLUMN IF NOT EXISTS premium_current_period_end TIMESTAMP NULL;"))
 
         conn.execute(
             text(
