@@ -827,6 +827,7 @@ for fn, label in [
     (_auto_migrate_password_reset_tokens_table, "AUTO_MIGRATE_PASSWORD_RESET"),
     (_auto_migrate_admin_tables, "AUTO_MIGRATE_ADMIN_TABLES"),
     (_auto_migrate_admin_messages_table, "AUTO_MIGRATE_ADMIN_MESSAGES"),
+    (_auto_migrate_blocked_users_table, "AUTO_MIGRATE_BLOCKED_USERS"),
     (_auto_migrate_reports_table, "AUTO_MIGRATE_REPORTS"),
 ]:
     try:
