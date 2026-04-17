@@ -660,6 +660,193 @@ export default function MyProfilePage() {
         await apiUpsertProfile(buildUpsertPayload({ photo2: "" }));
       }
 
+const photoSlots = [
+  {
+    slot: 1,
+    url: photoPreview || form.photo || "",
+    savedUrl: form.photo || "",
+    label: "Profile Photo",
+    alt: "Profile photo",
+    preview: photoPreview,
+    placeholder: (
+      <div
+        style={{
+          fontSize: 64,
+          fontWeight: 900,
+          color: "rgba(0,0,0,0.35)",
+        }}
+      >
+        {(form.displayName || "U").slice(0, 1).toUpperCase()}
+      </div>
+    ),
+  },
+  {
+    slot: 2,
+    url: photoPreview2 || form.photo2 || "",
+    savedUrl: form.photo2 || "",
+    label: "Photo 2 (optional)",
+    alt: "Profile photo 2",
+    preview: photoPreview2,
+    placeholder: (
+      <div
+        style={{
+          fontSize: 48,
+          fontWeight: 900,
+          color: "rgba(0,0,0,0.25)",
+          textAlign: "center",
+          padding: 20,
+        }}
+      >
+        Optional second photo
+      </div>
+    ),
+  },
+];
+
+const visiblePhotos = photoSlots.filter((p) => p.url);
+
+useEffect(() => {
+  if (visiblePhotos.length === 0) {
+    setActivePhotoIndex(0);
+    return;
+  }
+  if (activePhotoIndex > visiblePhotos.length - 1) {
+    setActivePhotoIndex(0);
+  }
+}, [activePhotoIndex, visiblePhotos.length]);
+
+function goToPrevPhoto() {
+  if (visiblePhotos.length <= 1) return;
+  setActivePhotoIndex((prev) =>
+    prev === 0 ? visiblePhotos.length - 1 : prev - 1
+  );
+}
+
+function goToNextPhoto() {
+  if (visiblePhotos.length <= 1) return;
+  setActivePhotoIndex((prev) =>
+    prev === visiblePhotos.length - 1 ? 0 : prev + 1
+  );
+}
+
+function handleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+  setTouchEndX(null);
+  setTouchStartX(e.targetTouches[0].clientX);
+}
+
+function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) {
+  setTouchEndX(e.targetTouches[0].clientX);
+}
+
+function handleTouchEnd() {
+  if (touchStartX === null || touchEndX === null) return;
+  const distance = touchStartX - touchEndX;
+
+  if (distance > 50) {
+    goToNextPhoto();
+  } else if (distance < -50) {
+    goToPrevPhoto();
+  }
+}
+
+function onDragStartPhoto(index: number) {
+  setDraggingPhotoIndex(index);
+}
+
+function onDragOverPhoto(e: React.DragEvent<HTMLDivElement>) {
+  e.preventDefault();
+}
+
+function onDropPhoto(targetIndex: number) {
+  if (draggingPhotoIndex === null || draggingPhotoIndex === targetIndex) {
+    setDraggingPhotoIndex(null);
+    return;
+  }
+
+  const current = [
+    { slot: 1, value: form.photo || "" },
+    { slot: 2, value: form.photo2 || "" },
+  ];
+
+  const dragged = current[draggingPhotoIndex];
+  const target = current[targetIndex];
+
+  const newPhoto = current[0].value;
+  const newPhoto2 = current[1].value;
+
+  if (dragged.slot === 1 && target.slot === 2) {
+    setForm((prev) => ({
+      ...prev,
+      photo: prev.photo2,
+      photo2: prev.photo,
+    }));
+    showToast("Photos reordered. Click Save Profile to keep the new order.");
+  }
+
+  if (dragged.slot === 2 && target.slot === 1) {
+    setForm((prev) => ({
+      ...prev,
+      photo: prev.photo2,
+      photo2: prev.photo,
+    }));
+    showToast("Photos reordered. Click Save Profile to keep the new order.");
+  }
+
+  setDraggingPhotoIndex(null);
+}
+
+const galleryBoxStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 520,
+  maxHeight: 760,
+  borderRadius: 24,
+  background: "#f6f6f6",
+  border: "1px solid #e7e7e7",
+  overflow: "hidden",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  position: "relative",
+};
+
+const galleryImageStyle: React.CSSProperties = {
+  width: "100%",
+  height: "auto",
+  maxHeight: 760,
+  objectFit: "contain",
+  display: "block",
+};
+
+const thumbStyle: React.CSSProperties = {
+  width: 84,
+  height: 108,
+  borderRadius: 16,
+  border: "2px solid #ddd",
+  objectFit: "cover",
+  background: "#f4f4f4",
+};
+
+const navButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  transform: "translateY(-50%)",
+  width: 42,
+  height: 42,
+  borderRadius: "999px",
+  border: "1px solid rgba(0,0,0,0.12)",
+  background: "rgba(255,255,255,0.92)",
+  fontSize: 24,
+  fontWeight: 900,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
+};
+  
+  return parts.join("\n\n");
+}
+      
       showToast("Photo deleted.");
     } catch (e: any) {
       setApiError(e?.message || "Could not delete photo.");
