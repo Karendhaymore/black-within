@@ -1391,71 +1391,130 @@ export default function MyProfilePage() {
   ) : null}
 </div>
 
-              <input
-                ref={fileInputRef2}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0] || null;
-                  setPhotoFile2(f);
+             {/* ✅ Photo 2 upload block */}
+<div style={{ marginTop: 22 }}>
+  <div style={{ fontWeight: 700, marginBottom: 6 }}>Photo 2 (optional)</div>
 
-                  if (f) {
-                    const localUrl = URL.createObjectURL(f);
-                    setPhotoPreview2(localUrl);
-                    showToast("Photo 2 selected. Click Upload Photo 2.");
-                  }
-                }}
-              />
+  <div
+    style={{
+      width: "100%",
+      minHeight: 320,
+      maxHeight: 760,
+      borderRadius: 24,
+      background: "#f6f6f6",
+      border: "1px solid #e7e7e7",
+      overflow: "hidden",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    }}
+  >
+    {photoPreview2 || form.photo2 ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={photoPreview2 || form.photo2}
+        alt="Profile photo 2"
+        style={{
+          width: "100%",
+          height: "auto",
+          maxHeight: 760,
+          objectFit: "contain",
+        }}
+      />
+    ) : (
+      <div
+        style={{
+          fontSize: 48,
+          fontWeight: 900,
+          color: "rgba(0,0,0,0.25)",
+          textAlign: "center",
+          padding: 20,
+        }}
+      >
+        Optional second photo
+      </div>
+    )}
+  </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  marginTop: 10,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!photoFile2) {
-                      fileInputRef2.current?.click();
-                      return;
-                    }
-                    onUploadPhoto(2);
-                  }}
-                  disabled={loadingExisting || uploadingPhoto}
-                  style={{
-                    padding: "0.6rem 0.9rem",
-                    borderRadius: 10,
-                    border: "1px solid #111",
-                    background: "#111",
-                    color: "white",
-                    cursor:
-                      loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
-                    fontWeight: 900,
-                    opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
-                  }}
-                >
-                  {uploadingPhoto
-                    ? "Uploading..."
-                    : photoFile2
-                    ? "Upload Photo 2"
-                    : "Choose Photo 2"}
-                </button>
+  <input
+    ref={fileInputRef2}
+    type="file"
+    accept="image/png,image/jpeg,image/webp"
+    style={{ display: "none" }}
+    onChange={(e) => {
+      const f = e.target.files?.[0] || null;
+      setPhotoFile2(f);
 
-                <div style={{ fontSize: 12, color: "#777" }}>
-                  {photoFile2 ? (
-                    <>
-                      Selected: <b>{photoFile2.name}</b> • Uploading will <b>auto-save</b>.
-                    </>
-                  ) : (
-                    <>Click the button to choose a second photo (optional).</>
-                  )}
-                </div>
-              </div>
+      if (f) {
+        const localUrl = URL.createObjectURL(f);
+        setPhotoPreview2(localUrl);
+        showToast("Second photo selected. Click Upload Photo.");
+      }
+    }}
+  />
+
+  <div
+    style={{
+      display: "flex",
+      gap: 10,
+      flexWrap: "wrap",
+      alignItems: "center",
+      marginTop: 10,
+    }}
+  >
+    <button
+      type="button"
+      onClick={() => {
+        if (!photoFile2) {
+          fileInputRef2.current?.click();
+          return;
+        }
+        onUploadPhoto(2);
+      }}
+      disabled={loadingExisting || uploadingPhoto}
+      style={{
+        padding: "0.6rem 0.9rem",
+        borderRadius: 10,
+        border: "1px solid #111",
+        background: "#111",
+        color: "white",
+        cursor:
+          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+        fontWeight: 900,
+        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+      }}
+    >
+      {uploadingPhoto
+        ? "Uploading..."
+        : photoFile2
+        ? "Upload Photo"
+        : "Choose Photo"}
+    </button>
+
+    <div style={{ fontSize: 12, color: "#777" }}>
+      {photoFile2 ? (
+        <>
+          Selected: <b>{photoFile2.name}</b> • Uploading will <b>auto-save</b>.
+        </>
+      ) : (
+        <>Click the button to choose a second photo (jpg/png/webp).</>
+      )}
+    </div>
+  </div>
+
+  {form.photo2 ? (
+    <div
+      style={{
+        marginTop: 8,
+        fontSize: 12,
+        color: "#666",
+        wordBreak: "break-all",
+      }}
+    >
+      Saved URL: {form.photo2}
+    </div>
+  ) : null}
+</div> 
 
               {form.photo2 ? (
                 <div
