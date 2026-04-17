@@ -1390,11 +1390,6 @@ export default function MyProfilePage() {
     </div>
   ) : null}
 </div>
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ) : null}
 
               <input
                 ref={fileInputRef2}
