@@ -433,6 +433,8 @@ export default function MyProfilePage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string>("");
+  const [photoPreview2, setPhotoPreview2] = useState<string>(""); 
 
   // ✅ Photo 2 upload state
   const fileInputRef2 = useRef<HTMLInputElement | null>(null);
