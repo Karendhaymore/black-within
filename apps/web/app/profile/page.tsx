@@ -1516,20 +1516,6 @@ export default function MyProfilePage() {
   ) : null}
 </div> 
 
-              {form.photo2 ? (
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 12,
-                    color: "#666",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  Saved URL: {form.photo2}
-                </div>
-              ) : null}
-            </div>
-
             <label>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Relationship Intent</div>
               <select
