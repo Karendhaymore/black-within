@@ -1148,11 +1148,6 @@ export default function MyProfilePage() {
           </div>
         </div>
 
-        <div style={{ marginTop: "1.25rem", color: "#777", fontSize: "0.95rem" }}>
-          Tip: open the site in an incognito window (or a different browser) to create a
-          second user + second profile. Then Like each other and watch notifications show
-          up.
-        </div>
       </div>
     </main>
   );
