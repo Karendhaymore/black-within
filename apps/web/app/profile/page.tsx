@@ -745,197 +745,461 @@ export default function MyProfilePage() {
             </div>
 
             {/* ✅ Photo 1 block */}
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Profile Photo</div>
+           <div>
+  <div style={{ fontWeight: 700, marginBottom: 10 }}>Photo Gallery</div>
 
-              <div style={bigPhotoStyle}>
-                {photoPreview || form.photo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={photoPreview || form.photo}
-                    alt="Profile photo"
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      fontSize: 64,
-                      fontWeight: 900,
-                      color: "rgba(0,0,0,0.35)",
-                    }}
-                  >
-                    {(form.displayName || "U").slice(0, 1).toUpperCase()}
-                  </div>
-                )}
-              </div>
+  <div
+    style={galleryBoxStyle}
+    onTouchStart={handleTouchStart}
+    onTouchMove={handleTouchMove}
+    onTouchEnd={handleTouchEnd}
+  >
+    {visiblePhotos.length > 0 ? (
+      <>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={visiblePhotos[activePhotoIndex].url}
+          alt={visiblePhotos[activePhotoIndex].alt}
+          style={galleryImageStyle}
+        />
 
-              {form.photo ? (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={form.photo}
-                      alt="Photo 1"
-                      style={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: 14,
-                        objectFit: "cover",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => onDeletePhoto(form.photo, 1)}
-                      disabled={loadingExisting || uploadingPhoto}
-                      style={{
-                        padding: "0.55rem 0.8rem",
-                        borderRadius: 10,
-                        border: "1px solid #ccc",
-                        background: "white",
-                        cursor:
-                          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
-                        fontWeight: 700,
-                        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ) : null}
+        {visiblePhotos.length > 1 ? (
+          <>
+            <button
+              type="button"
+              onClick={goToPrevPhoto}
+              style={{ ...navButtonStyle, left: 14 }}
+              aria-label="Previous photo"
+            >
+              ‹
+            </button>
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0] || null;
-                  setPhotoFile(f);
+            <button
+              type="button"
+              onClick={goToNextPhoto}
+              style={{ ...navButtonStyle, right: 14 }}
+              aria-label="Next photo"
+            >
+              ›
+            </button>
 
-                  if (f) {
-                    const localUrl = URL.createObjectURL(f);
-                    setPhotoPreview(localUrl);
-                    showToast("Photo selected. Click Upload Photo.");
-                  }
-                }}
+            <div
+              style={{
+                position: "absolute",
+                bottom: 12,
+                left: "50%",
+                transform: "translateX(-50%)",
+                display: "flex",
+                gap: 8,
+                background: "rgba(255,255,255,0.88)",
+                padding: "8px 12px",
+                borderRadius: 999,
+              }}
+            >
+              {visiblePhotos.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setActivePhotoIndex(i)}
+                  aria-label={`Go to photo ${i + 1}`}
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: "999px",
+                    border: "none",
+                    cursor: "pointer",
+                    background: i === activePhotoIndex ? "#111" : "#cfcfcf",
+                  }}
+                />
+              ))}
+            </div>
+          </>
+        ) : null}
+      </>
+    ) : (
+      <div
+        style={{
+          fontSize: 64,
+          fontWeight: 900,
+          color: "rgba(0,0,0,0.25)",
+        }}
+      >
+        {(form.displayName || "U").slice(0, 1).toUpperCase()}
+      </div>
+    )}
+  </div>
+
+  <div style={{ marginTop: 10, fontSize: 12, color: "#666" }}>
+    Swipe left/right on mobile, or use the arrows. Drag the thumbnails below to reorder.
+  </div>
+
+  <div
+    style={{
+      display: "flex",
+      gap: 12,
+      flexWrap: "wrap",
+      alignItems: "flex-start",
+      marginTop: 14,
+    }}
+  >
+    {photoSlots.map((slotItem, index) => {
+      const hasPhoto = !!slotItem.url;
+
+      return (
+        <div
+          key={slotItem.slot}
+          draggable={hasPhoto}
+          onDragStart={() => onDragStartPhoto(index)}
+          onDragOver={onDragOverPhoto}
+          onDrop={() => onDropPhoto(index)}
+          style={{
+            width: 140,
+            border: "1px solid #ddd",
+            borderRadius: 16,
+            padding: 10,
+            background: draggingPhotoIndex === index ? "#f7f7f7" : "white",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.04)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              marginBottom: 8,
+            }}
+          >
+            {slotItem.label}
+          </div>
+
+          <div
+            style={{
+              width: "100%",
+              height: 140,
+              borderRadius: 14,
+              background: "#f4f4f4",
+              overflow: "hidden",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 8,
+            }}
+          >
+            {hasPhoto ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={slotItem.url}
+                alt={slotItem.alt}
+                style={thumbStyle}
               />
-
+            ) : (
               <div
                 style={{
-                  display: "flex",
-                  gap: 10,
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  marginTop: 10,
+                  fontSize: 12,
+                  color: "#999",
+                  textAlign: "center",
+                  padding: 8,
                 }}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!photoFile) {
-                      fileInputRef.current?.click();
-                      return;
-                    }
-                    onUploadPhoto(1);
-                  }}
-                  disabled={loadingExisting || uploadingPhoto}
-                  style={{
-                    padding: "0.6rem 0.9rem",
-                    borderRadius: 10,
-                    border: "1px solid #111",
-                    background: "#111",
-                    color: "white",
-                    cursor:
-                      loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
-                    fontWeight: 900,
-                    opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
-                  }}
-                >
-                  {uploadingPhoto ? "Uploading..." : photoFile ? "Upload Photo" : "Choose Photo"}
-                </button>
-
-                <div style={{ fontSize: 12, color: "#777" }}>
-                  {photoFile ? (
-                    <>
-                      Selected: <b>{photoFile.name}</b> • Uploading will <b>auto-save</b>.
-                    </>
-                  ) : (
-                    <>Click the button to choose a photo (jpg/png/webp).</>
-                  )}
-                </div>
+                No photo yet
               </div>
+            )}
+          </div>
 
-              {form.photo ? (
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 12,
-                    color: "#666",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  Saved URL: {form.photo}
-                </div>
-              ) : null}
-            </div>
+          {slotItem.savedUrl ? (
+            <button
+              type="button"
+              onClick={() => {
+                setActivePhotoIndex(
+                  Math.max(
+                    0,
+                    visiblePhotos.findIndex((p) => p.slot === slotItem.slot)
+                  )
+                );
+              }}
+              style={{
+                width: "100%",
+                marginBottom: 8,
+                padding: "0.5rem 0.7rem",
+                borderRadius: 10,
+                border: "1px solid #ccc",
+                background: "white",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              View
+            </button>
+          ) : null}
 
-            {/* ✅ Photo 2 block (optional) */}
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Photo 2 (optional)</div>
+          {slotItem.savedUrl ? (
+            <button
+              type="button"
+              onClick={() => onDeletePhoto(slotItem.savedUrl, slotItem.slot)}
+              disabled={loadingExisting || uploadingPhoto}
+              style={{
+                width: "100%",
+                padding: "0.55rem 0.8rem",
+                borderRadius: 10,
+                border: "1px solid #ccc",
+                background: "white",
+                cursor:
+                  loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+                fontWeight: 700,
+                opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+              }}
+            >
+              Delete
+            </button>
+          ) : null}
+        </div>
+      );
+    })}
+  </div>
+</div>
 
-              <div style={bigPhotoStyle}>
-                {photoPreview2 || form.photo2 ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={photoPreview2 || form.photo2}
-                    alt="Profile photo 2"
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      fontSize: 48,
-                      fontWeight: 900,
-                      color: "rgba(0,0,0,0.25)",
-                      textAlign: "center",
-                      padding: 20,
-                    }}
-                  >
-                    Optional second photo
-                  </div>
-                )}
-              </div>
+{/* ✅ Photo 1 upload block */}
+<div style={{ marginTop: 22 }}>
+  <div style={{ fontWeight: 700, marginBottom: 6 }}>Profile Photo</div>
 
-              {form.photo2 ? (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={form.photo2}
-                      alt="Photo 2"
-                      style={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: 14,
-                        objectFit: "cover",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => onDeletePhoto(form.photo2, 2)}
-                      disabled={loadingExisting || uploadingPhoto}
-                      style={{
-                        padding: "0.55rem 0.8rem",
-                        borderRadius: 10,
-                        border: "1px solid #ccc",
-                        background: "white",
-                        cursor:
-                          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
-                        fontWeight: 700,
-                        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
-                      }}
-                    >
+  <div
+    style={{
+      width: "100%",
+      minHeight: 320,
+      maxHeight: 760,
+      borderRadius: 24,
+      background: "#f6f6f6",
+      border: "1px solid #e7e7e7",
+      overflow: "hidden",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      position: "relative",
+    }}
+  >
+    {photoPreview || form.photo ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={photoPreview || form.photo}
+        alt="Profile photo"
+        style={{
+          width: "100%",
+          height: "auto",
+          maxHeight: 760,
+          objectFit: "contain",
+          display: "block",
+        }}
+      />
+    ) : (
+      <div
+        style={{
+          fontSize: 64,
+          fontWeight: 900,
+          color: "rgba(0,0,0,0.35)",
+        }}
+      >
+        {(form.displayName || "U").slice(0, 1).toUpperCase()}
+      </div>
+    )}
+  </div>
+
+  <input
+    ref={fileInputRef}
+    type="file"
+    accept="image/png,image/jpeg,image/webp"
+    style={{ display: "none" }}
+    onChange={(e) => {
+      const f = e.target.files?.[0] || null;
+      setPhotoFile(f);
+
+      if (f) {
+        const localUrl = URL.createObjectURL(f);
+        setPhotoPreview(localUrl);
+        showToast("Photo selected. Click Upload Photo.");
+      }
+    }}
+  />
+
+  <div
+    style={{
+      display: "flex",
+      gap: 10,
+      flexWrap: "wrap",
+      alignItems: "center",
+      marginTop: 10,
+    }}
+  >
+    <button
+      type="button"
+      onClick={() => {
+        if (!photoFile) {
+          fileInputRef.current?.click();
+          return;
+        }
+        onUploadPhoto(1);
+      }}
+      disabled={loadingExisting || uploadingPhoto}
+      style={{
+        padding: "0.6rem 0.9rem",
+        borderRadius: 10,
+        border: "1px solid #111",
+        background: "#111",
+        color: "white",
+        cursor:
+          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+        fontWeight: 900,
+        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+      }}
+    >
+      {uploadingPhoto ? "Uploading..." : photoFile ? "Upload Photo" : "Choose Photo"}
+    </button>
+
+    <div style={{ fontSize: 12, color: "#777" }}>
+      {photoFile ? (
+        <>
+          Selected: <b>{photoFile.name}</b> • Uploading will <b>auto-save</b>.
+        </>
+      ) : (
+        <>Click the button to choose a photo (jpg/png/webp).</>
+      )}
+    </div>
+  </div>
+
+  {form.photo ? (
+    <div
+      style={{
+        marginTop: 8,
+        fontSize: 12,
+        color: "#666",
+        wordBreak: "break-all",
+      }}
+    >
+      Saved URL: {form.photo}
+    </div>
+  ) : null}
+</div>
+
+{/* ✅ Photo 2 upload block */}
+<div style={{ marginTop: 22 }}>
+  <div style={{ fontWeight: 700, marginBottom: 6 }}>Photo 2 (optional)</div>
+
+  <div
+    style={{
+      width: "100%",
+      minHeight: 320,
+      maxHeight: 760,
+      borderRadius: 24,
+      background: "#f6f6f6",
+      border: "1px solid #e7e7e7",
+      overflow: "hidden",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      position: "relative",
+    }}
+  >
+    {photoPreview2 || form.photo2 ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={photoPreview2 || form.photo2}
+        alt="Profile photo 2"
+        style={{
+          width: "100%",
+          height: "auto",
+          maxHeight: 760,
+          objectFit: "contain",
+          display: "block",
+        }}
+      />
+    ) : (
+      <div
+        style={{
+          fontSize: 48,
+          fontWeight: 900,
+          color: "rgba(0,0,0,0.25)",
+          textAlign: "center",
+          padding: 20,
+        }}
+      >
+        Optional second photo
+      </div>
+    )}
+  </div>
+
+  <input
+    ref={fileInputRef2}
+    type="file"
+    accept="image/png,image/jpeg,image/webp"
+    style={{ display: "none" }}
+    onChange={(e) => {
+      const f = e.target.files?.[0] || null;
+      setPhotoFile2(f);
+
+      if (f) {
+        const localUrl = URL.createObjectURL(f);
+        setPhotoPreview2(localUrl);
+        showToast("Second photo selected. Click Upload Photo.");
+      }
+    }}
+  />
+
+  <div
+    style={{
+      display: "flex",
+      gap: 10,
+      flexWrap: "wrap",
+      alignItems: "center",
+      marginTop: 10,
+    }}
+  >
+    <button
+      type="button"
+      onClick={() => {
+        if (!photoFile2) {
+          fileInputRef2.current?.click();
+          return;
+        }
+        onUploadPhoto(2);
+      }}
+      disabled={loadingExisting || uploadingPhoto}
+      style={{
+        padding: "0.6rem 0.9rem",
+        borderRadius: 10,
+        border: "1px solid #111",
+        background: "#111",
+        color: "white",
+        cursor:
+          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+        fontWeight: 900,
+        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+      }}
+    >
+      {uploadingPhoto ? "Uploading..." : photoFile2 ? "Upload Photo" : "Choose Photo"}
+    </button>
+
+    <div style={{ fontSize: 12, color: "#777" }}>
+      {photoFile2 ? (
+        <>
+          Selected: <b>{photoFile2.name}</b> • Uploading will <b>auto-save</b>.
+        </>
+      ) : (
+        <>Click the button to choose a second photo (jpg/png/webp).</>
+      )}
+    </div>
+  </div>
+
+  {form.photo2 ? (
+    <div
+      style={{
+        marginTop: 8,
+        fontSize: 12,
+        color: "#666",
+        wordBreak: "break-all",
+      }}
+    >
+      Saved URL: {form.photo2}
+    </div>
+  ) : null}
+</div>
                       Delete
                     </button>
                   </div>
