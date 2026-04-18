@@ -147,12 +147,9 @@ async function apiUpsertProfile(payload: any) {
   return res.json();
 }
 
-// ✅ Fix #2: signature matches usage (userId + file)
 async function apiUploadProfilePhoto(userId: string, file: File): Promise<string> {
   const fd = new FormData();
   fd.append("file", file);
-
-  // (safe) send userId both ways in case your backend expects one or the other
   fd.append("user_id", userId);
 
   const res = await fetch(
@@ -168,7 +165,6 @@ async function apiUploadProfilePhoto(userId: string, file: File): Promise<string
   return url;
 }
 
-// ✅ Delete photo API helper
 async function apiDeleteProfilePhoto(userId: string, photoUrl: string): Promise<void> {
   const res = await fetch(`${API_BASE}/photos/delete`, {
     method: "POST",
@@ -225,197 +221,7 @@ function buildIdentityPreview(args: {
       ? `One Thing You Need to Know About Me: ${args.personalTruth.trim()}`
       : "",
   ].filter(Boolean);
-const [activePhotoIndex, setActivePhotoIndex] = useState(0);
-const [draggingPhotoIndex, setDraggingPhotoIndex] = useState<number | null>(null);
-const [touchStartX, setTouchStartX] = useState<number | null>(null);
-const [touchEndX, setTouchEndX] = useState<number | null>(null);
 
-const photoSlots = [
-  {
-    slot: 1,
-    url: photoPreview || form.photo || "",
-    savedUrl: form.photo || "",
-    label: "Profile Photo",
-    alt: "Profile photo",
-    preview: photoPreview,
-    placeholder: (
-      <div
-        style={{
-          fontSize: 64,
-          fontWeight: 900,
-          color: "rgba(0,0,0,0.35)",
-        }}
-      >
-        {(form.displayName || "U").slice(0, 1).toUpperCase()}
-      </div>
-    ),
-  },
-  {
-    slot: 2,
-    url: photoPreview2 || form.photo2 || "",
-    savedUrl: form.photo2 || "",
-    label: "Photo 2 (optional)",
-    alt: "Profile photo 2",
-    preview: photoPreview2,
-    placeholder: (
-      <div
-        style={{
-          fontSize: 48,
-          fontWeight: 900,
-          color: "rgba(0,0,0,0.25)",
-          textAlign: "center",
-          padding: 20,
-        }}
-      >
-        Optional second photo
-      </div>
-    ),
-  },
-];
-
-const visiblePhotos = photoSlots.filter((p) => p.url);
-
-useEffect(() => {
-  if (visiblePhotos.length === 0) {
-    setActivePhotoIndex(0);
-    return;
-  }
-  if (activePhotoIndex > visiblePhotos.length - 1) {
-    setActivePhotoIndex(0);
-  }
-}, [activePhotoIndex, visiblePhotos.length]);
-
-function goToPrevPhoto() {
-  if (visiblePhotos.length <= 1) return;
-  setActivePhotoIndex((prev) =>
-    prev === 0 ? visiblePhotos.length - 1 : prev - 1
-  );
-}
-
-function goToNextPhoto() {
-  if (visiblePhotos.length <= 1) return;
-  setActivePhotoIndex((prev) =>
-    prev === visiblePhotos.length - 1 ? 0 : prev + 1
-  );
-}
-
-function handleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
-  setTouchEndX(null);
-  setTouchStartX(e.targetTouches[0].clientX);
-}
-
-function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) {
-  setTouchEndX(e.targetTouches[0].clientX);
-}
-
-function handleTouchEnd() {
-  if (touchStartX === null || touchEndX === null) return;
-  const distance = touchStartX - touchEndX;
-
-  if (distance > 50) {
-    goToNextPhoto();
-  } else if (distance < -50) {
-    goToPrevPhoto();
-  }
-}
-
-function onDragStartPhoto(index: number) {
-  setDraggingPhotoIndex(index);
-}
-
-function onDragOverPhoto(e: React.DragEvent<HTMLDivElement>) {
-  e.preventDefault();
-}
-
-function onDropPhoto(targetIndex: number) {
-  if (draggingPhotoIndex === null || draggingPhotoIndex === targetIndex) {
-    setDraggingPhotoIndex(null);
-    return;
-  }
-
-  const current = [
-    { slot: 1, value: form.photo || "" },
-    { slot: 2, value: form.photo2 || "" },
-  ];
-
-  const dragged = current[draggingPhotoIndex];
-  const target = current[targetIndex];
-
-  const newPhoto = current[0].value;
-  const newPhoto2 = current[1].value;
-
-  if (dragged.slot === 1 && target.slot === 2) {
-    setForm((prev) => ({
-      ...prev,
-      photo: prev.photo2,
-      photo2: prev.photo,
-    }));
-    showToast("Photos reordered. Click Save Profile to keep the new order.");
-  }
-
-  if (dragged.slot === 2 && target.slot === 1) {
-    setForm((prev) => ({
-      ...prev,
-      photo: prev.photo2,
-      photo2: prev.photo,
-    }));
-    showToast("Photos reordered. Click Save Profile to keep the new order.");
-  }
-
-  setDraggingPhotoIndex(null);
-}
-
-const galleryBoxStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 520,
-  maxHeight: 760,
-  borderRadius: 24,
-  background: "#f6f6f6",
-  border: "1px solid #e7e7e7",
-  overflow: "hidden",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  position: "relative",
-};
-
-const galleryImageStyle: React.CSSProperties = {
-  width: "100%",
-  height: "auto",
-  maxHeight: 760,
-  objectFit: "contain",
-  display: "block",
-};
-
-const thumbStyle: React.CSSProperties = {
-  width: 84,
-  height: 108,
-  borderRadius: 16,
-  border: "2px solid #ddd",
-  objectFit: "cover",
-  background: "#f4f4f4",
-};
-
-const navButtonStyle: React.CSSProperties = {
-  position: "absolute",
-  top: "50%",
-  transform: "translateY(-50%)",
-  width: 42,
-  height: 42,
-  borderRadius: "999px",
-  border: "1px solid rgba(0,0,0,0.12)",
-  background: "rgba(255,255,255,0.92)",
-  fontSize: 24,
-  fontWeight: 900,
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
-};
-
-
-  
   return parts.join("\n\n");
 }
 
@@ -428,16 +234,17 @@ export default function MyProfilePage() {
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  // ✅ Photo upload state - Photo 1
+  // Photo 1 upload state
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string>("");
-  
-  // ✅ Photo 2 upload state
+
+  // Photo 2 upload state
   const fileInputRef2 = useRef<HTMLInputElement | null>(null);
   const [photoFile2, setPhotoFile2] = useState<File | null>(null);
   const [photoPreview2, setPhotoPreview2] = useState<string>("");
+
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const [form, setForm] = useState<FormState>({
     displayName: "",
@@ -456,6 +263,12 @@ export default function MyProfilePage() {
 
   const [culturalSelected, setCulturalSelected] = useState<string[]>([]);
   const [spiritualSelected, setSpiritualSelected] = useState<string[]>([]);
+
+  // Photo gallery state
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [draggingPhotoIndex, setDraggingPhotoIndex] = useState<number | null>(null);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchEndX, setTouchEndX] = useState<number | null>(null);
 
   const selectedTags = useMemo(() => {
     const combined = [...culturalSelected, ...spiritualSelected]
@@ -490,7 +303,6 @@ export default function MyProfilePage() {
     setList(list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
   }
 
-  // ✅ Auth guard
   useEffect(() => {
     const uid = getLoggedInUserId();
     if (!uid) {
@@ -500,7 +312,6 @@ export default function MyProfilePage() {
     setUserId(uid);
   }, []);
 
-  // ✅ Load existing profile
   useEffect(() => {
     if (!userId) return;
 
@@ -533,7 +344,6 @@ export default function MyProfilePage() {
             Array.isArray(mine.spiritualFramework) ? mine.spiritualFramework : []
           );
 
-          // ✅ reset previews to stored photos when loading
           setPhotoPreview((mine.photo as string) || "");
           setPhotoPreview2((mine.photo2 as string) || "");
         }
@@ -545,7 +355,6 @@ export default function MyProfilePage() {
     })();
   }, [userId]);
 
-  // ✅ buildUpsertPayload()
   function buildUpsertPayload(overrides?: Partial<{ photo: string; photo2: string }>) {
     const ageNum = parseInt(form.age || "0", 10) || 0;
 
@@ -584,7 +393,6 @@ export default function MyProfilePage() {
     };
   }
 
-  // ✅ onUploadPhoto()  (ONLY ONE - duplicates removed)
   async function onUploadPhoto(slot: 1 | 2) {
     if (!userId) return;
 
@@ -605,22 +413,18 @@ export default function MyProfilePage() {
     try {
       const url = await apiUploadProfilePhoto(userId, file);
 
-      // Update the correct slot in state + preview + clear file input
       if (slot === 1) {
         setForm((p) => ({ ...p, photo: url }));
-        // ✅ Fix #3: keep preview as string (not null)
         setPhotoPreview("");
         setPhotoFile(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
       } else {
         setForm((p) => ({ ...p, photo2: url }));
-        // ✅ Fix #3: keep preview as string (not null)
         setPhotoPreview2("");
         setPhotoFile2(null);
         if (fileInputRef2.current) fileInputRef2.current.value = "";
       }
 
-      // ✅ AUTO-SAVE immediately so it persists
       await apiUpsertProfile(buildUpsertPayload(slot === 1 ? { photo: url } : { photo2: url }));
 
       showToast(`Photo ${slot} uploaded & saved!`);
@@ -632,7 +436,6 @@ export default function MyProfilePage() {
     }
   }
 
-  // ✅ Fix #4: Delete persists immediately
   async function onDeletePhoto(photoUrl: string, slot: 1 | 2) {
     if (!userId) return;
     if (!photoUrl) return;
@@ -645,7 +448,6 @@ export default function MyProfilePage() {
     try {
       await apiDeleteProfilePhoto(userId, photoUrl);
 
-      // Clear UI immediately + persist immediately
       if (slot === 1) {
         setForm((p) => ({ ...p, photo: "" }));
         setPhotoPreview("");
@@ -660,193 +462,6 @@ export default function MyProfilePage() {
         await apiUpsertProfile(buildUpsertPayload({ photo2: "" }));
       }
 
-const photoSlots = [
-  {
-    slot: 1,
-    url: photoPreview || form.photo || "",
-    savedUrl: form.photo || "",
-    label: "Profile Photo",
-    alt: "Profile photo",
-    preview: photoPreview,
-    placeholder: (
-      <div
-        style={{
-          fontSize: 64,
-          fontWeight: 900,
-          color: "rgba(0,0,0,0.35)",
-        }}
-      >
-        {(form.displayName || "U").slice(0, 1).toUpperCase()}
-      </div>
-    ),
-  },
-  {
-    slot: 2,
-    url: photoPreview2 || form.photo2 || "",
-    savedUrl: form.photo2 || "",
-    label: "Photo 2 (optional)",
-    alt: "Profile photo 2",
-    preview: photoPreview2,
-    placeholder: (
-      <div
-        style={{
-          fontSize: 48,
-          fontWeight: 900,
-          color: "rgba(0,0,0,0.25)",
-          textAlign: "center",
-          padding: 20,
-        }}
-      >
-        Optional second photo
-      </div>
-    ),
-  },
-];
-
-const visiblePhotos = photoSlots.filter((p) => p.url);
-
-useEffect(() => {
-  if (visiblePhotos.length === 0) {
-    setActivePhotoIndex(0);
-    return;
-  }
-  if (activePhotoIndex > visiblePhotos.length - 1) {
-    setActivePhotoIndex(0);
-  }
-}, [activePhotoIndex, visiblePhotos.length]);
-
-function goToPrevPhoto() {
-  if (visiblePhotos.length <= 1) return;
-  setActivePhotoIndex((prev) =>
-    prev === 0 ? visiblePhotos.length - 1 : prev - 1
-  );
-}
-
-function goToNextPhoto() {
-  if (visiblePhotos.length <= 1) return;
-  setActivePhotoIndex((prev) =>
-    prev === visiblePhotos.length - 1 ? 0 : prev + 1
-  );
-}
-
-function handleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
-  setTouchEndX(null);
-  setTouchStartX(e.targetTouches[0].clientX);
-}
-
-function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) {
-  setTouchEndX(e.targetTouches[0].clientX);
-}
-
-function handleTouchEnd() {
-  if (touchStartX === null || touchEndX === null) return;
-  const distance = touchStartX - touchEndX;
-
-  if (distance > 50) {
-    goToNextPhoto();
-  } else if (distance < -50) {
-    goToPrevPhoto();
-  }
-}
-
-function onDragStartPhoto(index: number) {
-  setDraggingPhotoIndex(index);
-}
-
-function onDragOverPhoto(e: React.DragEvent<HTMLDivElement>) {
-  e.preventDefault();
-}
-
-function onDropPhoto(targetIndex: number) {
-  if (draggingPhotoIndex === null || draggingPhotoIndex === targetIndex) {
-    setDraggingPhotoIndex(null);
-    return;
-  }
-
-  const current = [
-    { slot: 1, value: form.photo || "" },
-    { slot: 2, value: form.photo2 || "" },
-  ];
-
-  const dragged = current[draggingPhotoIndex];
-  const target = current[targetIndex];
-
-  const newPhoto = current[0].value;
-  const newPhoto2 = current[1].value;
-
-  if (dragged.slot === 1 && target.slot === 2) {
-    setForm((prev) => ({
-      ...prev,
-      photo: prev.photo2,
-      photo2: prev.photo,
-    }));
-    showToast("Photos reordered. Click Save Profile to keep the new order.");
-  }
-
-  if (dragged.slot === 2 && target.slot === 1) {
-    setForm((prev) => ({
-      ...prev,
-      photo: prev.photo2,
-      photo2: prev.photo,
-    }));
-    showToast("Photos reordered. Click Save Profile to keep the new order.");
-  }
-
-  setDraggingPhotoIndex(null);
-}
-
-const galleryBoxStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 520,
-  maxHeight: 760,
-  borderRadius: 24,
-  background: "#f6f6f6",
-  border: "1px solid #e7e7e7",
-  overflow: "hidden",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  position: "relative",
-};
-
-const galleryImageStyle: React.CSSProperties = {
-  width: "100%",
-  height: "auto",
-  maxHeight: 760,
-  objectFit: "contain",
-  display: "block",
-};
-
-const thumbStyle: React.CSSProperties = {
-  width: 84,
-  height: 108,
-  borderRadius: 16,
-  border: "2px solid #ddd",
-  objectFit: "cover",
-  background: "#f4f4f4",
-};
-
-const navButtonStyle: React.CSSProperties = {
-  position: "absolute",
-  top: "50%",
-  transform: "translateY(-50%)",
-  width: 42,
-  height: 42,
-  borderRadius: "999px",
-  border: "1px solid rgba(0,0,0,0.12)",
-  background: "rgba(255,255,255,0.92)",
-  fontSize: 24,
-  fontWeight: 900,
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
-};
-  
-  return parts.join("\n\n");
-}
-      
       showToast("Photo deleted.");
     } catch (e: any) {
       setApiError(e?.message || "Could not delete photo.");
@@ -883,6 +498,92 @@ const navButtonStyle: React.CSSProperties = {
     }
   }
 
+  const photoSlots = [
+    {
+      slot: 1 as const,
+      url: photoPreview || form.photo || "",
+      savedUrl: form.photo || "",
+      label: "Profile Photo",
+      alt: "Profile photo",
+    },
+    {
+      slot: 2 as const,
+      url: photoPreview2 || form.photo2 || "",
+      savedUrl: form.photo2 || "",
+      label: "Photo 2 (optional)",
+      alt: "Profile photo 2",
+    },
+  ];
+
+  const visiblePhotos = photoSlots.filter((p) => p.url);
+
+  useEffect(() => {
+    if (visiblePhotos.length === 0) {
+      setActivePhotoIndex(0);
+      return;
+    }
+    if (activePhotoIndex > visiblePhotos.length - 1) {
+      setActivePhotoIndex(0);
+    }
+  }, [activePhotoIndex, visiblePhotos.length]);
+
+  function goToPrevPhoto() {
+    if (visiblePhotos.length <= 1) return;
+    setActivePhotoIndex((prev) =>
+      prev === 0 ? visiblePhotos.length - 1 : prev - 1
+    );
+  }
+
+  function goToNextPhoto() {
+    if (visiblePhotos.length <= 1) return;
+    setActivePhotoIndex((prev) =>
+      prev === visiblePhotos.length - 1 ? 0 : prev + 1
+    );
+  }
+
+  function handleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+    setTouchEndX(null);
+    setTouchStartX(e.targetTouches[0].clientX);
+  }
+
+  function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) {
+    setTouchEndX(e.targetTouches[0].clientX);
+  }
+
+  function handleTouchEnd() {
+    if (touchStartX === null || touchEndX === null) return;
+    const distance = touchStartX - touchEndX;
+
+    if (distance > 50) {
+      goToNextPhoto();
+    } else if (distance < -50) {
+      goToPrevPhoto();
+    }
+  }
+
+  function onDragStartPhoto(index: number) {
+    setDraggingPhotoIndex(index);
+  }
+
+  function onDragOverPhoto(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+  }
+
+  function onDropPhoto(targetIndex: number) {
+    if (draggingPhotoIndex === null || draggingPhotoIndex === targetIndex) {
+      setDraggingPhotoIndex(null);
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      photo: prev.photo2,
+      photo2: prev.photo,
+    }));
+    showToast("Photos reordered. Click Save Profile to keep the new order.");
+    setDraggingPhotoIndex(null);
+  }
+
   const sectionStyle: React.CSSProperties = {
     marginTop: "1.25rem",
     border: "1px solid #eee",
@@ -891,15 +592,53 @@ const navButtonStyle: React.CSSProperties = {
     background: "white",
   };
 
-  const bigPhotoStyle: React.CSSProperties = {
+  const galleryBoxStyle: React.CSSProperties = {
     width: "100%",
-    height: 420,
-    borderRadius: 16,
-    border: "1px solid #e6e6e6",
-    background: "#f4f4f4",
+    minHeight: 520,
+    maxHeight: 760,
+    borderRadius: 24,
+    background: "#f6f6f6",
+    border: "1px solid #e7e7e7",
     overflow: "hidden",
-    display: "grid",
-    placeItems: "center",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  };
+
+  const galleryImageStyle: React.CSSProperties = {
+    width: "100%",
+    height: "auto",
+    maxHeight: 760,
+    objectFit: "contain",
+    display: "block",
+  };
+
+  const thumbStyle: React.CSSProperties = {
+    width: 84,
+    height: 108,
+    borderRadius: 16,
+    border: "2px solid #ddd",
+    objectFit: "cover",
+    background: "#f4f4f4",
+  };
+
+  const navButtonStyle: React.CSSProperties = {
+    position: "absolute",
+    top: "50%",
+    transform: "translateY(-50%)",
+    width: 42,
+    height: 42,
+    borderRadius: "999px",
+    border: "1px solid rgba(0,0,0,0.12)",
+    background: "rgba(255,255,255,0.92)",
+    fontSize: 24,
+    fontWeight: 900,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
   };
 
   return (
@@ -1121,587 +860,459 @@ const navButtonStyle: React.CSSProperties = {
               </label>
             </div>
 
-            {/* ✅ Photo 1 block */}
-           <div>
-  <div style={{ fontWeight: 700, marginBottom: 10 }}>Photo Gallery</div>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 10 }}>Photo Gallery</div>
 
-  <div
-    style={galleryBoxStyle}
-    onTouchStart={handleTouchStart}
-    onTouchMove={handleTouchMove}
-    onTouchEnd={handleTouchEnd}
-  >
-    {visiblePhotos.length > 0 ? (
-      <>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={visiblePhotos[activePhotoIndex].url}
-          alt={visiblePhotos[activePhotoIndex].alt}
-          style={galleryImageStyle}
-        />
+              <div
+                style={galleryBoxStyle}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+              >
+                {visiblePhotos.length > 0 ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={visiblePhotos[activePhotoIndex].url}
+                      alt={visiblePhotos[activePhotoIndex].alt}
+                      style={galleryImageStyle}
+                    />
 
-        {visiblePhotos.length > 1 ? (
-          <>
-            <button
-              type="button"
-              onClick={goToPrevPhoto}
-              style={{ ...navButtonStyle, left: 14 }}
-              aria-label="Previous photo"
-            >
-              ‹
-            </button>
+                    {visiblePhotos.length > 1 ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={goToPrevPhoto}
+                          style={{ ...navButtonStyle, left: 14 }}
+                          aria-label="Previous photo"
+                        >
+                          ‹
+                        </button>
 
-            <button
-              type="button"
-              onClick={goToNextPhoto}
-              style={{ ...navButtonStyle, right: 14 }}
-              aria-label="Next photo"
-            >
-              ›
-            </button>
+                        <button
+                          type="button"
+                          onClick={goToNextPhoto}
+                          style={{ ...navButtonStyle, right: 14 }}
+                          aria-label="Next photo"
+                        >
+                          ›
+                        </button>
 
-            <div
-              style={{
-                position: "absolute",
-                bottom: 12,
-                left: "50%",
-                transform: "translateX(-50%)",
-                display: "flex",
-                gap: 8,
-                background: "rgba(255,255,255,0.88)",
-                padding: "8px 12px",
-                borderRadius: 999,
-              }}
-            >
-              {visiblePhotos.map((_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setActivePhotoIndex(i)}
-                  aria-label={`Go to photo ${i + 1}`}
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "999px",
-                    border: "none",
-                    cursor: "pointer",
-                    background: i === activePhotoIndex ? "#111" : "#cfcfcf",
-                  }}
-                />
-              ))}
-            </div>
-          </>
-        ) : null}
-      </>
-    ) : (
-      <div
-        style={{
-          fontSize: 64,
-          fontWeight: 900,
-          color: "rgba(0,0,0,0.25)",
-        }}
-      >
-        {(form.displayName || "U").slice(0, 1).toUpperCase()}
-      </div>
-    )}
-  </div>
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: 12,
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            display: "flex",
+                            gap: 8,
+                            background: "rgba(255,255,255,0.88)",
+                            padding: "8px 12px",
+                            borderRadius: 999,
+                          }}
+                        >
+                          {visiblePhotos.map((_, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => setActivePhotoIndex(i)}
+                              aria-label={`Go to photo ${i + 1}`}
+                              style={{
+                                width: 10,
+                                height: 10,
+                                borderRadius: "999px",
+                                border: "none",
+                                cursor: "pointer",
+                                background: i === activePhotoIndex ? "#111" : "#cfcfcf",
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      fontSize: 64,
+                      fontWeight: 900,
+                      color: "rgba(0,0,0,0.25)",
+                    }}
+                  >
+                    {(form.displayName || "U").slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+              </div>
 
-  <div style={{ marginTop: 10, fontSize: 12, color: "#666" }}>
-    Swipe left/right on mobile, or use the arrows. Drag the thumbnails below to reorder.
-  </div>
+              <div style={{ marginTop: 10, fontSize: 12, color: "#666" }}>
+                Swipe left/right on mobile, or use the arrows. Drag the thumbnails below to reorder.
+              </div>
 
-  <div
-    style={{
-      display: "flex",
-      gap: 12,
-      flexWrap: "wrap",
-      alignItems: "flex-start",
-      marginTop: 14,
-    }}
-  >
-    {photoSlots.map((slotItem, index) => {
-      const hasPhoto = !!slotItem.url;
-
-      return (
-        <div
-          key={slotItem.slot}
-          draggable={hasPhoto}
-          onDragStart={() => onDragStartPhoto(index)}
-          onDragOver={onDragOverPhoto}
-          onDrop={() => onDropPhoto(index)}
-          style={{
-            width: 140,
-            border: "1px solid #ddd",
-            borderRadius: 16,
-            padding: 10,
-            background: draggingPhotoIndex === index ? "#f7f7f7" : "white",
-            boxShadow: "0 2px 10px rgba(0,0,0,0.04)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 800,
-              marginBottom: 8,
-            }}
-          >
-            {slotItem.label}
-          </div>
-
-          <div
-            style={{
-              width: "100%",
-              height: 140,
-              borderRadius: 14,
-              background: "#f4f4f4",
-              overflow: "hidden",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              marginBottom: 8,
-            }}
-          >
-            {hasPhoto ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={slotItem.url}
-                alt={slotItem.alt}
-                style={thumbStyle}
-              />
-            ) : (
               <div
                 style={{
-                  fontSize: 12,
-                  color: "#999",
-                  textAlign: "center",
-                  padding: 8,
+                  display: "flex",
+                  gap: 12,
+                  flexWrap: "wrap",
+                  alignItems: "flex-start",
+                  marginTop: 14,
                 }}
               >
-                No photo yet
+                {photoSlots.map((slotItem, index) => {
+                  const hasPhoto = !!slotItem.url;
+
+                  return (
+                    <div
+                      key={slotItem.slot}
+                      draggable={hasPhoto}
+                      onDragStart={() => onDragStartPhoto(index)}
+                      onDragOver={onDragOverPhoto}
+                      onDrop={() => onDropPhoto(index)}
+                      style={{
+                        width: 140,
+                        border: "1px solid #ddd",
+                        borderRadius: 16,
+                        padding: 10,
+                        background: draggingPhotoIndex === index ? "#f7f7f7" : "white",
+                        boxShadow: "0 2px 10px rgba(0,0,0,0.04)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 800,
+                          marginBottom: 8,
+                        }}
+                      >
+                        {slotItem.label}
+                      </div>
+
+                      <div
+                        style={{
+                          width: "100%",
+                          height: 140,
+                          borderRadius: 14,
+                          background: "#f4f4f4",
+                          overflow: "hidden",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          marginBottom: 8,
+                        }}
+                      >
+                        {hasPhoto ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={slotItem.url}
+                            alt={slotItem.alt}
+                            style={thumbStyle}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#999",
+                              textAlign: "center",
+                              padding: 8,
+                            }}
+                          >
+                            No photo yet
+                          </div>
+                        )}
+                      </div>
+
+                      {slotItem.savedUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActivePhotoIndex(
+                              Math.max(
+                                0,
+                                visiblePhotos.findIndex((p) => p.slot === slotItem.slot)
+                              )
+                            );
+                          }}
+                          style={{
+                            width: "100%",
+                            marginBottom: 8,
+                            padding: "0.5rem 0.7rem",
+                            borderRadius: 10,
+                            border: "1px solid #ccc",
+                            background: "white",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                        >
+                          View
+                        </button>
+                      ) : null}
+
+                      {slotItem.savedUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => onDeletePhoto(slotItem.savedUrl, slotItem.slot)}
+                          disabled={loadingExisting || uploadingPhoto}
+                          style={{
+                            width: "100%",
+                            padding: "0.55rem 0.8rem",
+                            borderRadius: 10,
+                            border: "1px solid #ccc",
+                            background: "white",
+                            cursor:
+                              loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+                            fontWeight: 700,
+                            opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+                          }}
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
-            )}
-          </div>
+            </div>
 
-          {slotItem.savedUrl ? (
-            <button
-              type="button"
-              onClick={() => {
-                setActivePhotoIndex(
-                  Math.max(
-                    0,
-                    visiblePhotos.findIndex((p) => p.slot === slotItem.slot)
-                  )
-                );
-              }}
-              style={{
-                width: "100%",
-                marginBottom: 8,
-                padding: "0.5rem 0.7rem",
-                borderRadius: 10,
-                border: "1px solid #ccc",
-                background: "white",
-                cursor: "pointer",
-                fontWeight: 700,
-              }}
-            >
-              View
-            </button>
-          ) : null}
+            <div style={{ marginTop: 22 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Profile Photo</div>
 
-          {slotItem.savedUrl ? (
-            <button
-              type="button"
-              onClick={() => onDeletePhoto(slotItem.savedUrl, slotItem.slot)}
-              disabled={loadingExisting || uploadingPhoto}
-              style={{
-                width: "100%",
-                padding: "0.55rem 0.8rem",
-                borderRadius: 10,
-                border: "1px solid #ccc",
-                background: "white",
-                cursor:
-                  loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
-                fontWeight: 700,
-                opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
-              }}
-            >
-              Delete
-            </button>
-          ) : null}
-        </div>
-      );
-    })}
-  </div>
-</div>
+              <div
+                style={{
+                  width: "100%",
+                  minHeight: 320,
+                  maxHeight: 760,
+                  borderRadius: 24,
+                  background: "#f6f6f6",
+                  border: "1px solid #e7e7e7",
+                  overflow: "hidden",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  position: "relative",
+                }}
+              >
+                {photoPreview || form.photo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photoPreview || form.photo}
+                    alt="Profile photo"
+                    style={{
+                      width: "100%",
+                      height: "auto",
+                      maxHeight: 760,
+                      objectFit: "contain",
+                      display: "block",
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      fontSize: 64,
+                      fontWeight: 900,
+                      color: "rgba(0,0,0,0.35)",
+                    }}
+                  >
+                    {(form.displayName || "U").slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+              </div>
 
-{/* ✅ Photo 1 upload block */}
-<div style={{ marginTop: 22 }}>
-  <div style={{ fontWeight: 700, marginBottom: 6 }}>Profile Photo</div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setPhotoFile(f);
 
-  <div
-    style={{
-      width: "100%",
-      minHeight: 320,
-      maxHeight: 760,
-      borderRadius: 24,
-      background: "#f6f6f6",
-      border: "1px solid #e7e7e7",
-      overflow: "hidden",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      position: "relative",
-    }}
-  >
-    {photoPreview || form.photo ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={photoPreview || form.photo}
-        alt="Profile photo"
-        style={{
-          width: "100%",
-          height: "auto",
-          maxHeight: 760,
-          objectFit: "contain",
-          display: "block",
-        }}
-      />
-    ) : (
-      <div
-        style={{
-          fontSize: 64,
-          fontWeight: 900,
-          color: "rgba(0,0,0,0.35)",
-        }}
-      >
-        {(form.displayName || "U").slice(0, 1).toUpperCase()}
-      </div>
-    )}
-  </div>
+                  if (f) {
+                    const localUrl = URL.createObjectURL(f);
+                    setPhotoPreview(localUrl);
+                    showToast("Photo selected. Click Upload Photo.");
+                  }
+                }}
+              />
 
-  <input
-    ref={fileInputRef}
-    type="file"
-    accept="image/png,image/jpeg,image/webp"
-    style={{ display: "none" }}
-    onChange={(e) => {
-      const f = e.target.files?.[0] || null;
-      setPhotoFile(f);
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  marginTop: 10,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!photoFile) {
+                      fileInputRef.current?.click();
+                      return;
+                    }
+                    onUploadPhoto(1);
+                  }}
+                  disabled={loadingExisting || uploadingPhoto}
+                  style={{
+                    padding: "0.6rem 0.9rem",
+                    borderRadius: 10,
+                    border: "1px solid #111",
+                    background: "#111",
+                    color: "white",
+                    cursor:
+                      loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+                    fontWeight: 900,
+                    opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+                  }}
+                >
+                  {uploadingPhoto ? "Uploading..." : photoFile ? "Upload Photo" : "Choose Photo"}
+                </button>
 
-      if (f) {
-        const localUrl = URL.createObjectURL(f);
-        setPhotoPreview(localUrl);
-        showToast("Photo selected. Click Upload Photo.");
-      }
-    }}
-  />
+                <div style={{ fontSize: 12, color: "#777" }}>
+                  {photoFile ? (
+                    <>
+                      Selected: <b>{photoFile.name}</b> • Uploading will <b>auto-save</b>.
+                    </>
+                  ) : (
+                    <>Click the button to choose a photo (jpg/png/webp).</>
+                  )}
+                </div>
+              </div>
 
-  <div
-    style={{
-      display: "flex",
-      gap: 10,
-      flexWrap: "wrap",
-      alignItems: "center",
-      marginTop: 10,
-    }}
-  >
-    <button
-      type="button"
-      onClick={() => {
-        if (!photoFile) {
-          fileInputRef.current?.click();
-          return;
-        }
-        onUploadPhoto(1);
-      }}
-      disabled={loadingExisting || uploadingPhoto}
-      style={{
-        padding: "0.6rem 0.9rem",
-        borderRadius: 10,
-        border: "1px solid #111",
-        background: "#111",
-        color: "white",
-        cursor:
-          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
-        fontWeight: 900,
-        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
-      }}
-    >
-      {uploadingPhoto ? "Uploading..." : photoFile ? "Upload Photo" : "Choose Photo"}
-    </button>
+              {form.photo ? (
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: "#666",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  Saved URL: {form.photo}
+                </div>
+              ) : null}
+            </div>
 
-    <div style={{ fontSize: 12, color: "#777" }}>
-      {photoFile ? (
-        <>
-          Selected: <b>{photoFile.name}</b> • Uploading will <b>auto-save</b>.
-        </>
-      ) : (
-        <>Click the button to choose a photo (jpg/png/webp).</>
-      )}
-    </div>
-  </div>
+            <div style={{ marginTop: 22 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Photo 2 (optional)</div>
 
-  {form.photo ? (
-    <div
-      style={{
-        marginTop: 8,
-        fontSize: 12,
-        color: "#666",
-        wordBreak: "break-all",
-      }}
-    >
-      Saved URL: {form.photo}
-    </div>
-  ) : null}
-</div>
+              <div
+                style={{
+                  width: "100%",
+                  minHeight: 320,
+                  maxHeight: 760,
+                  borderRadius: 24,
+                  background: "#f6f6f6",
+                  border: "1px solid #e7e7e7",
+                  overflow: "hidden",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  position: "relative",
+                }}
+              >
+                {photoPreview2 || form.photo2 ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photoPreview2 || form.photo2}
+                    alt="Profile photo 2"
+                    style={{
+                      width: "100%",
+                      height: "auto",
+                      maxHeight: 760,
+                      objectFit: "contain",
+                      display: "block",
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      fontSize: 48,
+                      fontWeight: 900,
+                      color: "rgba(0,0,0,0.25)",
+                      textAlign: "center",
+                      padding: 20,
+                    }}
+                  >
+                    Optional second photo
+                  </div>
+                )}
+              </div>
 
-{/* ✅ Photo 2 upload block */}
-<div style={{ marginTop: 22 }}>
-  <div style={{ fontWeight: 700, marginBottom: 6 }}>Photo 2 (optional)</div>
+              <input
+                ref={fileInputRef2}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setPhotoFile2(f);
 
-  <div
-    style={{
-      width: "100%",
-      minHeight: 320,
-      maxHeight: 760,
-      borderRadius: 24,
-      background: "#f6f6f6",
-      border: "1px solid #e7e7e7",
-      overflow: "hidden",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      position: "relative",
-    }}
-  >
-    {photoPreview2 || form.photo2 ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={photoPreview2 || form.photo2}
-        alt="Profile photo 2"
-        style={{
-          width: "100%",
-          height: "auto",
-          maxHeight: 760,
-          objectFit: "contain",
-          display: "block",
-        }}
-      />
-    ) : (
-      <div
-        style={{
-          fontSize: 48,
-          fontWeight: 900,
-          color: "rgba(0,0,0,0.25)",
-          textAlign: "center",
-          padding: 20,
-        }}
-      >
-        Optional second photo
-      </div>
-    )}
-  </div>
+                  if (f) {
+                    const localUrl = URL.createObjectURL(f);
+                    setPhotoPreview2(localUrl);
+                    showToast("Second photo selected. Click Upload Photo.");
+                  }
+                }}
+              />
 
-  <input
-    ref={fileInputRef2}
-    type="file"
-    accept="image/png,image/jpeg,image/webp"
-    style={{ display: "none" }}
-    onChange={(e) => {
-      const f = e.target.files?.[0] || null;
-      setPhotoFile2(f);
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  marginTop: 10,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!photoFile2) {
+                      fileInputRef2.current?.click();
+                      return;
+                    }
+                    onUploadPhoto(2);
+                  }}
+                  disabled={loadingExisting || uploadingPhoto}
+                  style={{
+                    padding: "0.6rem 0.9rem",
+                    borderRadius: 10,
+                    border: "1px solid #111",
+                    background: "#111",
+                    color: "white",
+                    cursor:
+                      loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+                    fontWeight: 900,
+                    opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+                  }}
+                >
+                  {uploadingPhoto ? "Uploading..." : photoFile2 ? "Upload Photo" : "Choose Photo"}
+                </button>
 
-      if (f) {
-        const localUrl = URL.createObjectURL(f);
-        setPhotoPreview2(localUrl);
-        showToast("Second photo selected. Click Upload Photo.");
-      }
-    }}
-  />
+                <div style={{ fontSize: 12, color: "#777" }}>
+                  {photoFile2 ? (
+                    <>
+                      Selected: <b>{photoFile2.name}</b> • Uploading will <b>auto-save</b>.
+                    </>
+                  ) : (
+                    <>Click the button to choose a second photo (jpg/png/webp).</>
+                  )}
+                </div>
+              </div>
 
-  <div
-    style={{
-      display: "flex",
-      gap: 10,
-      flexWrap: "wrap",
-      alignItems: "center",
-      marginTop: 10,
-    }}
-  >
-    <button
-      type="button"
-      onClick={() => {
-        if (!photoFile2) {
-          fileInputRef2.current?.click();
-          return;
-        }
-        onUploadPhoto(2);
-      }}
-      disabled={loadingExisting || uploadingPhoto}
-      style={{
-        padding: "0.6rem 0.9rem",
-        borderRadius: 10,
-        border: "1px solid #111",
-        background: "#111",
-        color: "white",
-        cursor:
-          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
-        fontWeight: 900,
-        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
-      }}
-    >
-      {uploadingPhoto ? "Uploading..." : photoFile2 ? "Upload Photo" : "Choose Photo"}
-    </button>
-
-    <div style={{ fontSize: 12, color: "#777" }}>
-      {photoFile2 ? (
-        <>
-          Selected: <b>{photoFile2.name}</b> • Uploading will <b>auto-save</b>.
-        </>
-      ) : (
-        <>Click the button to choose a second photo (jpg/png/webp).</>
-      )}
-    </div>
-  </div>
-
-  {form.photo2 ? (
-    <div
-      style={{
-        marginTop: 8,
-        fontSize: 12,
-        color: "#666",
-        wordBreak: "break-all",
-      }}
-    >
-      Saved URL: {form.photo2}
-    </div>
-  ) : null}
-</div>
-
-             {/* ✅ Photo 2 upload block */}
-<div style={{ marginTop: 22 }}>
-  <div style={{ fontWeight: 700, marginBottom: 6 }}>Photo 2 (optional)</div>
-
-  <div
-    style={{
-      width: "100%",
-      minHeight: 320,
-      maxHeight: 760,
-      borderRadius: 24,
-      background: "#f6f6f6",
-      border: "1px solid #e7e7e7",
-      overflow: "hidden",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-    }}
-  >
-    {photoPreview2 || form.photo2 ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={photoPreview2 || form.photo2}
-        alt="Profile photo 2"
-        style={{
-          width: "100%",
-          height: "auto",
-          maxHeight: 760,
-          objectFit: "contain",
-        }}
-      />
-    ) : (
-      <div
-        style={{
-          fontSize: 48,
-          fontWeight: 900,
-          color: "rgba(0,0,0,0.25)",
-          textAlign: "center",
-          padding: 20,
-        }}
-      >
-        Optional second photo
-      </div>
-    )}
-  </div>
-
-  <input
-    ref={fileInputRef2}
-    type="file"
-    accept="image/png,image/jpeg,image/webp"
-    style={{ display: "none" }}
-    onChange={(e) => {
-      const f = e.target.files?.[0] || null;
-      setPhotoFile2(f);
-
-      if (f) {
-        const localUrl = URL.createObjectURL(f);
-        setPhotoPreview2(localUrl);
-        showToast("Second photo selected. Click Upload Photo.");
-      }
-    }}
-  />
-
-  <div
-    style={{
-      display: "flex",
-      gap: 10,
-      flexWrap: "wrap",
-      alignItems: "center",
-      marginTop: 10,
-    }}
-  >
-    <button
-      type="button"
-      onClick={() => {
-        if (!photoFile2) {
-          fileInputRef2.current?.click();
-          return;
-        }
-        onUploadPhoto(2);
-      }}
-      disabled={loadingExisting || uploadingPhoto}
-      style={{
-        padding: "0.6rem 0.9rem",
-        borderRadius: 10,
-        border: "1px solid #111",
-        background: "#111",
-        color: "white",
-        cursor:
-          loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
-        fontWeight: 900,
-        opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
-      }}
-    >
-      {uploadingPhoto
-        ? "Uploading..."
-        : photoFile2
-        ? "Upload Photo"
-        : "Choose Photo"}
-    </button>
-
-    <div style={{ fontSize: 12, color: "#777" }}>
-      {photoFile2 ? (
-        <>
-          Selected: <b>{photoFile2.name}</b> • Uploading will <b>auto-save</b>.
-        </>
-      ) : (
-        <>Click the button to choose a second photo (jpg/png/webp).</>
-      )}
-    </div>
-  </div>
-
-  {form.photo2 ? (
-    <div
-      style={{
-        marginTop: 8,
-        fontSize: 12,
-        color: "#666",
-        wordBreak: "break-all",
-      }}
-    >
-      Saved URL: {form.photo2}
-    </div>
-  ) : null}
-</div> 
+              {form.photo2 ? (
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: "#666",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  Saved URL: {form.photo2}
+                </div>
+              ) : null}
+            </div>
 
             <label>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Relationship Intent</div>
@@ -1828,7 +1439,6 @@ const navButtonStyle: React.CSSProperties = {
             </button>
           </div>
         </div>
-
       </div>
     </main>
   );
