@@ -344,8 +344,8 @@ export default function MyProfilePage() {
             Array.isArray(mine.spiritualFramework) ? mine.spiritualFramework : []
           );
 
-          setPhotoPreview((mine.photo as string) || "");
-          setPhotoPreview2((mine.photo2 as string) || "");
+          setPhotoPreview("");
+          setPhotoPreview2("");
         }
       } catch (e: any) {
         setApiError(e?.message || "Could not load your profile.");
