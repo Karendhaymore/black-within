@@ -425,7 +425,7 @@ export default function MyProfilePage() {
         if (fileInputRef2.current) fileInputRef2.current.value = "";
       }
 
-      showToast(`Photo ${slot} uploaded. Click Save profile to keep it.`);
+      showToast(`Photo ${slot} uploaded. Wait for upload to finish, then click Save profile.`);
     } catch (e: any) {
       setApiError(e?.message || "Photo upload failed.");
       showToast("Upload failed.");
@@ -457,6 +457,10 @@ export default function MyProfilePage() {
 
   async function onSave() {
     if (!userId) return;
+
+    if (uploadingPhoto) {
+      return showToast("Please wait for the photo upload to finish, then click Save profile.");
+    }
 
     if (!form.displayName.trim()) return showToast("Please add a display name.");
     const ageNum = parseInt(form.age || "0", 10);
@@ -951,7 +955,7 @@ export default function MyProfilePage() {
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {photoFile ? (
                     <>
-                      Selected: <b>{photoFile.name}</b> • Click <b>Save profile</b> to keep it.
+                      Selected: <b>{photoFile.name}</b> • Click <b>Save profile</b> after upload finishes.
                     </>
                   ) : (
                     <>Click the button to choose a photo (jpg/png/webp).</>
@@ -1073,7 +1077,7 @@ export default function MyProfilePage() {
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {photoFile2 ? (
                     <>
-                      Selected: <b>{photoFile2.name}</b> • Click <b>Save profile</b> to keep it.
+                      Selected: <b>{photoFile2.name}</b> • Click <b>Save profile</b> after upload finishes.
                     </>
                   ) : (
                     <>Click the button to choose a second photo (jpg/png/webp).</>
@@ -1416,19 +1420,20 @@ export default function MyProfilePage() {
 
             <button
               onClick={onSave}
-              disabled={saving || loadingExisting}
+              disabled={saving || loadingExisting || uploadingPhoto}
               style={{
                 marginTop: "0.4rem",
                 padding: "0.85rem 1rem",
                 borderRadius: 12,
                 border: "1px solid #ccc",
                 background: "white",
-                cursor: saving || loadingExisting ? "not-allowed" : "pointer",
-                opacity: saving || loadingExisting ? 0.7 : 1,
+                cursor:
+                  saving || loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+                opacity: saving || loadingExisting || uploadingPhoto ? 0.7 : 1,
                 fontWeight: 700,
               }}
             >
-              {saving ? "Saving..." : "Save profile"}
+              {saving ? "Saving..." : uploadingPhoto ? "Waiting for photo upload..." : "Save profile"}
             </button>
           </div>
         </div>
