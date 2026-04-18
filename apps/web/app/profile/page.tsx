@@ -425,9 +425,7 @@ export default function MyProfilePage() {
         if (fileInputRef2.current) fileInputRef2.current.value = "";
       }
 
-      await apiUpsertProfile(buildUpsertPayload(slot === 1 ? { photo: url } : { photo2: url }));
-
-      showToast(`Photo ${slot} uploaded & saved!`);
+      showToast(`Photo ${slot} uploaded. Click Save profile to keep it.`);
     } catch (e: any) {
       setApiError(e?.message || "Photo upload failed.");
       showToast("Upload failed.");
@@ -436,37 +434,25 @@ export default function MyProfilePage() {
     }
   }
 
-  async function onDeletePhoto(photoUrl: string, slot: 1 | 2) {
-    if (!userId) return;
+  function onDeletePhoto(photoUrl: string, slot: 1 | 2) {
     if (!photoUrl) return;
 
-    const ok = window.confirm("Delete this photo? You can upload a new one after.");
+    const ok = window.confirm("Remove this photo from your profile? Click Save profile to keep the change.");
     if (!ok) return;
 
-    setApiError(null);
-
-    try {
-      await apiDeleteProfilePhoto(userId, photoUrl);
-
-      if (slot === 1) {
-        setForm((p) => ({ ...p, photo: "" }));
-        setPhotoPreview("");
-        setPhotoFile(null);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        await apiUpsertProfile(buildUpsertPayload({ photo: "" }));
-      } else {
-        setForm((p) => ({ ...p, photo2: "" }));
-        setPhotoPreview2("");
-        setPhotoFile2(null);
-        if (fileInputRef2.current) fileInputRef2.current.value = "";
-        await apiUpsertProfile(buildUpsertPayload({ photo2: "" }));
-      }
-
-      showToast("Photo deleted.");
-    } catch (e: any) {
-      setApiError(e?.message || "Could not delete photo.");
-      showToast("Delete failed. See API notice.");
+    if (slot === 1) {
+      setForm((p) => ({ ...p, photo: "" }));
+      setPhotoPreview("");
+      setPhotoFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } else {
+      setForm((p) => ({ ...p, photo2: "" }));
+      setPhotoPreview2("");
+      setPhotoFile2(null);
+      if (fileInputRef2.current) fileInputRef2.current.value = "";
     }
+
+    showToast("Photo removed from the form. Click Save profile to keep the change.");
   }
 
   async function onSave() {
@@ -569,7 +555,7 @@ export default function MyProfilePage() {
     e.preventDefault();
   }
 
-  async function onDropPhoto(targetIndex: number) {
+  function onDropPhoto(targetIndex: number) {
     if (draggingPhotoIndex === null || draggingPhotoIndex === targetIndex) {
       setDraggingPhotoIndex(null);
       return;
@@ -586,22 +572,9 @@ export default function MyProfilePage() {
 
     setPhotoPreview("");
     setPhotoPreview2("");
-
     setDraggingPhotoIndex(null);
 
-    if (!userId) {
-      showToast("Photos reordered on screen.");
-      return;
-    }
-
-    try {
-      setApiError(null);
-      await apiUpsertProfile(buildUpsertPayload({ photo: newPhoto, photo2: newPhoto2 }));
-      showToast("Photos reordered and saved.");
-    } catch (e: any) {
-      setApiError(e?.message || "Could not save photo order.");
-      showToast("Photo order changed on screen, but save failed.");
-    }
+    showToast("Photos reordered. Click Save profile to keep the new order.");
   }
 
   const sectionStyle: React.CSSProperties = {
@@ -978,7 +951,7 @@ export default function MyProfilePage() {
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {photoFile ? (
                     <>
-                      Selected: <b>{photoFile.name}</b> • Uploading will <b>auto-save</b>.
+                      Selected: <b>{photoFile.name}</b> • Click <b>Save profile</b> to keep it.
                     </>
                   ) : (
                     <>Click the button to choose a photo (jpg/png/webp).</>
@@ -1100,7 +1073,7 @@ export default function MyProfilePage() {
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {photoFile2 ? (
                     <>
-                      Selected: <b>{photoFile2.name}</b> • Uploading will <b>auto-save</b>.
+                      Selected: <b>{photoFile2.name}</b> • Click <b>Save profile</b> to keep it.
                     </>
                   ) : (
                     <>Click the button to choose a second photo (jpg/png/webp).</>
