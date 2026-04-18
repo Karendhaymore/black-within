@@ -569,11 +569,40 @@ export default function MyProfilePage() {
     e.preventDefault();
   }
 
-  function onDropPhoto(targetIndex: number) {
-    if (draggingPhotoIndex === null || draggingPhotoIndex === targetIndex) {
-      setDraggingPhotoIndex(null);
-      return;
-    }
+  async function onDropPhoto(targetIndex: number) {
+  if (draggingPhotoIndex === null || draggingPhotoIndex === targetIndex) {
+    setDraggingPhotoIndex(null);
+    return;
+  }
+
+  const newPhoto = form.photo2 || "";
+  const newPhoto2 = form.photo || "";
+
+  setForm((prev) => ({
+    ...prev,
+    photo: newPhoto,
+    photo2: newPhoto2,
+  }));
+
+  setPhotoPreview(newPhoto);
+  setPhotoPreview2(newPhoto2);
+
+  setDraggingPhotoIndex(null);
+
+  if (!userId) {
+    showToast("Photos reordered on screen.");
+    return;
+  }
+
+  try {
+    setApiError(null);
+    await apiUpsertProfile(buildUpsertPayload({ photo: newPhoto, photo2: newPhoto2 }));
+    showToast("Photos reordered and saved.");
+  } catch (e: any) {
+    setApiError(e?.message || "Could not save photo order.");
+    showToast("Photo order changed on screen, but save failed.");
+  }
+}
 
     setForm((prev) => ({
       ...prev,
