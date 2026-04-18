@@ -279,6 +279,7 @@ export default function ProfileDetailPage() {
   const [brokenSrcs, setBrokenSrcs] = useState<Record<string, boolean>>({});
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string>("");
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
 
   function openLightbox(src: string) {
     setLightboxSrc(src);
@@ -325,6 +326,16 @@ export default function ProfileDetailPage() {
     const p2 = profile?.photo2 || null;
     return [p1, p2].filter(Boolean) as string[];
   }, [profile?.photo, profile?.photo2]);
+
+  useEffect(() => {
+    if (photos.length === 0) {
+      setSelectedPhotoIndex(0);
+      return;
+    }
+    if (selectedPhotoIndex > photos.length - 1) {
+      setSelectedPhotoIndex(0);
+    }
+  }, [photos.length, selectedPhotoIndex]);
 
   async function refreshSavedAndLikes(uid: string) {
     try {
@@ -694,7 +705,7 @@ export default function ProfileDetailPage() {
               <div
                 style={{
                   width: "100%",
-                  height: 220,
+                  height: 320,
                   borderRadius: 16,
                   background: "#f2f2f2",
                   display: "grid",
@@ -707,57 +718,119 @@ export default function ProfileDetailPage() {
                 {getInitials(profile.displayName)}
               </div>
             ) : (
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                {photos.slice(0, 2).map((src) => {
-                  const isBroken = !!brokenSrcs[src];
-                  return (
-                    <button
-                      key={src}
-                      type="button"
-                      onClick={() => openLightbox(src)}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => openLightbox(photos[selectedPhotoIndex])}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #ddd",
+                    padding: 0,
+                    borderRadius: 16,
+                    overflow: "hidden",
+                    cursor: "pointer",
+                    background: "white",
+                  }}
+                  aria-label="Open photo"
+                >
+                  {brokenSrcs[photos[selectedPhotoIndex]] ? (
+                    <div
                       style={{
-                        border: "1px solid #ddd",
-                        padding: 0,
-                        borderRadius: 14,
-                        overflow: "hidden",
-                        cursor: "pointer",
-                        background: "white",
+                        width: "100%",
+                        height: 420,
+                        display: "grid",
+                        placeItems: "center",
+                        background: "#f2f2f2",
+                        color: "#555",
+                        fontSize: "2rem",
+                        fontWeight: 700,
                       }}
-                      aria-label="Open photo"
                     >
-                      {isBroken ? (
-                        <div
+                      {getInitials(profile.displayName)}
+                    </div>
+                  ) : (
+                    <img
+                      src={photos[selectedPhotoIndex]}
+                      alt={`${profile.displayName} photo ${selectedPhotoIndex + 1}`}
+                      style={{
+                        width: "100%",
+                        height: 420,
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                      onError={() =>
+                        setBrokenSrcs((prev) => ({
+                          ...prev,
+                          [photos[selectedPhotoIndex]]: true,
+                        }))
+                      }
+                    />
+                  )}
+                </button>
+
+                {photos.length > 1 ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      flexWrap: "wrap",
+                      marginTop: 12,
+                    }}
+                  >
+                    {photos.map((src, i) => {
+                      const isBroken = !!brokenSrcs[src];
+                      const isActive = i === selectedPhotoIndex;
+
+                      return (
+                        <button
+                          key={`${src}-${i}`}
+                          type="button"
+                          onClick={() => setSelectedPhotoIndex(i)}
                           style={{
-                            width: 220,
-                            height: 220,
-                            display: "grid",
-                            placeItems: "center",
-                            background: "#f2f2f2",
-                            color: "#555",
-                            fontSize: "2rem",
-                            fontWeight: 700,
+                            border: isActive ? "2px solid #111" : "1px solid #ddd",
+                            padding: 0,
+                            borderRadius: 14,
+                            overflow: "hidden",
+                            cursor: "pointer",
+                            background: "white",
                           }}
+                          aria-label={`View photo ${i + 1}`}
                         >
-                          {getInitials(profile.displayName)}
-                        </div>
-                      ) : (
-                        <img
-                          src={src}
-                          alt={`${profile.displayName} photo`}
-                          style={{
-                            width: 220,
-                            height: 220,
-                            objectFit: "cover",
-                            display: "block",
-                          }}
-                          onError={() =>
-                            setBrokenSrcs((prev) => ({ ...prev, [src]: true }))
-                          }
-                        />
-                      )}
-                    </button>
-                  );
-                })}
+                          {isBroken ? (
+                            <div
+                              style={{
+                                width: 110,
+                                height: 110,
+                                display: "grid",
+                                placeItems: "center",
+                                background: "#f2f2f2",
+                                color: "#555",
+                                fontSize: "1.2rem",
+                                fontWeight: 700,
+                              }}
+                            >
+                              {getInitials(profile.displayName)}
+                            </div>
+                          ) : (
+                            <img
+                              src={src}
+                              alt={`${profile.displayName} thumbnail ${i + 1}`}
+                              style={{
+                                width: 110,
+                                height: 110,
+                                objectFit: "cover",
+                                display: "block",
+                              }}
+                              onError={() =>
+                                setBrokenSrcs((prev) => ({ ...prev, [src]: true }))
+                              }
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
