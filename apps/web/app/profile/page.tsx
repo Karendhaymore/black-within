@@ -456,130 +456,52 @@ export default function MyProfilePage() {
   }
 
   async function onSave() {
-    if (!userId) return;
+  if (!userId) return;
 
-    if (uploadingPhoto) {
-      return showToast("Please wait for the photo upload to finish, then click Save profile.");
-    }
-
-    if (!form.displayName.trim()) return showToast("Please add a display name.");
-    const ageNum = parseInt(form.age || "0", 10);
-    if (!ageNum || ageNum < 18) return showToast("Please enter a valid age (18+).");
-    if (!form.city.trim()) return showToast("Please add your city.");
-    if (!form.stateUS.trim()) return showToast("Please add your state.");
-    if (!form.relationshipIntent.trim()) return showToast("Please select a Relationship Intent.");
-
-    if (culturalSelected.length === 0)
-      return showToast("Please select at least one Cultural Identity option.");
-    if (spiritualSelected.length === 0)
-      return showToast("Please select at least one Spiritual Framework option.");
-
-    setSaving(true);
-    setApiError(null);
-
-    try {
-      await apiUpsertProfile(buildUpsertPayload());
-      showToast("Profile saved.");
-    } catch (e: any) {
-      setApiError(e?.message || "Could not save profile.");
-      showToast("Save failed. See API notice.");
-    } finally {
-      setSaving(false);
-    }
+  if (uploadingPhoto) {
+    return showToast("Please wait for the photo upload to finish, then click Save profile.");
   }
 
-  const photoSlots = [
-    {
-      slot: 1 as const,
-      url: photoPreview || form.photo || "",
-      savedUrl: form.photo || "",
-      label: "Profile Photo",
-      alt: "Profile photo",
-    },
-    {
-      slot: 2 as const,
-      url: photoPreview2 || form.photo2 || "",
-      savedUrl: form.photo2 || "",
-      label: "Photo 2 (optional)",
-      alt: "Profile photo 2",
-    },
-  ];
+  if (!form.displayName.trim()) return showToast("Please add a display name.");
 
-  const visiblePhotos = photoSlots.filter((p) => p.url);
+  const ageNum = parseInt(form.age || "0", 10);
+  if (!ageNum || ageNum < 18) {
+    return showToast("Please enter a valid age (18+).");
+  }
 
-  useEffect(() => {
-    if (visiblePhotos.length === 0) {
-      setActivePhotoIndex(0);
-      return;
-    }
-    if (activePhotoIndex > visiblePhotos.length - 1) {
-      setActivePhotoIndex(0);
-    }
-  }, [activePhotoIndex, visiblePhotos.length]);
+  if (!form.city.trim()) return showToast("Please add your city.");
+  if (!form.stateUS.trim()) return showToast("Please add your state.");
+  if (!form.relationshipIntent.trim()) {
+    return showToast("Please select a Relationship Intent.");
+  }
 
-  function goToPrevPhoto() {
-    if (visiblePhotos.length <= 1) return;
-    setActivePhotoIndex((prev) =>
-      prev === 0 ? visiblePhotos.length - 1 : prev - 1
+  if (culturalSelected.length === 0) {
+    return showToast("Please select at least one Cultural Identity option.");
+  }
+
+  if (spiritualSelected.length === 0) {
+    return showToast("Please select at least one Spiritual Framework option.");
+  }
+
+  setSaving(true);
+  setApiError(null);
+
+  try {
+    await apiUpsertProfile(
+      buildUpsertPayload({
+        photo: form.photo || "",
+        photo2: form.photo2 || "",
+      })
     );
+
+    showToast("Profile saved.");
+  } catch (e: any) {
+    setApiError(e?.message || "Could not save profile.");
+    showToast("Save failed. See API notice.");
+  } finally {
+    setSaving(false);
   }
-
-  function goToNextPhoto() {
-    if (visiblePhotos.length <= 1) return;
-    setActivePhotoIndex((prev) =>
-      prev === visiblePhotos.length - 1 ? 0 : prev + 1
-    );
-  }
-
-  function handleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
-    setTouchEndX(null);
-    setTouchStartX(e.targetTouches[0].clientX);
-  }
-
-  function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) {
-    setTouchEndX(e.targetTouches[0].clientX);
-  }
-
-  function handleTouchEnd() {
-    if (touchStartX === null || touchEndX === null) return;
-    const distance = touchStartX - touchEndX;
-
-    if (distance > 50) {
-      goToNextPhoto();
-    } else if (distance < -50) {
-      goToPrevPhoto();
-    }
-  }
-
-  function onDragStartPhoto(index: number) {
-    setDraggingPhotoIndex(index);
-  }
-
-  function onDragOverPhoto(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-  }
-
-  function onDropPhoto(targetIndex: number) {
-    if (draggingPhotoIndex === null || draggingPhotoIndex === targetIndex) {
-      setDraggingPhotoIndex(null);
-      return;
-    }
-
-    const newPhoto = form.photo2 || "";
-    const newPhoto2 = form.photo || "";
-
-    setForm((prev) => ({
-      ...prev,
-      photo: newPhoto,
-      photo2: newPhoto2,
-    }));
-
-    setPhotoPreview("");
-    setPhotoPreview2("");
-    setDraggingPhotoIndex(null);
-
-    showToast("Photos reordered. Click Save profile to keep the new order.");
-  }
+}
 
   const sectionStyle: React.CSSProperties = {
     marginTop: "1.25rem",
