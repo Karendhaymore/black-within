@@ -1030,37 +1030,35 @@ class CreateUnlockSessionPayload(BaseModel):
     thread_id: str
 
 
+from pydantic import BaseModel
+from typing import Optional, List
+
 class UpsertMyProfilePayload(BaseModel):
     owner_user_id: str
-    displayName: Optional[str] = None
-    stateUS: Optional[str] = None
-    identityPreview: Optional[str] = None
-    isAvailable: Optional[bool] = True
 
-    display_name: Optional[str] = None
-    state_us: Optional[str] = None
-    identity_preview: Optional[str] = None
-    is_available: Optional[bool] = None
-
+    displayName: str
     age: int
     city: str
+    stateUS: str
+
     photo: Optional[str] = None
     photo2: Optional[str] = None
 
+    identityPreview: Optional[str] = None
     intention: str
+
     tags: List[str] = []
 
-    culturalIdentity: Optional[List[str]] = None
-    spiritualFramework: Optional[List[str]] = None
+    isAvailable: Optional[bool] = True
+
+    # Cultural / spiritual
+    culturalIdentity: Optional[List[str]] = []
+    spiritualFramework: Optional[List[str]] = []
+
+    # Relationship + personal fields
     relationshipIntent: Optional[str] = None
     datingChallenge: Optional[str] = None
     personalTruth: Optional[str] = None
-
-    cultural_identity: Optional[List[str]] = None
-    spiritual_framework: Optional[List[str]] = None
-    relationship_intent: Optional[str] = None
-    dating_challenge_text: Optional[str] = None
-    personal_truth_text: Optional[str] = None
 
 
 class AdminLoginIn(BaseModel):
