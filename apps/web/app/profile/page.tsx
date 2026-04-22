@@ -134,6 +134,12 @@ async function apiListProfiles(
   return Array.isArray(json?.items) ? json.items : [];
 }
 
+async function apiGetMyProfile(userId: string): Promise<ProfileItem | null> {
+  const all = await apiListProfiles();
+  const mine = all.find((p) => p.owner_user_id === userId);
+  return mine || null;
+}
+
 async function apiUpsertProfile(payload: any) {
   const res = await fetch(`${API_BASE}/profiles/upsert`, {
     method: "POST",
@@ -319,8 +325,7 @@ export default function MyProfilePage() {
       setLoadingExisting(true);
       setApiError(null);
       try {
-        const all = await apiListProfiles();
-        const mine = all.find((p) => p.owner_user_id === userId);
+        const mine = await apiGetMyProfile(userId);
 
         if (mine) {
           setForm({
