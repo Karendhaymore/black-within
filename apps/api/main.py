@@ -2239,7 +2239,9 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
 
     now = datetime.utcnow()
     with Session(engine) as session:
-        existing = session.execute(select(Profile).where(Profile.owner_user_id == owner_user_id)).scalar_one_or_none()
+        existing = session.execute(
+            select(Profile).where(Profile.owner_user_id == owner_user_id)
+        ).scalar_one_or_none()
 
         tags_csv = json.dumps(_coerce_str_list(payload.tags)[:25])
         cultural_csv = json.dumps(cultural_list)
@@ -2270,37 +2272,38 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
                 existing.is_available = is_avail
 
             existing.updated_at = now
+            session.add(existing)
             session.commit()
-            pid = existing.id
+            session.refresh(existing)
+            p = existing
         else:
-            pid = _new_id()
-            session.add(
-                Profile(
-                    id=pid,
-                    owner_user_id=owner_user_id,
-                    display_name=display,
-                    age=int(payload.age),
-                    city=payload.city.strip(),
-                    state_us=state,
-                    photo=photo1,
-                    photo2=photo2,
-                    identity_preview=preview,
-                    intention=payload.intention.strip(),
-                    tags_csv=tags_csv,
-                    cultural_identity_csv=cultural_csv,
-                    spiritual_framework_csv=spiritual_csv,
-                    relationship_intent=rel_intent,
-                    dating_challenge_text=dating_challenge,
-                    personal_truth_text=personal_truth,
-                    is_available=is_avail,
-                    is_banned=False,
-                    created_at=now,
-                    updated_at=now,
-                )
+            new_profile = Profile(
+                id=_new_id(),
+                owner_user_id=owner_user_id,
+                display_name=display,
+                age=int(payload.age),
+                city=payload.city.strip(),
+                state_us=state,
+                photo=photo1,
+                photo2=photo2,
+                identity_preview=preview,
+                intention=payload.intention.strip(),
+                tags_csv=tags_csv,
+                cultural_identity_csv=cultural_csv,
+                spiritual_framework_csv=spiritual_csv,
+                relationship_intent=rel_intent,
+                dating_challenge_text=dating_challenge,
+                personal_truth_text=personal_truth,
+                is_available=is_avail,
+                is_banned=False,
+                created_at=now,
+                updated_at=now,
             )
+            session.add(new_profile)
             session.commit()
+            session.refresh(new_profile)
+            p = new_profile
 
-        p = session.get(Profile, pid)
         tags = _parse_json_list(p.tags_csv)
         cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
         spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
@@ -2313,7 +2316,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             city=p.city,
             stateUS=p.state_us,
             photo=p.photo,
-            photo2=getattr(p, "photo2", None),
+            photo2=p.photo2,
             identityPreview=p.identity_preview,
             intention=p.intention,
             tags=tags,
