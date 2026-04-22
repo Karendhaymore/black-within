@@ -560,6 +560,31 @@ export default function MyProfilePage() {
     boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
   };
 
+  // ✅ Swipe support for mobile (ADD THIS ABOVE return)
+
+const [touchStartX, setTouchStartX] = useState<number | null>(null);
+const [touchEndX, setTouchEndX] = useState<number | null>(null);
+
+function handleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+  setTouchEndX(null);
+  setTouchStartX(e.targetTouches[0].clientX);
+}
+
+function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) {
+  setTouchEndX(e.targetTouches[0].clientX);
+}
+
+function handleTouchEnd() {
+  if (touchStartX === null || touchEndX === null) return;
+
+  const distance = touchStartX - touchEndX;
+
+  if (distance > 50) {
+    goToNextPhoto();
+  } else if (distance < -50) {
+    goToPrevPhoto();
+  }
+}
   return (
     <main
       style={{
