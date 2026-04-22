@@ -562,9 +562,6 @@ export default function MyProfilePage() {
 
   // ✅ Swipe support for mobile (ADD THIS ABOVE return)
 
-const [touchStartX, setTouchStartX] = useState<number | null>(null);
-const [touchEndX, setTouchEndX] = useState<number | null>(null);
-
 function handleTouchStart(e: React.TouchEvent<HTMLDivElement>) {
   setTouchEndX(null);
   setTouchStartX(e.targetTouches[0].clientX);
