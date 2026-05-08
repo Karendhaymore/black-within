@@ -492,10 +492,35 @@ export default function MyProfilePage() {
     setApiError(null);
 
     try {
+      let finalPhoto = form.photo || "";
+      let finalPhoto2 = form.photo2 || "";
+
+      // If Photo 1 was selected but not uploaded yet, upload it during Save.
+      if (photoFile) {
+        finalPhoto = await apiUploadProfilePhoto(userId, photoFile);
+        setPhotoPreview("");
+        setPhotoFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+
+      // If Photo 2 was selected but not uploaded yet, upload it during Save.
+      if (photoFile2) {
+        finalPhoto2 = await apiUploadProfilePhoto(userId, photoFile2);
+        setPhotoPreview2("");
+        setPhotoFile2(null);
+        if (fileInputRef2.current) fileInputRef2.current.value = "";
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        photo: finalPhoto,
+        photo2: finalPhoto2,
+      }));
+
       await apiUpsertProfile(
         buildUpsertPayload({
-          photo: form.photo || "",
-          photo2: form.photo2 || "",
+          photo: finalPhoto,
+          photo2: finalPhoto2,
         })
       );
 
