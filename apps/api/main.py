@@ -2122,23 +2122,36 @@ def get_profile(profile_id: str):
         )
 
 
-def _coerce_upsert_fields(payload: UpsertMyProfilePayload):
-    display = (payload.displayName or payload.display_name or "").strip()
-    state = (payload.stateUS or payload.state_us or "").strip()
-    preview = (payload.identityPreview or payload.identity_preview or "").strip()
+def _coerce_upsert_fields(payload):
+    display = (
+        payload.display_name
+        if getattr(payload, "display_name", None)
+        else payload.displayName
+    )
 
-    is_avail = payload.isAvailable
-    if payload.is_available is not None:
-        is_avail = payload.is_available
+    state = (
+        payload.state_us
+        if getattr(payload, "state_us", None)
+        else payload.stateUS
+    )
 
-    if not display:
-        raise HTTPException(status_code=400, detail="displayName/display_name is required")
-    if not state:
-        raise HTTPException(status_code=400, detail="stateUS/state_us is required")
-    if not preview:
-        raise HTTPException(status_code=400, detail="identityPreview/identity_preview is required")
+    preview = (
+        payload.identity_preview
+        if getattr(payload, "identity_preview", None)
+        else payload.identityPreview
+    )
 
-    return display, state, preview, bool(is_avail)
+    if hasattr(payload, "is_available") and payload.is_available is not None:
+        is_avail = bool(payload.is_available)
+    else:
+        is_avail = bool(getattr(payload, "isAvailable", True))
+
+    return (
+        (display or "").strip(),
+        (state or "").strip(),
+        (preview or "").strip(),
+        is_avail,
+    )
 
 
 def _coerce_alignment_fields(payload: UpsertMyProfilePayload):
