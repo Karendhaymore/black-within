@@ -460,78 +460,61 @@ export default function MyProfilePage() {
     showToast("Photo removed from the form. Click Save profile to keep the change.");
   }
 
-  async function onSave() {
-    if (!userId) return;
+ async function onSave() {
+  if (!userId) return;
 
-    if (uploadingPhoto) {
-      return showToast("Please wait for the photo upload to finish, then click Save profile.");
-    }
-
-    if (!form.displayName.trim()) return showToast("Please add a display name.");
-
-    const ageNum = parseInt(form.age || "0", 10);
-    if (!ageNum || ageNum < 18) {
-      return showToast("Please enter a valid age (18+).");
-    }
-
-    if (!form.city.trim()) return showToast("Please add your city.");
-    if (!form.stateUS.trim()) return showToast("Please add your state.");
-    if (!form.relationshipIntent.trim()) {
-      return showToast("Please select a Relationship Intent.");
-    }
-
-    if (culturalSelected.length === 0) {
-      return showToast("Please select at least one Cultural Identity option.");
-    }
-
-    if (spiritualSelected.length === 0) {
-      return showToast("Please select at least one Spiritual Framework option.");
-    }
-
-    setSaving(true);
-    setApiError(null);
-
-    try {
-      let finalPhoto = form.photo || "";
-      let finalPhoto2 = form.photo2 || "";
-
-      // If Photo 1 was selected but not uploaded yet, upload it during Save.
-      if (photoFile) {
-        finalPhoto = await apiUploadProfilePhoto(userId, photoFile);
-        setPhotoPreview("");
-        setPhotoFile(null);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      }
-
-      // If Photo 2 was selected but not uploaded yet, upload it during Save.
-      if (photoFile2) {
-        finalPhoto2 = await apiUploadProfilePhoto(userId, photoFile2);
-        setPhotoPreview2("");
-        setPhotoFile2(null);
-        if (fileInputRef2.current) fileInputRef2.current.value = "";
-      }
-
-      setForm((prev) => ({
-        ...prev,
-        photo: finalPhoto,
-        photo2: finalPhoto2,
-      }));
-
-      await apiUpsertProfile(
-        buildUpsertPayload({
-          photo: finalPhoto,
-          photo2: finalPhoto2,
-        })
-      );
-
-      showToast("Profile saved.");
-    } catch (e: any) {
-      setApiError(e?.message || "Could not save profile.");
-      showToast("Save failed. See API notice.");
-    } finally {
-      setSaving(false);
-    }
+  if (uploadingPhoto) {
+    return showToast("Please wait for the photo upload to finish, then click Save profile.");
   }
+
+  if (photoFile) {
+    return showToast("Please click Upload Photo for your profile photo before saving.");
+  }
+
+  if (photoFile2) {
+    return showToast("Please click Upload Photo for Photo 2 before saving.");
+  }
+
+  if (!form.displayName.trim()) return showToast("Please add a display name.");
+
+  const ageNum = parseInt(form.age || "0", 10);
+  if (!ageNum || ageNum < 18) {
+    return showToast("Please enter a valid age (18+).");
+  }
+
+  if (!form.city.trim()) return showToast("Please add your city.");
+  if (!form.stateUS.trim()) return showToast("Please add your state.");
+  if (!form.relationshipIntent.trim()) {
+    return showToast("Please select a Relationship Intent.");
+  }
+
+  if (culturalSelected.length === 0) {
+    return showToast("Please select at least one Cultural Identity option.");
+  }
+
+  if (spiritualSelected.length === 0) {
+    return showToast("Please select at least one Spiritual Framework option.");
+  }
+
+  setSaving(true);
+  setApiError(null);
+
+  try {
+    await apiUpsertProfile(
+      buildUpsertPayload({
+        photo: form.photo || "",
+        photo2: form.photo2 || "",
+      })
+    );
+
+    showToast("Profile saved.");
+  } catch (e: any) {
+    setApiError(e?.message || "Could not save profile.");
+    showToast("Save failed. See API notice.");
+  } finally {
+    setSaving(false);
+  }
+}
 
   const photoSlots = [
     {
