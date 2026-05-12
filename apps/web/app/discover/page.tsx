@@ -1002,7 +1002,7 @@ export default function DiscoverPage() {
                         {p.city}, {p.stateUS}
                       </div>
 
-                      <div style={{ marginTop: 10, fontSize: 13 }}>
+                      <div style={{ marginTop: 10, fontSize: 13, color: "#111827", fontWeight: 500 }}>
                         <strong>Identity:</strong> {p.identityPreview}
                       </div>
 
