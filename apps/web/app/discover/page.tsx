@@ -942,17 +942,16 @@ export default function DiscoverPage() {
                 const likeLabel = isLiked ? "Liked" : isLimitReached ? "Limit reached" : "Like";
 
                 return (
-                  <div
-                    key={p.id}
-                    className="card"
-                    style={{
-                      borderRadius: 18,
-                      overflow: "hidden",
-                      border: "1px solid rgba(0,0,0,0.10)",
-                      background: "rgba(255,255,255,0.90)",
-                      boxShadow: "0 14px 34px rgba(0,0,0,0.12)",
-                      backdropFilter: "blur(10px)",
-                    }}
+                  style={{
+  borderRadius: 18,
+  overflow: "hidden",
+  border: "1px solid rgba(0,0,0,0.10)",
+  background: "#ffffff",
+  color: "#111827",
+  WebkitTextFillColor: "#111827",
+  boxShadow: "0 14px 34px rgba(0,0,0,0.12)",
+  backdropFilter: "blur(10px)",
+}}
                   >
                     <Link href={`/profiles/${p.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
                       {p.photo && !brokenImages[p.id] ? (
