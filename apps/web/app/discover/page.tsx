@@ -942,7 +942,10 @@ export default function DiscoverPage() {
                 const likeLabel = isLiked ? "Liked" : isLimitReached ? "Limit reached" : "Like";
 
                 return (
-                  style={{
+                 <div
+                   key={p.id}
+                   className="card"
+                    style={{
                     borderRadius: 18,
                     overflow: "hidden",
                     border: "1px solid rgba(0,0,0,0.10)",
