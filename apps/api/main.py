@@ -1843,7 +1843,7 @@ def signup(payload: LoginPayload):
         session.flush()
 
         new_auth = AuthAccount(
-            user_id=new_user.id,
+            user_id=user.id,
             email=email,
             password_hash=_hash_password(password)
         )
