@@ -196,3 +196,11 @@ main {
     color: #1f2933;
   }
 }
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  color: #111827;
+  -webkit-text-fill-color: #111827;
+}
