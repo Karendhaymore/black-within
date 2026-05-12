@@ -998,7 +998,7 @@ export default function DiscoverPage() {
                         <div style={{ color: "#666", fontWeight: 800 }}>{p.age}</div>
                       </div>
 
-                      <div style={{ marginTop: 6, color: "#666", fontSize: 13 }}>
+                      <div style={{ marginTop: 6, color: "#374151", fontSize: 13, fontWeight: 600 }}>
                         {p.city}, {p.stateUS}
                       </div>
 
