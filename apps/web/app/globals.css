@@ -153,3 +153,46 @@ main {
 .btn-view:hover {
   background: #f6f6f6;
 }
+/* Mobile readability fix */
+@media (max-width: 768px) {
+  body,
+  main,
+  section,
+  article,
+  div,
+  p,
+  span,
+  label,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: #1f2933;
+  }
+
+  input,
+  select,
+  textarea {
+    color: #1f2933;
+    background-color: #ffffff;
+  }
+
+  button {
+    color: #064e3b;
+  }
+
+  .profile-card,
+  .card,
+  [class*="card"] {
+    color: #1f2933;
+  }
+
+  .profile-card p,
+  .profile-card span,
+  .profile-card h2,
+  .profile-card h3 {
+    color: #1f2933;
+  }
+}
