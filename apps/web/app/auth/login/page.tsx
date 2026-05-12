@@ -10,7 +10,6 @@ const API_BASE =
   "https://black-within-api.onrender.com";
 
 async function safeReadErrorDetail(res: Response): Promise<string> {
-  // Handles FastAPI {detail: "..."} or {detail: [...]} or plain text
   try {
     const data = await res.json();
     if (data?.detail != null) {
@@ -62,7 +61,6 @@ export default function LoginPage() {
       if (!res.ok) {
         const detail = await safeReadErrorDetail(res);
 
-        // Friendly message for banned users (your API should return 403)
         if (res.status === 403) {
           throw new Error(detail || "Your account has been suspended.");
         }
@@ -75,16 +73,13 @@ export default function LoginPage() {
       const userId = (data?.user_id || data?.userId || data?.id || "").toString();
       if (!userId) throw new Error("Login succeeded, but no user id returned.");
 
-      // ✅ Save login session
       localStorage.setItem("bw_user_id", userId);
       localStorage.setItem("bw_logged_in", "1");
 
-      // Optional: keep token if your API returns it
       if (data?.session_token) {
         localStorage.setItem("bw_session_token", String(data.session_token));
       }
 
-      // ✅ Go to app
       router.replace("/discover");
     } catch (err: any) {
       setError(err?.message || "Login error");
@@ -108,7 +103,8 @@ export default function LoginPage() {
         style={{
           width: "100%",
           maxWidth: 420,
-          background: "white",
+          background: "#fff",
+          color: "#111",
           padding: 24,
           borderRadius: 16,
           boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
@@ -117,7 +113,7 @@ export default function LoginPage() {
           gap: 14,
         }}
       >
-        <h2 style={{ margin: 0 }}>Log in</h2>
+        <h2 style={{ margin: 0, color: "#111", fontWeight: 900 }}>Log in</h2>
 
         <input
           type="email"
@@ -153,8 +149,8 @@ export default function LoginPage() {
             borderRadius: 10,
             border: "none",
             background: "#111",
-            color: "white",
-            fontWeight: 700,
+            color: "#fff",
+            fontWeight: 800,
             cursor: loading ? "not-allowed" : "pointer",
             opacity: loading ? 0.8 : 1,
           }}
@@ -162,11 +158,11 @@ export default function LoginPage() {
           {loading ? "Logging in..." : "Log In"}
         </button>
 
-        <a href="/auth/forgot" style={{ textAlign: "center", fontSize: 13, color: "#444" }}>
+        <a href="/auth/forgot" style={{ textAlign: "center", fontSize: 13, color: "#222" }}>
           Forgot password?
         </a>
 
-        <div style={{ textAlign: "center", fontSize: 13, marginTop: 2 }}>
+        <div style={{ textAlign: "center", fontSize: 13, marginTop: 2, color: "#111" }}>
           <Link href="/auth/signup" style={{ color: "#111", textDecoration: "underline" }}>
             Create account
           </Link>
@@ -179,6 +175,10 @@ export default function LoginPage() {
 const inputStyle: React.CSSProperties = {
   padding: "0.8rem",
   borderRadius: 8,
-  border: "1px solid #ccc",
+  border: "1px solid #999",
   fontSize: 15,
+  color: "#111",
+  background: "#fff",
+  fontWeight: 600,
+  outlineColor: "#111",
 };
