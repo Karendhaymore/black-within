@@ -1006,7 +1006,7 @@ export default function DiscoverPage() {
                         <strong>Identity:</strong> {p.identityPreview}
                       </div>
 
-                      <div style={{ marginTop: 8, fontSize: 13 }}>
+                      <div style={{ marginTop: 8, fontSize: 13, color: "#111827", fontWeight: 500 }}>
                         <strong>Intention:</strong> {p.intention}
                       </div>
 
