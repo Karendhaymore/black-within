@@ -713,13 +713,15 @@ export default function DiscoverPage() {
 
   return (
     <main
-      style={{
-        minHeight: "100vh",
-        padding: "1.5rem",
-        display: "grid",
-        placeItems: "start center",
-      }}
-    >
+  style={{
+    minHeight: "100vh",
+    padding: "1.5rem",
+    display: "grid",
+    placeItems: "start center",
+    color: "#111827",
+    WebkitTextFillColor: "#111827",
+  }}
+>
       <div style={{ width: "100%", maxWidth: 1100 }}>
        <div
   style={{
