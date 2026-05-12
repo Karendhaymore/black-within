@@ -202,5 +202,10 @@ html {
 
 body {
   color: #111827;
-  -webkit-text-fill-color: #111827;
+}
+
+button,
+a[class*="button"],
+.button {
+  -webkit-text-fill-color: inherit;
 }
