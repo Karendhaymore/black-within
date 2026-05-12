@@ -1838,9 +1838,7 @@ def signup(payload: LoginPayload):
             )
 
         # 3️⃣ Create new user
-        new_user = User()
-        session.add(new_user)
-        session.flush()
+        import uuid
 
         new_auth = AuthAccount(
             user_id=new_user.id,
