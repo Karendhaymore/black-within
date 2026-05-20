@@ -29,6 +29,8 @@ type ProfileItem = {
   relationshipIntent?: string | null;
   datingChallenge?: string | null;
   personalTruth?: string | null;
+  gender?: string | null;
+  lookingForGender?: string | null;
 };
 
 type ProfilesResponse = { items: ProfileItem[] };
