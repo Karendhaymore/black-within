@@ -431,6 +431,8 @@ export default function DiscoverPage() {
 
       const culturalMatch = culturalIdentityFilter === "All" || ci === culturalIdentityFilter;
       const spiritualMatch = spiritualFrameworkFilter === "All" || sf === spiritualFrameworkFilter;
+      const genderMatch =
+        genderFilter === "All" || p.gender === genderFilter;
 
       return intentionMatch && culturalMatch && spiritualMatch;
     });
