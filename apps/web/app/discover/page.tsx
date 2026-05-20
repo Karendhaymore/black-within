@@ -389,6 +389,10 @@ export default function DiscoverPage() {
   );
 
   const spiritualFrameworkOptions = useMemo(
+  const genderOptions = useMemo(
+  () => ["All", "Male", "Female"],
+  []
+);
   const [genderFilter, setGenderFilter] = useState<string>("All");
     () => [
       "All",
