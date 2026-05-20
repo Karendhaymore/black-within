@@ -444,8 +444,6 @@ const reciprocalMatch =
         culturalMatch &&
         spiritualMatch &&
         genderMatch &&
-        preferenceMatch &&
-        reciprocalMatch
       );
     });
   }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter]);
