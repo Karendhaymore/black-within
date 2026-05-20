@@ -557,9 +557,6 @@ setProfiles(items);
 
 const mine = items.find((p) => p.owner_user_id === uid) || null;
 setMyProfile(mine);
-
-const mine = items.find((p) => p.owner_user_id === uid) || null;
-setMyProfile(mine);
       } catch (e: any) {
         setApiError(toNiceString(e?.message || e));
         setProfiles([]);
