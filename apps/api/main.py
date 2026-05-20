@@ -1064,6 +1064,8 @@ class UpsertMyProfilePayload(BaseModel):
     datingChallenge: Optional[str] = None
     personalTruth: Optional[str] = None
 
+    gender: Optional[str] = None
+    looking_for_gender: Optional[str] = None
 
 class AdminLoginIn(BaseModel):
     email: str
