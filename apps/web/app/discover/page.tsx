@@ -22,6 +22,8 @@ type ApiProfile = {
   intention: string;
   tags: string[];
   isAvailable: boolean;
+  gender?: string | null;
+  lookingForGender?: string | null;
 };
 
 type IdListResponse = { ids: string[] };
