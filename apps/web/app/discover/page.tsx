@@ -443,7 +443,7 @@ const reciprocalMatch =
         intentionMatch &&
         culturalMatch &&
         spiritualMatch &&
-        genderMatch &&
+        genderMatch
       );
     });
   }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter]);
