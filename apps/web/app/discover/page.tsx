@@ -434,7 +434,12 @@ export default function DiscoverPage() {
       const genderMatch =
         genderFilter === "All" || p.gender === genderFilter;
 
-      return intentionMatch && culturalMatch && spiritualMatch;
+      return (
+        intentionMatch &&
+        culturalMatch &&
+        spiritualMatch &&
+        genderMatch
+      );
     });
   }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter]);
 
