@@ -44,7 +44,8 @@ type FormState = {
   relationshipIntent: string;
   datingChallenge: string;
   personalTruth: string;
-
+  gender: string;
+  lookingForGender: string;
   isAvailable: boolean;
 };
 
