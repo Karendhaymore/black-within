@@ -393,6 +393,9 @@ export default function MyProfilePage() {
       photo: photoValue,
       photo2: photo2Value,
 
+      gender: form.gender,
+      looking_for_gender: form.lookingForGender,
+      
       intention: form.relationshipIntent.trim(),
       identityPreview,
 
