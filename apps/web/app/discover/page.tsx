@@ -445,6 +445,7 @@ const genderOptions = useMemo(
       const reciprocalMatch =
          !p.lookingForGender || !currentUserGender || p.lookingForGender === currentUserGender;
       return (
+        notMe &&
         intentionMatch &&
         culturalMatch &&
         spiritualMatch &&
