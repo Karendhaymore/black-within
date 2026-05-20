@@ -439,7 +439,9 @@ const genderOptions = useMemo(
         intentionMatch &&
         culturalMatch &&
         spiritualMatch &&
-        genderMatch
+        genderMatch &&
+        preferenceMatch &&
+        reciprocalMatch
       );
     });
   }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter]);
