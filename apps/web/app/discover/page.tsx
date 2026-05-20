@@ -435,12 +435,6 @@ const genderOptions = useMemo(
       const genderMatch =
         genderFilter === "All" || p.gender === genderFilter;
 
-      const currentUserGender = myProfile?.gender || "";
-      const currentLookingFor = myProfile?.lookingForGender || "";
-
-      const preferenceMatch =
-        !currentLookingFor ||
-        p.gender === currentLookingFor;
 
 const reciprocalMatch =
   !p.lookingForGender ||
