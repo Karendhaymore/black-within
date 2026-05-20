@@ -981,6 +981,7 @@ setMyProfile(mine);
                 const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
                 const likeDisabled = isLiked || loadingLikesStatus || isLimitReached;
                 const likeLabel = isLiked ? "Liked" : isLimitReached ? "Limit reached" : "Like";
+                const notMe = p.owner_user_id !== userId;
 
                 return (
                  <div
