@@ -923,7 +923,8 @@ class ProfileItem(BaseModel):
     relationshipIntent: Optional[str] = None
     datingChallenge: Optional[str] = None
     personalTruth: Optional[str] = None
-
+    gender: Optional[str] = None
+    lookingForGender: Optional[str] = None 
 
 class ProfilesResponse(BaseModel):
     items: List[ProfileItem]
