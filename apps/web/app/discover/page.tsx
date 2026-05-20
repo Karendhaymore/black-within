@@ -388,39 +388,38 @@ export default function DiscoverPage() {
     []
   );
 
-  const spiritualFrameworkOptions = useMemo(
-  const genderOptions = useMemo(
+const spiritualFrameworkOptions = useMemo(
+  () => [
+    "All",
+    "Afrocentric Spirituality",
+    "Dogon",
+    "Kemetic Philosophy",
+    "Ubuntu",
+    "Sankofa",
+    "Ifa / Orisha Traditions (Yoruba)",
+    "Vodun / Vodou",
+    "Hoodoo / Rootwork",
+    "Hebrew Israelite",
+    "Candomblé",
+    "Obeah",
+    "Pan African Spiritual Movements",
+    "African-Centered Holistic Healing",
+    "Bible Based Christian",
+    "Ancestral Veneration Systems",
+    "Liberated Christianity",
+    "Islam",
+    "New Age Spirituality",
+    "Afrofuturist Spirituality",
+    "Metaphysical Science (African-centered variants)",
+    "Quantum Spirituality",
+  ],
+  []
+);
+
+const genderOptions = useMemo(
   () => ["All", "Male", "Female"],
   []
 );
-  const [genderFilter, setGenderFilter] = useState<string>("All");
-    () => [
-      "All",
-      "Afrocentric Spirituality",
-      "Dogon",
-      "Kemetic Philosophy",
-      "Ubuntu",
-      "Sankofa",
-      "Ifa / Orisha Traditions (Yoruba)",
-      "Vodun / Vodou",
-      "Hoodoo / Rootwork",
-      "Hebrew Israelite",
-      "Candomblé",
-      "Obeah",
-      "Pan African Spiritual Movements",
-      "African-Centered Holistic Healing",
-      "Bible Based Christian",
-      "Ancestral Veneration Systems",
-      "Liberated Christianity",
-      "Islam",
-      "New Age Spirituality",
-      "Afrofuturist Spirituality",
-      "Metaphysical Science (African-centered variants)",
-      "Quantum Spirituality",
-    ],
-    []
-  );
-
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
       const intentionMatch = intentionFilter === "All" || p.intention === intentionFilter;
