@@ -2265,6 +2265,9 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
         photo1 = (payload.photo or "").strip() or None
         photo2 = (payload.photo2 or "").strip() or None
 
+        gender = (payload.gender or "").strip() or None
+        looking_for_gender = (payload.looking_for_gender or "").strip() or None
+
         if existing:
             existing.display_name = display
             existing.age = int(payload.age)
@@ -2280,6 +2283,8 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             existing.relationship_intent = rel_intent
             existing.dating_challenge_text = dating_challenge
             existing.personal_truth_text = personal_truth
+            existing.gender = gender
+            existing.looking_for_gender = looking_for_gender
 
             if getattr(existing, "is_banned", False):
                 existing.is_available = False
@@ -2309,6 +2314,8 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
                 relationship_intent=rel_intent,
                 dating_challenge_text=dating_challenge,
                 personal_truth_text=personal_truth,
+                gender=gender,
+                looking_for_gender=looking_for_gender,
                 is_available=is_avail,
                 is_banned=False,
                 created_at=now,
@@ -2341,6 +2348,8 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             relationshipIntent=getattr(p, "relationship_intent", None),
             datingChallenge=getattr(p, "dating_challenge_text", None),
             personalTruth=getattr(p, "personal_truth_text", None),
+            gender=getattr(p, "gender", None),
+            lookingForGender=getattr(p, "looking_for_gender", None),
         )
 
 
