@@ -253,19 +253,22 @@ export default function MyProfilePage() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const [form, setForm] = useState<FormState>({
-    displayName: "",
-    age: "",
-    city: "",
-    stateUS: "",
-    photo: "",
-    photo2: "",
+  displayName: "",
+  age: "",
+  city: "",
+  stateUS: "",
+  photo: "",
+  photo2: "",
 
-    relationshipIntent: "Intentional partnership",
-    datingChallenge: "",
-    personalTruth: "",
+  gender: "",
+  lookingForGender: "",
 
-    isAvailable: true,
-  });
+  relationshipIntent: "Intentional partnership",
+  datingChallenge: "",
+  personalTruth: "",
+
+  isAvailable: true,
+});
 
   const [culturalSelected, setCulturalSelected] = useState<string[]>([]);
   const [spiritualSelected, setSpiritualSelected] = useState<string[]>([]);
