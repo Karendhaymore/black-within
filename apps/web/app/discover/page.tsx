@@ -917,7 +917,21 @@ export default function DiscoverPage() {
             </select>
           </div>
         </div>
+        <div style={filterWrapStyle}>
+          <span style={filterLabelStyle}>Gender:</span>
 
+          <select
+            value={genderFilter}
+            onChange={(e) => setGenderFilter(e.target.value)}
+            style={selectBase}
+          >
+          {genderOptions.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+        </select>
+      </div>   
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
             <div
