@@ -435,10 +435,6 @@ const genderOptions = useMemo(
       const genderMatch =
         genderFilter === "All" || p.gender === genderFilter;
 
-
-const reciprocalMatch =
-  !p.lookingForGender ||
-  p.lookingForGender === currentUserGender;
       return (
         intentionMatch &&
         culturalMatch &&
