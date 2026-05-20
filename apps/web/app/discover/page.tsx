@@ -436,11 +436,21 @@ const genderOptions = useMemo(
       const genderMatch =
         genderFilter === "All" || p.gender === genderFilter;
 
+      const currentUserGender = myProfile?.gender || "";
+      const currentLookingFor = myProfile?.lookingForGender || "";
+
+      const preferenceMatch =
+        !currentLookingFor || p.gender === currentLookingFor;
+
+      const reciprocalMatch =
+         !p.lookingForGender || !currentUserGender || p.lookingForGender === currentUserGender;
       return (
         intentionMatch &&
         culturalMatch &&
         spiritualMatch &&
-        genderMatch
+        genderMatch &&
+        preferenceMatch &&
+        reciprocalMatch
       );
     });
   }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter]);
