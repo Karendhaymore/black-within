@@ -2244,6 +2244,8 @@ def list_profiles(exclude_owner_user_id: Optional[str] = Query(default=None), li
                     relationshipIntent=getattr(p, "relationship_intent", None),
                     datingChallenge=getattr(p, "dating_challenge_text", None),
                     personalTruth=getattr(p, "personal_truth_text", None),
+                    gender=getattr(p, "gender", None),
+                    lookingForGender=getattr(p, "looking_for_gender", None), 
                 )
             )
 
