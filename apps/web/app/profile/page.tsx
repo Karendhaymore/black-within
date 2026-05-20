@@ -340,6 +340,9 @@ export default function MyProfilePage() {
             photo: (mine.photo as string) || "",
             photo2: (mine.photo2 as string) || "",
 
+            gender: mine.gender || "",
+            lookingForGender: mine.lookingForGender || "",
+            
             relationshipIntent:
               mine.relationshipIntent || mine.intention || "Intentional partnership",
             datingChallenge: mine.datingChallenge || "",
