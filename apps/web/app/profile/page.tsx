@@ -1348,6 +1348,52 @@ export default function MyProfilePage() {
             </div>
 
             <label>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>I Am</div>
+
+              <select
+                value={form.gender}
+                onChange={(e) => onChange("gender", e.target.value)}
+                style={{
+                width: "100%",
+                padding: "0.7rem",
+                borderRadius: 10,
+                border: "1px solid #ccc",
+              }}
+              disabled={loadingExisting}
+            >
+              <option value="">Select</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+          </label>
+
+          <label>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>
+              I Am Looking For
+            </div>
+
+            <select
+              value={form.lookingForGender}
+              onChange={(e) => onChange("lookingForGender", e.target.value)}
+              style={{
+                width: "100%",
+                padding: "0.7rem",
+                borderRadius: 10,
+                border: "1px solid #ccc",
+              }}
+              disabled={loadingExisting}
+            >
+              <option value="">Select</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+          </label>
+
+          <label>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>
+              Relationship Intent
+            </div>
+  
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Relationship Intent</div>
               <select
                 value={form.relationshipIntent}
