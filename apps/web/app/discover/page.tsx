@@ -556,11 +556,12 @@ const genderOptions = useMemo(
         setApiError(null);
         setLoadingProfiles(true);
 
-const items = await apiListProfiles(uid);
-setProfiles(items);
-
-const mine = items.find((p) => p.owner_user_id === uid) || null;
+const allItems = await apiListProfiles();
+const mine = allItems.find((p) => p.owner_user_id === uid) || null;
 setMyProfile(mine);
+
+const items = allItems.filter((p) => p.owner_user_id !== uid);
+setProfiles(items);
       } catch (e: any) {
         setApiError(toNiceString(e?.message || e));
         setProfiles([]);
