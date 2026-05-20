@@ -453,8 +453,7 @@ const genderOptions = useMemo(
         reciprocalMatch
       );
     });
-  }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter]);
-
+  }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter, genderFilter, myProfile]); 
   function showToast(msg: unknown) {
     setToast(typeof msg === "string" ? msg : toNiceString(msg));
     window.setTimeout(() => setToast(null), 2400);
