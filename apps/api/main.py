@@ -169,6 +169,9 @@ class Profile(Base):
 
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    looking_for_gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     banned_reason: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     banned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
