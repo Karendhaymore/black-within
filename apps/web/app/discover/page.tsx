@@ -361,6 +361,7 @@ export default function DiscoverPage() {
   const [intentionFilter, setIntentionFilter] = useState<string>("All");
   const [culturalIdentityFilter, setCulturalIdentityFilter] = useState<string>("All");
   const [spiritualFrameworkFilter, setSpiritualFrameworkFilter] = useState<string>("All");
+  const [genderFilter, setGenderFilter] = useState<string>("All"); 
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const resetTimerRef = useRef<number | null>(null);
