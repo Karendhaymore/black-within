@@ -352,6 +352,7 @@ export default function DiscoverPage() {
   const [gateLoading, setGateLoading] = useState(true);
   const [totalUnread, setTotalUnread] = useState(0);
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
+  const [myProfile, setMyProfile] = useState<ApiProfile | null>(null);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
   const [likesStatus, setLikesStatus] = useState<LikesStatusResponse | null>(null);
