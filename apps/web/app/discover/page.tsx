@@ -22,6 +22,8 @@ type ApiProfile = {
   intention: string;
   tags: string[];
   isAvailable: boolean;
+  culturalIdentity?: string[];
+  spiritualFramework?: string[];
   gender?: string | null;
   lookingForGender?: string | null;
 };
@@ -436,12 +438,21 @@ const spiritualFrameworkOptions = useMemo(
     return availableProfiles.filter((p) => {
       const intentionMatch = intentionFilter === "All" || p.intention === intentionFilter;
 
-      const parsed = parseIdentityPreview(p.identityPreview || "");
-      const ci = parsed.culturalIdentity;
-      const sf = parsed.spiritualFramework;
+      const culturalValues = Array.isArray(p.culturalIdentity)
+        ? p.culturalIdentity
+        : [];
 
-      const culturalMatch = culturalIdentityFilter === "All" || ci === culturalIdentityFilter;
-      const spiritualMatch = spiritualFrameworkFilter === "All" || sf === spiritualFrameworkFilter;
+      const spiritualValues = Array.isArray(p.spiritualFramework)
+        ? p.spiritualFramework
+        : [];
+
+      const culturalMatch =
+        culturalIdentityFilter === "All" ||
+        culturalValues.includes(culturalIdentityFilter);
+
+      const spiritualMatch =
+        spiritualFrameworkFilter === "All" ||
+        spiritualValues.includes(spiritualFrameworkFilter);
       
       const stateMatch =
         stateFilter === "All" || p.stateUS === stateFilter;
