@@ -901,6 +901,21 @@ setProfiles(items);
           <div style={{ flex: 1 }} />
 
           <div style={filterWrapStyle}>
+            <span style={filterLabelStyle}>Intention:</span>
+
+          <select
+            value={intentionFilter}
+            onChange={(e) => setIntentionFilter(e.target.value)}
+            style={selectIntention}
+          >
+            {intentionOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+          <div style={filterWrapStyle}>
             <span style={filterLabelStyle}>Cultural:</span>
             <select
               value={culturalIdentityFilter}
