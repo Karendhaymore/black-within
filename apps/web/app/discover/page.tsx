@@ -963,22 +963,7 @@ setProfiles(items);
             </option>
           ))}
         </select>
-      </div>   
-        <div style={filterWrapStyle}>
-          <span style={filterLabelStyle}>State:</span>
-
-         <select
-           value={stateFilter}
-           onChange={(e) => setStateFilter(e.target.value)}
-           style={selectBase}
-         >
-          {stateOptions.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-      </option>
-    ))}
-  </select>
-</div>
+     
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
             <div
