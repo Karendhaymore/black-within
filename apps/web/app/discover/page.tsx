@@ -365,7 +365,6 @@ export default function DiscoverPage() {
   const [culturalIdentityFilter, setCulturalIdentityFilter] = useState<string>("All");
   const [spiritualFrameworkFilter, setSpiritualFrameworkFilter] = useState<string>("All");
   const [stateFilter, setStateFilter] = useState<string>("All");
-  const [genderFilter, setGenderFilter] = useState<string>("All"); 
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const resetTimerRef = useRef<number | null>(null);
@@ -428,10 +427,6 @@ const spiritualFrameworkOptions = useMemo(
   []
 );
 
-const genderOptions = useMemo(
-  () => ["All", "Male", "Female"],
-  []
-);
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
       const intentionMatch = intentionFilter === "All" || p.intention === intentionFilter;
@@ -442,8 +437,6 @@ const genderOptions = useMemo(
 
       const culturalMatch = culturalIdentityFilter === "All" || ci === culturalIdentityFilter;
       const spiritualMatch = spiritualFrameworkFilter === "All" || sf === spiritualFrameworkFilter;
-      const genderMatch =
-        genderFilter === "All" || p.gender === genderFilter;
       
       const stateMatch =
         stateFilter === "All" || p.stateUS === stateFilter;
@@ -464,13 +457,12 @@ const genderOptions = useMemo(
         intentionMatch &&
         culturalMatch &&
         spiritualMatch &&
-        genderMatch &&
         stateMatch &&
         preferenceMatch &&
         reciprocalMatch
       );
     });
- }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter, genderFilter, stateFilter, myProfile, userId]);
+ }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter, stateFilter, myProfile, userId]);
   function showToast(msg: unknown) {
     setToast(typeof msg === "string" ? msg : toNiceString(msg));
     window.setTimeout(() => setToast(null), 2400);
