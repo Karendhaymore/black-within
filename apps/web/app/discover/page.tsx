@@ -1019,18 +1019,7 @@ setProfiles(items);
                  <div
                    key={p.id}
                    className="card"
-                   drag="x"
-                   dragConstraints={{ left: 0, right: 0 }}
-                   whileTap={{ scale: 0.98 }}
-                   onDragEnd={(_, info) => {
-                     if (info.offset.x > 120 && !likeDisabled) {
-                       onLike(p);
-                      }
-
-                      if (Math.abs(info.offset.x) > 120) {
-                        showToast(info.offset.x > 0 ? "Liked." : "Passed.");
-                      }
-                     }}
+                   
                      style={{
                        borderRadius: 18,
                        overflow: "hidden",
