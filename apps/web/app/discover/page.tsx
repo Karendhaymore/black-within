@@ -372,11 +372,16 @@ export default function DiscoverPage() {
   const availableProfiles = useMemo(() => profiles.filter((p) => p.isAvailable), [profiles]);
   const availableProfileIds = useMemo(() => new Set(availableProfiles.map((p) => p.id)), [availableProfiles]);
 
-  const intentionOptions = useMemo(() => {
-    const set = new Set<string>();
-    availableProfiles.forEach((p) => set.add(p.intention));
-    return ["All", ...Array.from(set).sort()];
-  }, [availableProfiles]);
+  const intentionOptions = useMemo(
+  () => [
+    "All",
+    "Intentional partnership",
+    "Marriage-minded",
+    "Conscious companionship",
+    "Community-first connection",
+  ],
+  []
+);
 
   const stateOptions = useMemo(() => {
   const set = new Set<string>();
