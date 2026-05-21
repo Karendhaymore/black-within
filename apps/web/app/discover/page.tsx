@@ -1171,7 +1171,7 @@ setProfiles(items);
                         </button>
                       </div>
                     </div>
-                  </motion.div>  
+                 </div>   
                 );
               })}
             </div>
