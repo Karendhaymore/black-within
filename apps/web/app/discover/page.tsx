@@ -1016,7 +1016,7 @@ setProfiles(items);
                 const notMe = p.owner_user_id !== userId;
 
                 return (
-                 <motion.div
+                 <div
                    key={p.id}
                    className="card"
                    drag="x"
