@@ -1016,20 +1016,32 @@ setProfiles(items);
                 const notMe = p.owner_user_id !== userId;
 
                 return (
-                 <div
+                 <motion.div
                    key={p.id}
                    className="card"
-                    style={{
-                    borderRadius: 18,
-                    overflow: "hidden",
-                    border: "1px solid rgba(0,0,0,0.10)",
-                    background: "#ffffff",
-                    color: "#111827",
-                    WebkitTextFillColor: "#111827",
-                    boxShadow: "0 14px 34px rgba(0,0,0,0.12)",
-                   backdropFilter: "blur(10px)",
-                  }}
-                 >
+                   drag="x"
+                   dragConstraints={{ left: 0, right: 0 }}
+                   whileTap={{ scale: 0.98 }}
+                   onDragEnd={(_, info) => {
+                     if (info.offset.x > 120 && !likeDisabled) {
+                       onLike(p);
+                      }
+
+                      if (Math.abs(info.offset.x) > 120) {
+                        showToast(info.offset.x > 0 ? "Liked." : "Passed.");
+                      }
+                     }}
+                     style={{
+                       borderRadius: 18,
+                       overflow: "hidden",
+                       border: "1px solid rgba(0,0,0,0.10)",
+                       background: "#ffffff",
+                       color: "#111827",
+                       WebkitTextFillColor: "#111827",
+                       boxShadow: "0 14px 34px rgba(0,0,0,0.12)",
+                       backdropFilter: "blur(10px)",
+                     }}
+                   >
                     <Link href={`/profiles/${p.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
                       {p.photo && !brokenImages[p.id] ? (
                         <img
@@ -1170,7 +1182,7 @@ setProfiles(items);
                         </button>
                       </div>
                     </div>
-                  </div>
+                  </motion.div>  
                 );
               })}
             </div>
