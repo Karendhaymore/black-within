@@ -990,6 +990,7 @@ export default function MyProfilePage() {
                Right →
             </button>
           </div>
+                  </>
                   />
                 ) : (
                   <div
