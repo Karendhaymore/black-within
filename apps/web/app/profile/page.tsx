@@ -933,7 +933,6 @@ export default function MyProfilePage() {
                     />
 
                     <div
-                    <div
                       style={{
                         display: "flex",
                         justifyContent: "center",
