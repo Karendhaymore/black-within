@@ -225,3 +225,21 @@ a[class*="button"],
     overflow-x: hidden;
   }
 }
+@media (max-width: 768px) {
+  .discover-card-grid .card:nth-child(n + 2) {
+    display: none;
+  }
+
+  .discover-card-grid {
+    display: flex;
+    justify-content: center;
+  }
+}
+
+@media (min-width: 769px) {
+  .discover-card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(260px, 1fr));
+    gap: 16px;
+  }
+}
