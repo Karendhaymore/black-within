@@ -1192,13 +1192,7 @@ setProfiles(items);
                          opacity: loadingSets ? 0.8 : 1,
                       }}
                     >
-                          disabled={loadingSets}
-                          style={{
-                            ...pillBtn,
-                            cursor: loadingSets ? "not-allowed" : "pointer",
-                            opacity: loadingSets ? 0.8 : 1,
-                          }}
-                        >
+                  
                           <Icon name="chat" /> Message
                         </button>
                       </div>
