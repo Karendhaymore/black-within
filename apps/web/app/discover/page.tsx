@@ -1025,14 +1025,7 @@ setProfiles(items);
             </button>
             </div>
           ) : (
-            <div
-              style={{
-               display: "flex",
-               justifyContent: "center",
-               marginTop: 12,
-               width: "100%",
-               overflowX: "hidden", 
-              }}
+            <div className="discover-card-grid">
              >
               {[filteredProfiles[activeProfileIndex]].filter(Boolean).map((p) => {
                 const isSaved = savedIds.includes(p.id);
