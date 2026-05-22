@@ -1004,7 +1004,23 @@ setProfiles(items);
                 backdropFilter: "blur(10px)",
               }}
             >
-              No profiles match your filters yet.
+              <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>
+                You’ve reached the end of available profiles.
+              </div>
+
+              <div style={{ color: "#374151", marginBottom: 12 }}>
+                Check back later as more members join Black Within, or adjust your filters.
+            </div>
+
+            <button
+              onClick={() => setActiveProfileIndex(0)}
+              style={{
+                ...pillBtn,
+                cursor: "pointer",
+              }}
+            >
+              Start Over
+            </button>
             </div>
           ) : (
             <div
