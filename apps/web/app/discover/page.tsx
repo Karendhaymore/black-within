@@ -1156,22 +1156,42 @@ setProfiles(items);
                         </button>
 
                         <button
-                          onClick={async () => {
-                            await onLike(p);
+                          onClick={() => {
+                            showToast("Passed.");
                             setActiveProfileIndex((i) => i + 1);
                           }}
-                          disabled={likeDisabled}
-                          style={{
-                            ...pillBtn,
-                            cursor: likeDisabled ? "not-allowed" : "pointer",
-                            opacity: likeDisabled ? 0.7 : 1,
-                          }}
-                        >
-                          <Icon name="heart" /> {likeLabel}
-                        </button>
+                         style={{
+                           ...pillBtn,
+                           cursor: "pointer",
+                         }}
+                       >
+                         ✕ Pass
+                       </button>
 
-                        <button
-                          onClick={() => onMessage(p)}
+                       <button
+                        onClick={async () => {
+                          await onLike(p);
+                          setActiveProfileIndex((i) => i + 1);
+                       }}
+                       disabled={likeDisabled}
+                       style={{
+                         ...pillBtn,
+                         cursor: likeDisabled ? "not-allowed" : "pointer",
+                         opacity: likeDisabled ? 0.7 : 1,
+                       }}
+                     >
+                      <Icon name="heart" /> {likeLabel}
+                     </button>
+
+                     <button
+                       onClick={() => onMessage(p)}
+                       disabled={loadingSets}
+                       style={{
+                         ...pillBtn,
+                         cursor: loadingSets ? "not-allowed" : "pointer",
+                         opacity: loadingSets ? 0.8 : 1,
+                      }}
+                    >
                           disabled={loadingSets}
                           style={{
                             ...pillBtn,
