@@ -777,7 +777,7 @@ setProfiles(items);
     WebkitTextFillColor: "#111827",
   }}
 >
-      <div style={{ width: "100%", maxWidth: 1100 }}>
+      <div style={{ width: "100%", maxWidth: 1100, overflowX: "hidden" }}>
        <div
   style={{
     display: "flex",
