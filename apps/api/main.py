@@ -2279,6 +2279,10 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
 
         photo1 = (payload.photo or "").strip() or None
         photo2 = (payload.photo2 or "").strip() or None
+        photo_position_x = int(payload.photo_position_x or 50)
+        photo_position_y = int(payload.photo_position_y or 50)
+        photo2_position_x = int(payload.photo2_position_x or 50)
+        photo2_position_y = int(payload.photo2_position_y or 50)  
 
         gender = (payload.gender or "").strip() or None
         looking_for_gender = (payload.looking_for_gender or "").strip() or None
