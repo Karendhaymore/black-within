@@ -1048,6 +1048,11 @@ class UpsertMyProfilePayload(BaseModel):
     photo: Optional[str] = None
     photo2: Optional[str] = None
 
+    photo_position_x: int = 50
+    photo_position_y: int = 50
+
+    photo2_position_x: int = 50
+    photo2_position_y: int = 50
     identityPreview: Optional[str] = None
     intention: str
 
