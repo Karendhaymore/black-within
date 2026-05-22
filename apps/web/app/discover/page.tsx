@@ -1014,7 +1014,7 @@ setProfiles(items);
                 marginTop: 16,
               }}
              >
-              {filteredProfiles.map((p) => {
+              {[filteredProfiles[activeProfileIndex]].filter(Boolean).map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
                 const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
