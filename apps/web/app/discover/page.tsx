@@ -370,6 +370,8 @@ export default function DiscoverPage() {
   const [stateFilter, setStateFilter] = useState<string>("All");
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
   const [activeProfileIndex, setActiveProfileIndex] = useState(0);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchEndX, setTouchEndX] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const resetTimerRef = useRef<number | null>(null);
 
