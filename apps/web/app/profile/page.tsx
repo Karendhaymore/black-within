@@ -930,6 +930,9 @@ export default function MyProfilePage() {
                       objectPosition: `${form.photo_position_x ?? 50}% ${form.photo_position_y ?? 50}%`,
                       display: "block",
                     }}
+                    />
+
+                    <div
                     <div
                       style={{
                         display: "flex",
