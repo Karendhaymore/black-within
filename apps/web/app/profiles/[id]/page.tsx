@@ -756,7 +756,7 @@ export default function ProfileDetailPage() {
                             width: "100%",
                             height: 420,
                             objectFit: "cover",
-                            objectPosition: "center center"
+                            objectPosition: "center center",
                             display: "block",
                           }}
                           onError={() =>
