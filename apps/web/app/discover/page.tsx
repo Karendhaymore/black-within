@@ -1070,8 +1070,9 @@ setProfiles(items);
                        setTouchEndX(null);
                      }}
                      style={{
-                       maxWidth: 420,
-                       width: "100%",
+                       maxWidth: 380,
+                       width: "92vw",
+                       margin: "0 auto",
                        borderRadius: 18,
                        overflow: "hidden",
                        border: "1px solid rgba(0,0,0,0.10)",
@@ -1089,7 +1090,7 @@ setProfiles(items);
                           alt={p.displayName}
                           style={{
                             width: "100%",
-                            height: 320,
+                            height: 300,
                             objectFit: "cover",
                             display: "block",
                             background: "#f2f2f2",
@@ -1100,7 +1101,7 @@ setProfiles(items);
                         <div
                           style={{
                             width: "100%",
-                            height: 320,
+                            height: 300,
                             background: "#f2f2f2",
                             display: "grid",
                             placeItems: "center",
