@@ -1039,10 +1039,34 @@ setProfiles(items);
                 const notMe = p.owner_user_id !== userId;
 
                 return (
-                 <div
-                   key={p.id}
-                   className="card"
-                   
+                  <div
+                    key={p.id}
+                    className="card"
+                    onTouchStart={(e) => {
+                      setTouchStartX(e.touches[0].clientX);
+                      setTouchEndX(null);
+                    }}
+                    onTouchMove={(e) => {
+                      setTouchEndX(e.touches[0].clientX);
+                    }}
+                    onTouchEnd={async () => {
+                      if (touchStartX === null || touchEndX === null) return;
+
+                      const distance = touchStartX - touchEndX;
+
+                      if (distance > 80) {
+                        showToast("Passed.");
+                        setActiveProfileIndex((i) => i + 1);
+                       }
+
+                       if (distance < -80 && !likeDisabled) {
+                         await onLike(p);
+                         setActiveProfileIndex((i) => i + 1);
+                       }
+
+                       setTouchStartX(null);
+                       setTouchEndX(null);
+                     }}
                      style={{
                        maxWidth: 420,
                        width: "100%",
