@@ -1043,8 +1043,8 @@ setProfiles(items);
                     key={p.id}
                     className="card"
                      style={{
-                       maxWidth: 380,
-                       width: "92vw",
+                       maxWidth: 420,
+                       width: "100%",
                        margin: "0 auto",
                        borderRadius: 18,
                        overflow: "hidden",
