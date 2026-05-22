@@ -782,6 +782,8 @@ setProfiles(items);
   style={{
     display: "flex",
     justifyContent: "space-between",
+    overflowX: "auto",
+    maxWidth: "100%",
     gap: 12,
     alignItems: "center",
     flexWrap: "wrap",
