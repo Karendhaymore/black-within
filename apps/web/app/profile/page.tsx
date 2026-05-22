@@ -615,7 +615,7 @@ export default function MyProfilePage() {
     borderRadius: 16,
     border: "2px solid #ddd",
     objectFit: "cover",
-    objectPosition: "center center"
+    objectPosition: "center center",
     background: "#f4f4f4",
   };
 
