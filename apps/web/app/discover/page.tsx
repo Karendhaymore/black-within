@@ -1156,7 +1156,10 @@ setProfiles(items);
                         </button>
 
                         <button
-                          onClick={() => onLike(p)}
+                          onClick={async () => {
+                            await onLike(p);
+                            setActiveProfileIndex((i) => i + 1);
+                          }}
                           disabled={likeDisabled}
                           style={{
                             ...pillBtn,
