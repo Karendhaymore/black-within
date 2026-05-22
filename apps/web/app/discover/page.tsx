@@ -1026,7 +1026,10 @@ setProfiles(items);
             </div>
           ) : (
             <div className="discover-card-grid">
-              {[filteredProfiles[activeProfileIndex]].filter(Boolean).map((p) => {
+             {filteredProfiles
+              .slice(activeProfileIndex, activeProfileIndex + 3)
+              .filter(Boolean)
+              .map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
                 const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
