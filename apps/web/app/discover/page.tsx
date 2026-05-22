@@ -1046,7 +1046,7 @@ setProfiles(items);
                     className="card"
                      style={{
                        maxWidth: 420,
-                       width: "100%",
+                       width: "calc(100vw - 32px)",
                        margin: "0 auto",
                        borderRadius: 18,
                        overflow: "hidden",
