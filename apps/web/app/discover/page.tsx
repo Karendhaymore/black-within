@@ -1025,9 +1025,11 @@ setProfiles(items);
           ) : (
             <div
               style={{
-                display: "flex",
-                justifyContent: "center",
-                marginTop: 16,
+               display: "flex",
+               justifyContent: "center",
+               marginTop: 12,
+               width: "100%",
+               overflowX: "hidden", 
               }}
              >
               {[filteredProfiles[activeProfileIndex]].filter(Boolean).map((p) => {
