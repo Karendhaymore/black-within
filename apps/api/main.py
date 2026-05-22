@@ -2294,6 +2294,10 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             existing.state_us = state
             existing.photo = photo1
             existing.photo2 = photo2
+            existing.photo_position_x = photo_position_x
+            existing.photo_position_y = photo_position_y
+            existing.photo2_position_x = photo2_position_x
+            existing.photo2_position_y = photo2_position_y
             existing.identity_preview = preview
             existing.intention = payload.intention.strip()
             existing.tags_csv = tags_csv
