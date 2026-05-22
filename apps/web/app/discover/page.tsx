@@ -1066,6 +1066,7 @@ setProfiles(items);
                             width: "100%",
                             height: 260,
                             objectFit: "cover",
+                            objectPosition: "center center",
                             display: "block",
                             background: "#f2f2f2",
                           }}
