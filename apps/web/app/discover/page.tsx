@@ -1132,7 +1132,14 @@ setProfiles(items);
                         </div>
                       )}
 
-                      <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <div
+                        style={{
+                          marginTop: 12,
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr",
+                          gap: 8,
+                        }}
+                       >
                         <Link href={`/profiles/${p.id}`} style={pillBtn}>
                           <Icon name="user" /> View
                         </Link>
