@@ -769,7 +769,7 @@ setProfiles(items);
   return (
     <main
   style={{
-    minHeight: "100vh",
+    minHeight: "auto",
     padding: "1.5rem",
     display: "grid",
     placeItems: "start center",
