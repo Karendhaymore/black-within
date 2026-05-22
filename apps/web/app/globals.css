@@ -209,3 +209,19 @@ a[class*="button"],
 .button {
   -webkit-text-fill-color: inherit;
 }
+.discover-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .discover-card-grid {
+    display: flex;
+    justify-content: center;
+    margin-top: 12px;
+    overflow-x: hidden;
+  }
+}
