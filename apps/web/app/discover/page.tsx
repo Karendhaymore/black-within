@@ -908,8 +908,8 @@ setProfiles(items);
             background: "rgba(255,255,255,0.86)",
             boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
             backdropFilter: "blur(10px)",
-            flexWrap: "nowrap",
-            overflow: "hidden",
+            flexWrap: "wrap",
+            overflow: "visible",
           }}
         >
           <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 900, color: "#2a2a2a" }}>
