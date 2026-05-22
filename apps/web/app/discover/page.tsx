@@ -1063,7 +1063,7 @@ setProfiles(items);
                           alt={p.displayName}
                           style={{
                             width: "100%",
-                            height: 300,
+                            height: 260,
                             objectFit: "cover",
                             display: "block",
                             background: "#f2f2f2",
@@ -1074,7 +1074,7 @@ setProfiles(items);
                         <div
                           style={{
                             width: "100%",
-                            height: 300,
+                            height: 260,
                             background: "#f2f2f2",
                             display: "grid",
                             placeItems: "center",
