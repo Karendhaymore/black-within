@@ -1026,7 +1026,6 @@ setProfiles(items);
             </div>
           ) : (
             <div className="discover-card-grid">
-             >
               {[filteredProfiles[activeProfileIndex]].filter(Boolean).map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
