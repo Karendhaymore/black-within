@@ -1006,7 +1006,13 @@ setProfiles(items);
               No profiles match your filters yet.
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))", gap: 16 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                marginTop: 16,
+              }}
+             >
               {filteredProfiles.map((p) => {
                 const isSaved = savedIds.includes(p.id);
                 const isLiked = likedIds.includes(p.id);
@@ -1021,6 +1027,8 @@ setProfiles(items);
                    className="card"
                    
                      style={{
+                       maxWidth: 420,
+                       width: "100%",
                        borderRadius: 18,
                        overflow: "hidden",
                        border: "1px solid rgba(0,0,0,0.10)",
