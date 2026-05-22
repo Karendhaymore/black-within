@@ -926,9 +926,67 @@ export default function MyProfilePage() {
                       width: "100%",
                       height: "auto",
                       maxHeight: 760,
-                      objectFit: "contain",
+                      objectFit: "cover",
+                      objectPosition: `${form.photo_position_x ?? 50}% ${form.photo_position_y ?? 50}%`,
                       display: "block",
                     }}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        gap: 8,
+                        marginTop: 10,
+                        flexWrap: "wrap",
+                     }}
+                   >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((f) => ({
+                         ...f,
+                         photo_position_y: Math.max(0, (f.photo_position_y ?? 50) - 10),
+                       }))
+                     }
+                   >
+                     ↑ Up
+                   </button>
+
+                   <button
+                     type="button"
+                     onClick={() =>
+                       setForm((f) => ({
+                        ...f,
+                        photo_position_y: Math.min(100, (f.photo_position_y ?? 50) + 10),
+                     }))
+                    }
+                  >
+                   ↓ Down
+                 </button>
+
+                 <button
+                   type="button"
+                   onClick={() =>
+                     setForm((f) => ({
+                      ...f,
+                     photo_position_x: Math.max(0, (f.photo_position_x ?? 50) - 10),
+                  }))
+                }
+              >
+                ← Left
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setForm((f) => ({
+                   ...f,
+                   photo_position_x: Math.min(100, (f.photo_position_x ?? 50) + 10),
+                 }))
+               }
+             >
+               Right →
+            </button>
+          </div>
                   />
                 ) : (
                   <div
