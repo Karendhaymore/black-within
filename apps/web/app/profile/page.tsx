@@ -991,7 +991,6 @@ export default function MyProfilePage() {
             </button>
           </div>
                   </>
-                  />
                 ) : (
                   <div
                     style={{
