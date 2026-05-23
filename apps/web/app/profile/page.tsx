@@ -972,6 +972,14 @@ export default function MyProfilePage() {
 
                    <button
                      type="button"
+                     style={{
+                       padding: "8px 12px",
+                       borderRadius: 999,
+                       border: "1px solid #ccc",
+                       background: "white",
+                       fontWeight: 700,
+                       cursor: "pointer",
+                     }}
                      onClick={() =>
                        setForm((f) => ({
                         ...f,
@@ -984,6 +992,14 @@ export default function MyProfilePage() {
 
                  <button
                    type="button"
+                   style={{
+                     padding: "8px 12px",
+                     borderRadius: 999,
+                     border: "1px solid #ccc",
+                     background: "white",
+                     fontWeight: 700,
+                     cursor: "pointer",
+                   }}
                    onClick={() =>
                      setForm((f) => ({
                       ...f,
@@ -996,6 +1012,14 @@ export default function MyProfilePage() {
 
               <button
                 type="button"
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 999,
+                  border: "1px solid #ccc",
+                  background: "white",
+                  fontWeight: 700,
+                  cursor: "pointer",
+               }}
                 onClick={() =>
                   setForm((f) => ({
                    ...f,
@@ -1048,6 +1072,14 @@ export default function MyProfilePage() {
               >
                 <button
                   type="button"
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 999,
+                    border: "1px solid #ccc",
+                    background: "white",
+                    fontWeight: 700,
+                   cursor: "pointer",
+                 }}
                   onClick={() => {
                     if (!photoFile) {
                       fileInputRef.current?.click();
