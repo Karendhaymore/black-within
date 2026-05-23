@@ -935,7 +935,7 @@ export default function MyProfilePage() {
               >
                 {photoPreview || form.photo ? (
                 <>
-                  // eslint-disable-next-line @next/next/no-img-element
+                 {/* eslint-disable-next-line @next/next/no-img-element */} 
                   <img
                     src={photoPreview || form.photo}
                     alt="Profile photo"
