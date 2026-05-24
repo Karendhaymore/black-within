@@ -1088,7 +1088,6 @@ export default function MyProfilePage() {
                     onUploadPhoto(1);
                   }}
                   disabled={loadingExisting || uploadingPhoto}
-                  style={{
                     padding: "0.6rem 0.9rem",
                     borderRadius: 10,
                     border: "1px solid #111",
