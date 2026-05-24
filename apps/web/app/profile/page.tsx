@@ -1088,13 +1088,13 @@ export default function MyProfilePage() {
                     onUploadPhoto(1);
                   }}
                   disabled={loadingExisting || uploadingPhoto}
+                  style={{
                     padding: "0.6rem 0.9rem",
                     borderRadius: 10,
                     border: "1px solid #111",
                     background: "#111",
                     color: "white",
-                    cursor:
-                      loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+                    cursor: loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
                     fontWeight: 900,
                     opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
                   }}
