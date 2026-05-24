@@ -749,20 +749,19 @@ export default function ProfileDetailPage() {
                           {getInitials(profile.displayName)}
                         </div>
                       ) : (
-                        <img
-                          src={src}
-                          alt={`${profile.displayName} photo ${i + 1}`}
-                          style={{
-                            width: "100%",
-                            height: 300,
-                            objectFit: "contain",
-                            objectPosition: `${profile.photo_position_x ?? 50}% ${profile.photo_position_y ?? 50}%`,
-                            background: "#f4f1e8",
-                          }}
-                          onError={() =>
-                            setBrokenSrcs((prev) => ({ ...prev, [src]: true }))
-                          }
-                        />
+                       <img
+                         src={src}
+                         alt={`${profile.displayName} photo ${i + 1}`}
+                         style={{
+                           width: "100%",
+                           height: 300,
+                           objectFit: "contain",
+                           background: "#f4f1e8",
+                         }}
+                         onError={() =>
+                           setBrokenSrcs((prev) => ({ ...prev, [src]: true }))
+                         }
+                       />
                       )}
 
                       <div
