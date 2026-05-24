@@ -1534,7 +1534,6 @@ export default function MyProfilePage() {
             </button>
           </div>
         </div>
-      </div>
     </main>
   );
 }
