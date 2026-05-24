@@ -1027,7 +1027,6 @@ export default function MyProfilePage() {
                   Saved URL: {form.photo}
                 </div>
               ) : null}
-            </div>
 
             <div style={{ marginTop: 22 }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Photo 2 (optional)</div>
