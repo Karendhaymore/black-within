@@ -345,10 +345,6 @@ export default function MyProfilePage() {
             stateUS: mine.stateUS || "",
             photo: (mine.photo as string) || "",
             photo2: (mine.photo2 as string) || "",
-            photo_position_x: mine.photo_position_x ?? 50,
-            photo_position_y: mine.photo_position_y ?? 50,
-            photo2_position_x: mine.photo2_position_x ?? 50,
-            photo2_position_y: mine.photo2_position_y ?? 50,
 
             gender: mine.gender || "",
             lookingForGender: mine.lookingForGender || "",
