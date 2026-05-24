@@ -1062,11 +1062,10 @@ setProfiles(items);
                           alt={p.displayName}
                           style={{
                             width: "100%",
-                            height: 260,
-                            objectFit: "cover",
-                            objectPosition: "center center",
-                            display: "block",
-                            background: "#f2f2f2",
+                            height: 300,
+                            objectFit: "contain",
+                            objectPosition: `${p.photo_position_x ?? 50}% ${p.photo_position_y ?? 50}%`,
+                            background: "#f4f1e8",
                           }}
                           onError={() => setBrokenImages((curr) => ({ ...curr, [p.id]: true }))}
                         />
@@ -1074,7 +1073,7 @@ setProfiles(items);
                         <div
                           style={{
                             width: "100%",
-                            height: 260,
+                            height: 300,
                             background: "#f2f2f2",
                             display: "grid",
                             placeItems: "center",
