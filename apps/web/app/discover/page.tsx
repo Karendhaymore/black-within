@@ -19,6 +19,12 @@ type ApiProfile = {
   city: string;
   stateUS: string;
   photo?: string | null;
+  photo?: string | null;
+
+  photo_position_x?: number;
+  photo_position_y?: number;
+  photo2_position_x?: number;
+  photo2_position_y?: number;
   identityPreview: string;
   intention: string;
   tags: string[];
