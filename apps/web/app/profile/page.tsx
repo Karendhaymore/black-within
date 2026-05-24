@@ -46,10 +46,6 @@ type FormState = {
   stateUS: string;
   photo: string;
   photo2: string;
-  photo_position_x: number;
-  photo_position_y: number;
-  photo2_position_x: number;
-  photo2_position_y: number; 
 
   relationshipIntent: string;
   datingChallenge: string;
