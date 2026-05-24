@@ -266,10 +266,6 @@ export default function MyProfilePage() {
   stateUS: "",
   photo: "",
   photo2: "",
-  photo_position_x: 50,
-  photo_position_y: 50,
-  photo2_position_x: 50,
-  photo2_position_y: 50, 
 
   gender: "",
   lookingForGender: "",
