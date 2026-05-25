@@ -514,8 +514,10 @@ export default function MyProfilePage() {
   try {
     await apiUpsertProfile(
       buildUpsertPayload({
-        photo: form.photo || "",
-        photo2: form.photo2 || "",
+        ...form,
+        age: ageNum,
+        culturalIdentity: culturalSelected,
+        spiritualFramework: spiritualSelected,
       })
     );
 
