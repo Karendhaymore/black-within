@@ -155,6 +155,10 @@ class Profile(Base):
 
     photo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     photo2: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    photo_position_x: Mapped[int] = mapped_column(Integer, default=50)
+    photo_position_y: Mapped[int] = mapped_column(Integer, default=50)
+    photo2_position_x: Mapped[int] = mapped_column(Integer, default=50)
+    photo2_position_y: Mapped[int] = mapped_column(Integer, default=50)
 
     identity_preview: Mapped[str] = mapped_column(String(500))
     intention: Mapped[str] = mapped_column(String(120))
