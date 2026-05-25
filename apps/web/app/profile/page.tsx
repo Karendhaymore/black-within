@@ -1023,7 +1023,7 @@ export default function MyProfilePage() {
 
      <button
            type="button"
-           onClick={() => (!photoFile ? fileInputRef.current?.click() : onUploadPhoto(1))}
+           onClick={() => (!photoFile2 ? fileInputRef2.current?.click() : onUploadPhoto(2))}
            disabled={loadingExisting || uploadingPhoto}
            style={{
              marginTop: 10,
