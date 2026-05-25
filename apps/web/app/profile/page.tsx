@@ -370,8 +370,8 @@ export default function MyProfilePage() {
   }, [userId]);
 
   function buildUpsertPayload(
-   overrides: Partial<FormState & { age: number; culturalIdentity: string[]; spiritualFramework: string[] }> = {}
- ) {
+  overrides: Partial<{ photo: string; photo2: string }> = {}
+) {
     const ageNum = parseInt(form.age || "0", 10) || 0;
 
     const identityPreview = buildIdentityPreview({
