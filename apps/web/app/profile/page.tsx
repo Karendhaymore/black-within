@@ -514,12 +514,7 @@ export default function MyProfilePage() {
   setApiError(null);
 
   try {
-    await apiUpsertProfile(
-      buildUpsertPayload({
-        ...form,
-        age: ageNum,
-        culturalIdentity: culturalSelected,
-        spiritualFramework: spiritualSelected,
+    await apiUpsertProfile(buildUpsertPayload());
       })
     );
 
