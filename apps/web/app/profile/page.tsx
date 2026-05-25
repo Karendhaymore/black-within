@@ -1011,7 +1011,6 @@ export default function MyProfilePage() {
      </button>
    </div> 
 
-            <div>
               <div style={{ fontWeight: 700, marginBottom: 10 }}>Photo Gallery</div>
 
               <div
