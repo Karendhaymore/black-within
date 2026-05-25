@@ -950,7 +950,22 @@ export default function MyProfilePage() {
             }}
          />
 
-         <button type="button" onClick={() => (!photoFile ? fileInputRef.current?.click() : onUploadPhoto(1))}>
+         <button
+           type="button"
+           onClick={() => (!photoFile ? fileInputRef.current?.click() : onUploadPhoto(1))}
+           disabled={loadingExisting || uploadingPhoto}
+           style={{
+             marginTop: 10,
+             padding: "0.6rem 0.9rem",
+             borderRadius: 10,
+             border: "1px solid #111",
+             background: "#111",
+             color: "white",
+             cursor: loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+             fontWeight: 900,
+             opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+           }}
+         >
            {uploadingPhoto ? "Uploading..." : photoFile ? "Upload Photo" : "Choose Photo"}
          </button>
        </div>
@@ -1006,7 +1021,22 @@ export default function MyProfilePage() {
        }}
      />
 
-     <button type="button" onClick={() => (!photoFile2 ? fileInputRef2.current?.click() : onUploadPhoto(2))}>
+     <button
+           type="button"
+           onClick={() => (!photoFile ? fileInputRef.current?.click() : onUploadPhoto(1))}
+           disabled={loadingExisting || uploadingPhoto}
+           style={{
+             marginTop: 10,
+             padding: "0.6rem 0.9rem",
+             borderRadius: 10,
+             border: "1px solid #111",
+             background: "#111",
+             color: "white",
+             cursor: loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+             fontWeight: 900,
+             opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+           }}
+         >
        {uploadingPhoto ? "Uploading..." : photoFile2 ? "Upload Photo" : "Choose Photo"}
      </button>
    </div> 
