@@ -515,9 +515,7 @@ export default function MyProfilePage() {
 
   try {
     await apiUpsertProfile(buildUpsertPayload());
-      })
-    );
-
+    
     showToast("Profile saved.");
   } catch (e: any) {
     setApiError(e?.message || "Could not save profile.");
