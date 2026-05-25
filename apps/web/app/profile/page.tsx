@@ -473,6 +473,8 @@ export default function MyProfilePage() {
   }
 
  async function onSave() {
+   console.log("SAVE BUTTON CLICKED");
+   alert("SAVE BUTTON CLICKED");
   if (!userId) return;
 
   if (uploadingPhoto) {
