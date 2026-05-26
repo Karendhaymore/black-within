@@ -942,13 +942,6 @@ class ProfileItem(BaseModel):
     relationshipIntent: Optional[str] = None
     datingChallenge: Optional[str] = None
     personalTruth: Optional[str] = None
-
-    mateQualities=getattr(p, "mate_qualities", None),
-    funActivities=getattr(p, "fun_activities", None),
-    smokes=getattr(p, "smokes", None),
-    drinks=getattr(p, "drinks", None),
-    educationLevel=getattr(p, "education_level", None),
-    
     gender: Optional[str] = None
     lookingForGender: Optional[str] = None 
     mateQualities: Optional[str] = None
