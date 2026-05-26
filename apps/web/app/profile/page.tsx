@@ -269,7 +269,12 @@ export default function MyProfilePage() {
   relationshipIntent: "Intentional partnership",
   datingChallenge: "",
   personalTruth: "",
-
+  mateQualities: "",
+  funActivities: "",
+  smokes: "",
+  drinks: "",
+  educationLevel: "",
+    
   isAvailable: true,
 });
 
