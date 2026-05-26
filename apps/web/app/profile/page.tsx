@@ -364,6 +364,11 @@ export default function MyProfilePage() {
               mine.relationshipIntent || mine.intention || "Intentional partnership",
             datingChallenge: mine.datingChallenge || "",
             personalTruth: mine.personalTruth || "",
+            mateQualities: mine.mateQualities || "",
+            unActivities: mine.funActivities || "",
+            smokes: mine.smokes || "",
+            drinks: mine.drinks || "",
+            educationLevel: mine.educationLevel || "",
 
             isAvailable: typeof mine.isAvailable === "boolean" ? mine.isAvailable : true,
           });
