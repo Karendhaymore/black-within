@@ -171,6 +171,12 @@ class Profile(Base):
     dating_challenge_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     personal_truth_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    mate_qualities: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+   fun_activities: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+   smokes: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+   drinks: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+   education_level: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
 
     gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
