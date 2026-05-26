@@ -2362,16 +2362,16 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             else:
                 existing.is_available = is_avail
 
+            existing.mate_qualities = payload.mateQualities
+            existing.fun_activities = payload.funActivities
+            existing.smokes = payload.smokes
+            existing.drinks = payload.drinks
+            existing.education_level = payload.educationLevel
+
             existing.updated_at = now
             session.add(existing)
             session.commit()
             session.refresh(existing)
-            p = existing
-            p.mate_qualities = payload.mateQualities
-            p.fun_activities = payload.funActivities
-            p.smokes = payload.smokes
-            p.drinks = payload.drinks
-            p.education_level = payload.educationLevel
         else:
             new_profile = Profile(
                 id=_new_id(),
