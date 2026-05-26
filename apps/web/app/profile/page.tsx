@@ -11,7 +11,12 @@ const API_BASE =
 type ProfileItem = {
   id: string;
   owner_user_id: string;
-
+  
+  mateQualities?: string | null;
+  funActivities?: string | null;
+  smokes?: string | null;
+  drinks?: string | null;
+  educationLevel?: string | null;
   displayName: string;
   age: number;
   city: string;
