@@ -426,7 +426,12 @@ export default function MyProfilePage() {
       relationshipIntent: form.relationshipIntent.trim(),
       datingChallenge: form.datingChallenge.trim() || null,
       personalTruth: form.personalTruth.trim() || null,
-
+      mateQualities: form.mateQualities.trim() || null,
+      funActivities: form.funActivities.trim() || null,
+      smokes: form.smokes || null,
+      drinks: form.drinks || null,
+      educationLevel: form.educationLevel || null,
+      
       tags: selectedTags,
       isAvailable: !!form.isAvailable,
     };
