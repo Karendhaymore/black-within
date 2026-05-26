@@ -365,7 +365,7 @@ export default function MyProfilePage() {
             datingChallenge: mine.datingChallenge || "",
             personalTruth: mine.personalTruth || "",
             mateQualities: mine.mateQualities || "",
-            unActivities: mine.funActivities || "",
+            funActivities: mine.funActivities || "",
             smokes: mine.smokes || "",
             drinks: mine.drinks || "",
             educationLevel: mine.educationLevel || "",
