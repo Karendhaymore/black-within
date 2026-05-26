@@ -2343,6 +2343,11 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             session.commit()
             session.refresh(existing)
             p = existing
+            p.mate_qualities = req.mateQualities
+            p.fun_activities = req.funActivities
+            p.smokes = req.smokes
+            p.drinks = req.drinks
+            p.education_level = req.educationLevel
         else:
             new_profile = Profile(
                 id=_new_id(),
