@@ -47,7 +47,12 @@ type FormState = {
   stateUS: string;
   photo: string;
   photo2: string;
-
+ 
+  mateQualities: string;
+  funActivities: string;
+  smokes: string;
+  drinks: string;
+  educationLevel: string;
   relationshipIntent: string;
   datingChallenge: string;
   personalTruth: string;
