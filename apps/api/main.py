@@ -1093,6 +1093,11 @@ class UpsertMyProfilePayload(BaseModel):
     relationshipIntent: Optional[str] = None
     datingChallenge: Optional[str] = None
     personalTruth: Optional[str] = None
+    mateQualities: Optional[str] = None
+    funActivities: Optional[str] = None
+    smokes: Optional[str] = None
+    drinks: Optional[str] = None
+    educationLevel: Optional[str] = None
 
     gender: Optional[str] = None
     looking_for_gender: Optional[str] = None
