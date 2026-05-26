@@ -1402,6 +1402,110 @@ export default function MyProfilePage() {
               />
             </label>
 
+            <label>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                What type of qualities are important in a mate?
+              </div>
+
+              <textarea
+                value={form.mateQualities || ""}
+                onChange={(e) => onChange("mateQualities", e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "0.7rem",
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                  minHeight: 90,
+                }}
+                placeholder="Describe the qualities that matter most to you."
+         />
+</label>
+
+<label>
+  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+    What do you do for fun?
+  </div>
+
+  <textarea
+    value={form.funActivities || ""}
+    onChange={(e) => onChange("funActivities", e.target.value)}
+    style={{
+      width: "100%",
+      padding: "0.7rem",
+      borderRadius: 10,
+      border: "1px solid #ccc",
+      minHeight: 90,
+    }}
+    placeholder="Share your hobbies, interests, and favorite activities."
+  />
+</label>
+
+<label>
+  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+    Do you smoke?
+  </div>
+
+  <select
+    value={form.smokes || ""}
+    onChange={(e) => onChange("smokes", e.target.value)}
+    style={{
+      width: "100%",
+      padding: "0.7rem",
+      borderRadius: 10,
+      border: "1px solid #ccc",
+    }}
+  >
+    <option value="">Select one</option>
+    <option value="Yes">Yes</option>
+    <option value="No">No</option>
+  </select>
+</label>
+
+<label>
+  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+    Do you drink?
+  </div>
+
+  <select
+    value={form.drinks || ""}
+    onChange={(e) => onChange("drinks", e.target.value)}
+    style={{
+      width: "100%",
+      padding: "0.7rem",
+      borderRadius: 10,
+      border: "1px solid #ccc",
+    }}
+  >
+    <option value="">Select one</option>
+    <option value="Yes">Yes</option>
+    <option value="No">No</option>
+  </select>
+</label>
+
+<label>
+  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+    What's your highest level of education?
+  </div>
+
+  <select
+    value={form.educationLevel || ""}
+    onChange={(e) => onChange("educationLevel", e.target.value)}
+    style={{
+      width: "100%",
+      padding: "0.7rem",
+      borderRadius: 10,
+      border: "1px solid #ccc",
+    }}
+  >
+    <option value="">Select one</option>
+    <option value="High school graduate or less">
+      High school graduate or less
+    </option>
+    <option value="Some college">Some college</option>
+    <option value="College graduate">College graduate</option>
+    <option value="Advanced degree">Advanced degree</option>
+  </select>
+</label>
             <button
               onClick={onSave}
               disabled={saving || loadingExisting || uploadingPhoto}
