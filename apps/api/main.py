@@ -942,6 +942,13 @@ class ProfileItem(BaseModel):
     relationshipIntent: Optional[str] = None
     datingChallenge: Optional[str] = None
     personalTruth: Optional[str] = None
+
+    mateQualities=getattr(p, "mate_qualities", None),
+    funActivities=getattr(p, "fun_activities", None),
+    smokes=getattr(p, "smokes", None),
+    drinks=getattr(p, "drinks", None),
+    educationLevel=getattr(p, "education_level", None),
+    
     gender: Optional[str] = None
     lookingForGender: Optional[str] = None 
     mateQualities: Optional[str] = None
@@ -2164,6 +2171,13 @@ def get_profile(profile_id: str):
             relationshipIntent=getattr(p, "relationship_intent", None),
             datingChallenge=getattr(p, "dating_challenge_text", None),
             personalTruth=getattr(p, "personal_truth_text", None),
+
+            mateQualities=getattr(p, "mate_qualities", None),
+            funActivities=getattr(p, "fun_activities", None),
+            smokes=getattr(p, "smokes", None),
+            drinks=getattr(p, "drinks", None),
+            educationLevel=getattr(p, "education_level", None),
+            
             gender=getattr(p, "gender", None),
             lookingForGender=getattr(p, "looking_for_gender", None),
         )
@@ -2287,6 +2301,13 @@ def list_profiles(exclude_owner_user_id: Optional[str] = Query(default=None), li
                     relationshipIntent=getattr(p, "relationship_intent", None),
                     datingChallenge=getattr(p, "dating_challenge_text", None),
                     personalTruth=getattr(p, "personal_truth_text", None),
+
+                    mateQualities=getattr(p, "mate_qualities", None),
+                    funActivities=getattr(p, "fun_activities", None),
+                    smokes=getattr(p, "smokes", None),
+                    drinks=getattr(p, "drinks", None),
+                    educationLevel=getattr(p, "education_level", None),
+                    
                     gender=getattr(p, "gender", None),
                     lookingForGender=getattr(p, "looking_for_gender", None), 
                 )
@@ -2419,6 +2440,13 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             relationshipIntent=getattr(p, "relationship_intent", None),
             datingChallenge=getattr(p, "dating_challenge_text", None),
             personalTruth=getattr(p, "personal_truth_text", None),
+
+            mateQualities=getattr(p, "mate_qualities", None),
+            funActivities=getattr(p, "fun_activities", None),
+            smokes=getattr(p, "smokes", None),
+            drinks=getattr(p, "drinks", None),
+            educationLevel=getattr(p, "education_level", None),
+            
             gender=getattr(p, "gender", None),
             lookingForGender=getattr(p, "looking_for_gender", None),
         )
@@ -2827,6 +2855,11 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
                     relationshipIntent=getattr(p, "relationship_intent", None),
                     datingChallenge=getattr(p, "dating_challenge_text", None),
                     personalTruth=getattr(p, "personal_truth_text", None),
+                    mateQualities=getattr(p, "mate_qualities", None),
+                    funActivities=getattr(p, "fun_activities", None),
+                    smokes=getattr(p, "smokes", None),
+                    drinks=getattr(p, "drinks", None),
+                    educationLevel=getattr(p, "education_level", None),
                 )
             )
 
