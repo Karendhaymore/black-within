@@ -544,7 +544,12 @@ def _auto_migrate_profiles_table():
         conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS state_us VARCHAR(80);"))
         conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo TEXT;"))
         conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS photo2 TEXT;"))
-
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS mate_qualities TEXT;"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS fun_activities TEXT;"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS smokes VARCHAR(10);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS drinks VARCHAR(10);"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS education_level VARCHAR(80);")) 
+        
         conn.execute(
             text(
                 """
