@@ -939,6 +939,12 @@ class ProfileItem(BaseModel):
     personalTruth: Optional[str] = None
     gender: Optional[str] = None
     lookingForGender: Optional[str] = None 
+    mateQualities: Optional[str] = None
+    funActivities: Optional[str] = None
+    smokes: Optional[str] = None
+    drinks: Optional[str] = None
+    educationLevel: Optional[str] = None
+
 
 class ProfilesResponse(BaseModel):
     items: List[ProfileItem]
