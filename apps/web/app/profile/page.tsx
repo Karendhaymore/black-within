@@ -1321,7 +1321,6 @@ export default function MyProfilePage() {
               Relationship Intent
             </div>
   
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Relationship Intent</div>
               <select
                 value={form.relationshipIntent}
                 onChange={(e) => onChange("relationshipIntent", e.target.value)}
