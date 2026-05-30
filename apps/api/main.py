@@ -2138,6 +2138,8 @@ def get_profile(profile_id: str):
         if not p:
             raise HTTPException(status_code=404, detail="Profile not found")
 
+        p = existing if existing else new_profile 
+
         tags = _parse_json_list(p.tags_csv)
         cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
         spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
