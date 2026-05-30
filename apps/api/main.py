@@ -2413,6 +2413,11 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             session.refresh(new_profile)
             p = new_profile
 
+            if existing:
+                p = existing
+            else:
+                p = new_profile
+                
         tags = _parse_json_list(p.tags_csv)
         cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
         spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
