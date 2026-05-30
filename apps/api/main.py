@@ -2374,6 +2374,7 @@ def upsert_my_profile(payload: UpsertMyProfilePayload):
             session.add(existing)
             session.commit()
             session.refresh(existing)
+            p = existing 
         else:
             new_profile = Profile(
                 id=_new_id(),
