@@ -160,7 +160,7 @@ class Profile(Base):
     photo2_position_x: Mapped[int] = mapped_column(Integer, default=50)
     photo2_position_y: Mapped[int] = mapped_column(Integer, default=50)
 
-    identity_preview: Mapped[str] = mapped_column(String(500))
+    identity_preview: Mapped[str] = mapped_column(Text)
     intention: Mapped[str] = mapped_column(String(120))
 
     tags_csv: Mapped[str] = mapped_column(Text, default="[]")
