@@ -58,8 +58,19 @@ export default function ResetContent() {
       setMessage("Your password has been reset. You can now log in.");
       setPassword("");
       setConfirmPassword("");
-    } catch (err: any) {
-      setError(err.message || "Something went wrong. Please try again.");
+    }catch (err: any) {
+  console.error("Reset password error:", err);
+
+  if (typeof err === "string") {
+    setError(err);
+  } else if (err?.message) {
+    setError(err.message);
+  } else if (err?.detail) {
+    setError(err.detail);
+  } else {
+    setError("Password reset failed. Please request a new reset link and try again.");
+  }
+}
     } finally {
       setLoading(false);
     }
