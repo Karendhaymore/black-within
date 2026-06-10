@@ -726,10 +726,6 @@ export default function MyProfilePage() {
             <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
               My Profile
             </h1>
-            <p style={{ color: "#555", marginTop: 0 }}>
-              This is your real profile stored in the database — what other users browse
-              in Discover.
-            </p>
 
             <div
               style={{
