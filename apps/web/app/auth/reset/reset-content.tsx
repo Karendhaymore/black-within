@@ -43,10 +43,10 @@ export default function ResetContent() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          token,
-          new_password: password,
-        }),
+       body: JSON.stringify({
+         token,
+         password,
+      }),
       });
 
       const data = await res.json().catch(() => ({}));
