@@ -752,6 +752,48 @@ const profileCompletion = Math.round(
           <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
             My Profile
           </h1>
+          <div
+  style={{
+    marginTop: "0.75rem",
+    marginBottom: "1rem",
+    padding: "0.85rem 1rem",
+    border: "1px solid #ddd",
+    borderRadius: 12,
+    background: "#fff",
+    maxWidth: 500,
+  }}
+>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      marginBottom: 8,
+      fontWeight: 700,
+    }}
+  >
+    <span>Profile Completion</span>
+    <span>{profileCompletion}%</span>
+  </div>
+
+  <div
+    style={{
+      width: "100%",
+      height: 10,
+      background: "#eee",
+      borderRadius: 999,
+      overflow: "hidden",
+    }}
+  >
+    <div
+      style={{
+        width: `${profileCompletion}%`,
+        height: "100%",
+        background: "#0a5",
+      }}
+    />
+  </div>
+</div>
+          
         </div>
 
         <div
