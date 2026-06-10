@@ -37,13 +37,10 @@ async function apiGetLikedYou(userId: string): Promise<ApiProfile[]> {
 
 export default function LikedProfilesPage() {
   const [userId, setUserId] = useState<string>("");
-
   const [items, setItems] = useState<ApiProfile[]>([]);
   const [apiError, setApiError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // For broken images → fallback to initials
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
   function showToast(msg: string) {
@@ -90,31 +87,41 @@ export default function LikedProfilesPage() {
     <main
       style={{
         minHeight: "100vh",
-        padding: "2rem",
+        padding: "1rem",
         display: "grid",
         placeItems: "start center",
+        overflowX: "hidden",
       }}
     >
       <div style={{ width: "100%", maxWidth: 1100 }}>
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
+            display: "grid",
             gap: "1rem",
-            flexWrap: "wrap",
-            alignItems: "flex-start",
           }}
         >
           <div>
-            <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
+            <h1
+              style={{
+                fontSize: "clamp(2rem, 8vw, 3.2rem)",
+                marginBottom: "0.25rem",
+              }}
+            >
               Liked Profiles
             </h1>
-            <p style={{ color: "#555" }}>
+            <p style={{ color: "#555", fontSize: "1rem" }}>
               These are people who liked your profile.
             </p>
           </div>
 
-          <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "0.75rem",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
             <button
               onClick={() => userId && refresh(userId)}
               disabled={!userId || loading}
@@ -130,42 +137,15 @@ export default function LikedProfilesPage() {
               {loading ? "Refreshing..." : "Refresh"}
             </button>
 
-            <Link
-              href="/saved"
-              style={{
-                padding: "0.65rem 1rem",
-                border: "1px solid #ccc",
-                borderRadius: 10,
-                textDecoration: "none",
-                color: "inherit",
-              }}
-            >
+            <Link href="/saved" style={navStyle}>
               Saved
             </Link>
 
-            <Link
-              href="/notifications"
-              style={{
-                padding: "0.65rem 1rem",
-                border: "1px solid #ccc",
-                borderRadius: 10,
-                textDecoration: "none",
-                color: "inherit",
-              }}
-            >
+            <Link href="/notifications" style={navStyle}>
               Notifications
             </Link>
 
-            <Link
-              href="/discover"
-              style={{
-                padding: "0.65rem 1rem",
-                border: "1px solid #ccc",
-                borderRadius: 10,
-                textDecoration: "none",
-                color: "inherit",
-              }}
-            >
+            <Link href="/discover" style={navStyle}>
               Back to Discover
             </Link>
           </div>
@@ -201,27 +181,9 @@ export default function LikedProfilesPage() {
         )}
 
         {loading ? (
-          <div
-            style={{
-              marginTop: "1.5rem",
-              padding: "1.25rem",
-              borderRadius: 14,
-              border: "1px solid #eee",
-              color: "#555",
-            }}
-          >
-            Loading liked profiles…
-          </div>
+          <div style={noticeStyle}>Loading liked profiles…</div>
         ) : visible.length === 0 ? (
-          <div
-            style={{
-              marginTop: "1.5rem",
-              padding: "1.25rem",
-              borderRadius: 14,
-              border: "1px solid #eee",
-              color: "#555",
-            }}
-          >
+          <div style={noticeStyle}>
             <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>
               No likes yet.
             </div>
@@ -234,91 +196,100 @@ export default function LikedProfilesPage() {
             style={{
               marginTop: "1.5rem",
               display: "grid",
-              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
               gap: "1rem",
+              alignItems: "start",
             }}
           >
             {visible.map((p) => {
               const showFallback = !p.photo || brokenImages[p.id];
 
               return (
-                <div
-                  key={p.id}
-                  style={{
-                    border: "1px solid #eee",
-                    borderRadius: 14,
-                    overflow: "hidden",
-                    background: "white",
-                  }}
-                >
-                  <div
+                <div key={p.id} style={cardStyle}>
+                  <Link
+                    href={`/profiles/${p.id}`}
                     style={{
-                      width: "100%",
-                      aspectRatio: "4 / 3",
-                      background: "#f3f3f3",
-                      position: "relative",
+                      textDecoration: "none",
+                      color: "inherit",
+                      display: "block",
                     }}
                   >
                     <div
                       style={{
-                        position: "absolute",
-                        top: 10,
-                        right: 10,
-                        zIndex: 2,
-                        padding: "0.25rem 0.55rem",
-                        borderRadius: 999,
-                        border: "1px solid #ddd",
-                        background: "rgba(255,255,255,0.9)",
-                        color: "#333",
-                        fontSize: "0.8rem",
-                        fontWeight: 600,
+                        width: "100%",
+                        aspectRatio: "4 / 3",
+                        background: "#f3f3f3",
+                        position: "relative",
                       }}
                     >
-                      Liked you
-                    </div>
+                      <div style={badgeStyle}>Liked you</div>
 
-                    {showFallback ? (
-                      <div
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          display: "grid",
-                          placeItems: "center",
-                          background: "#f2f2f2",
-                          color: "#555",
-                          fontSize: "1.5rem",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {getInitials(p.displayName)}
-                      </div>
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={p.photo || ""}
-                        alt={p.displayName}
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
-                        }}
-                        onError={() =>
-                          setBrokenImages((prev) => ({ ...prev, [p.id]: true }))
-                        }
-                      />
-                    )}
-                  </div>
+                      {showFallback ? (
+                        <div style={fallbackStyle}>{getInitials(p.displayName)}</div>
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={p.photo || ""}
+                          alt={p.displayName}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                          onError={() =>
+                            setBrokenImages((prev) => ({
+                              ...prev,
+                              [p.id]: true,
+                            }))
+                          }
+                        />
+                      )}
+                    </div>
+                  </Link>
 
                   <div style={{ padding: "1rem" }}>
-                    <div style={{ fontSize: "1.15rem", fontWeight: 600 }}>
+                    <div style={{ fontSize: "1.3rem", fontWeight: 800 }}>
                       {p.displayName}
                     </div>
 
-                    <div style={{ color: "#666", marginTop: "0.4rem" }}>
+                    <div style={{ color: "#666", marginTop: "0.35rem" }}>
                       {p.age} • {p.city}, {p.stateUS}
                     </div>
 
-                    <div style={{ marginTop: "0.75rem", color: "#555" }}>
+                    <div
+                      style={{
+                        marginTop: "0.8rem",
+                        display: "grid",
+                        gridTemplateColumns: "1fr",
+                        gap: "0.6rem",
+                      }}
+                    >
+                      <Link href={`/profiles/${p.id}`} style={primaryButtonStyle}>
+                        View Profile
+                      </Link>
+
+                      <Link
+                        href={`/messages?withProfileId=${encodeURIComponent(
+                          p.id
+                        )}&with=${encodeURIComponent(p.displayName)}`}
+                        style={secondaryButtonStyle}
+                      >
+                        Message
+                      </Link>
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: "0.9rem",
+                        color: "#555",
+                        fontSize: "0.95rem",
+                        lineHeight: 1.45,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 5,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                    >
                       {p.identityPreview}
                     </div>
 
@@ -331,68 +302,10 @@ export default function LikedProfilesPage() {
                       }}
                     >
                       {(p.tags || []).slice(0, 3).map((t) => (
-                        <span
-                          key={t}
-                          style={{
-                            fontSize: "0.85rem",
-                            padding: "0.25rem 0.5rem",
-                            border: "1px solid #ddd",
-                            borderRadius: 999,
-                            color: "#444",
-                          }}
-                        >
+                        <span key={t} style={tagStyle}>
                           {t}
                         </span>
                       ))}
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: "1rem",
-                        display: "flex",
-                        gap: "0.6rem",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <Link
-                        href={`/profiles/${p.id}`}
-                        style={{
-                          padding: "0.6rem 0.9rem",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          textDecoration: "none",
-                          color: "inherit",
-                          display: "inline-block",
-                        }}
-                      >
-                        View
-                      </Link>
-
-                      <Link
-                        href={`/messages?withProfileId=${encodeURIComponent(p.id)}&with=${encodeURIComponent(
-                          p.displayName
-                        )}`}
-                        style={{
-                          padding: "0.6rem 0.9rem",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          textDecoration: "none",
-                          color: "inherit",
-                          display: "inline-block",
-                        }}
-                      >
-                        Message
-                      </Link>
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: "0.75rem",
-                        color: "#777",
-                        fontSize: "0.9rem",
-                      }}
-                    >
-                      This person liked you.
                     </div>
                   </div>
                 </div>
@@ -404,3 +317,86 @@ export default function LikedProfilesPage() {
     </main>
   );
 }
+
+const navStyle: React.CSSProperties = {
+  padding: "0.65rem 1rem",
+  border: "1px solid #ccc",
+  borderRadius: 10,
+  textDecoration: "none",
+  color: "inherit",
+  background: "white",
+};
+
+const noticeStyle: React.CSSProperties = {
+  marginTop: "1.5rem",
+  padding: "1.25rem",
+  borderRadius: 14,
+  border: "1px solid #eee",
+  color: "#555",
+  background: "white",
+};
+
+const cardStyle: React.CSSProperties = {
+  border: "1px solid #eee",
+  borderRadius: 18,
+  overflow: "hidden",
+  background: "white",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.06)",
+};
+
+const badgeStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 10,
+  right: 10,
+  zIndex: 2,
+  padding: "0.35rem 0.7rem",
+  borderRadius: 999,
+  border: "1px solid #ddd",
+  background: "rgba(255,255,255,0.92)",
+  color: "#333",
+  fontSize: "0.85rem",
+  fontWeight: 700,
+};
+
+const fallbackStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  display: "grid",
+  placeItems: "center",
+  background: "#f2f2f2",
+  color: "#555",
+  fontSize: "1.5rem",
+  fontWeight: 700,
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  padding: "0.75rem 1rem",
+  borderRadius: 12,
+  border: "1px solid #0a5",
+  textDecoration: "none",
+  color: "#064",
+  background: "white",
+  display: "block",
+  textAlign: "center",
+  fontWeight: 800,
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  padding: "0.75rem 1rem",
+  borderRadius: 12,
+  border: "1px solid #ccc",
+  textDecoration: "none",
+  color: "inherit",
+  background: "white",
+  display: "block",
+  textAlign: "center",
+  fontWeight: 700,
+};
+
+const tagStyle: React.CSSProperties = {
+  fontSize: "0.85rem",
+  padding: "0.25rem 0.5rem",
+  border: "1px solid #ddd",
+  borderRadius: 999,
+  color: "#444",
+};
