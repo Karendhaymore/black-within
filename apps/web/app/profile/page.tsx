@@ -721,6 +721,7 @@ export default function MyProfilePage() {
             flexWrap: "wrap",
             alignItems: "flex-start",
           }}
+         > 
         <div>
           <h1 style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>
             My Profile
