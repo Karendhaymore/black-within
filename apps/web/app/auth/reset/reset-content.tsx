@@ -15,8 +15,9 @@ export default function ResetContent() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleReset(e: React.FormEvent) {
+  async function handleReset(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
     setMessage("");
     setError("");
 
@@ -43,34 +44,36 @@ export default function ResetContent() {
         headers: {
           "Content-Type": "application/json",
         },
-       body: JSON.stringify({
-         token,
-         password,
-      }),
+        body: JSON.stringify({
+          token,
+          password,
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(data.detail || data.message || "Password reset failed.");
+        const detail =
+          typeof data?.detail === "string"
+            ? data.detail
+            : typeof data?.message === "string"
+              ? data.message
+              : "Password reset failed. Please request a new reset link and try again.";
+
+        throw new Error(detail);
       }
 
       setMessage("Your password has been reset. You can now log in.");
       setPassword("");
       setConfirmPassword("");
-    }catch (err: any) {
-  console.error("Reset password error:", err);
+    } catch (err: unknown) {
+      console.error("Reset password error:", err);
 
-  if (typeof err === "string") {
-    setError(err);
-  } else if (err?.message) {
-    setError(err.message);
-  } else if (err?.detail) {
-    setError(err.detail);
-  } else {
-    setError("Password reset failed. Please request a new reset link and try again.");
-  }
-}
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Password reset failed. Please request a new reset link and try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -90,6 +93,7 @@ export default function ResetContent() {
             onChange={(e) => setPassword(e.target.value)}
             required
             style={{
+              display: "block",
               width: "100%",
               padding: 12,
               marginTop: 6,
@@ -110,6 +114,7 @@ export default function ResetContent() {
             onChange={(e) => setConfirmPassword(e.target.value)}
             required
             style={{
+              display: "block",
               width: "100%",
               padding: 12,
               marginTop: 6,
