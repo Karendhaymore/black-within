@@ -701,6 +701,32 @@ export default function MyProfilePage() {
 
     showToast("Photos reordered. Click Save profile to keep the new order.");
   }
+   const completionFields = [
+  form.displayName,
+  form.age,
+  form.city,
+  form.stateUS,
+  form.photo,
+  form.photo2,
+  form.gender,
+  form.lookingForGender,
+  form.relationshipIntent,
+  form.datingChallenge,
+  form.personalTruth,
+  form.mateQualities,
+  form.funActivities,
+  form.smokes,
+  form.drinks,
+  form.educationLevel,
+];
+
+const completedFields = completionFields.filter(
+  (field) => String(field || "").trim().length > 0
+).length;
+
+const profileCompletion = Math.round(
+  (completedFields / completionFields.length) * 100
+);
 
   return (
     <main
