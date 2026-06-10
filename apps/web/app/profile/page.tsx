@@ -727,14 +727,6 @@ export default function MyProfilePage() {
               My Profile
             </h1>
 
-            <div
-              style={{
-                marginTop: "0.75rem",
-                color: "#777",
-                fontSize: "0.92rem",
-              }}
-          </div>
-
           <div
             style={{
               display: "flex",
