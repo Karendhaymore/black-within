@@ -736,7 +736,6 @@ export default function MyProfilePage() {
             flexWrap: "wrap",
           }}
         >
-          >
             <Link
               href="/discover"
               style={{
