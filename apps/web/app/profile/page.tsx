@@ -733,11 +733,7 @@ export default function MyProfilePage() {
                 color: "#777",
                 fontSize: "0.92rem",
               }}
-            >
-              Your user id: <code>{userId || "..."}</code>
-              {loadingExisting ? (
-                <span style={{ marginLeft: 10 }}>(loading your profile…)</span>
-              ) : null}
+  
             </div>
           </div>
 
