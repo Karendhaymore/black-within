@@ -733,8 +733,6 @@ export default function MyProfilePage() {
                 color: "#777",
                 fontSize: "0.92rem",
               }}
-  
-            </div>
           </div>
 
           <div
