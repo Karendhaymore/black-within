@@ -1141,7 +1141,7 @@ setProfiles(items);
                         style={{
                           marginTop: 12,
                           display: "grid",
-                          gridTemplateColumns: "1fr 1fr",
+                          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
                           gap: 8,
                         }}
                        >
