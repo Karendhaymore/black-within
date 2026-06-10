@@ -89,7 +89,16 @@ export default function ResetContent() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            style={{ width: "100%", padding: 12, marginTop: 6, marginBottom: 16 }}
+            style={{
+              width: "100%",
+              padding: 12,
+              marginTop: 6,
+              marginBottom: 16,
+              border: "1px solid #333",
+              borderRadius: 6,
+              backgroundColor: "#fff",
+              color: "#000",
+            }}
           />
         </label>
 
@@ -100,7 +109,16 @@ export default function ResetContent() {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             required
-            style={{ width: "100%", padding: 12, marginTop: 6, marginBottom: 16 }}
+            style={{
+              width: "100%",
+              padding: 12,
+              marginTop: 6,
+              marginBottom: 16,
+              border: "1px solid #333",
+              borderRadius: 6,
+              backgroundColor: "#fff",
+              color: "#000",
+            }}
           />
         </label>
 
