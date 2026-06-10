@@ -140,7 +140,18 @@ class AuthAccount(Base):
     user_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(500))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    verification_token: Mapped[Optional[str]] = mapped_column(
+        String(120),
+        nullable=True,
+        index=True,
+       )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, 
+        default=datetime.utcnow, 
+        index=True
+       )
 
 
 class Profile(Base):
