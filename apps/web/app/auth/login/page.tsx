@@ -139,8 +139,10 @@ export default function LoginPage() {
 
       if (!res.ok) {
         throw new Error(
-          data?.detail || "Unable to send verification email."
-        );
+          data?.detail === "Not Found"
+            ? "Verification resend is not available yet. Please try again after the latest update finishes deploying."
+            : data?.detail || "Unable to send verification email."
+         );
       }
 
       setSuccess(
