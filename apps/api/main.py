@@ -1900,7 +1900,7 @@ def signup(payload: LoginPayload):
         new_auth = AuthAccount(
             user_id=user.id,
             email=email,
-            password_hash=hash_password(password),
+            password_hash=_hash_password(password),
             email_verified=False,
             verification_token=verification_token,
         )
