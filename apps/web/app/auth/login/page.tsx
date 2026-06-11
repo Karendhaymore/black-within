@@ -239,7 +239,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {showVerificationButton && (
+        {error && (
           <button
             type="button"
             onClick={resendVerificationEmail}
