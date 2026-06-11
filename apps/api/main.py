@@ -1959,6 +1959,62 @@ def verify_email(token: str):
         status_code=302,
    )
 
+@app.post("/auth/resend-verification")
+def resend_verification(payload: LoginPayload):
+    email = _normalize_email(payload.email)
+
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required.")
+
+    with Session(engine) as session:
+        acct = session.execute(
+            select(AuthAccount).where(AuthAccount.email == email)
+        ).scalar_one_or_none()
+
+        # Do not reveal whether the email exists.
+        if not acct:
+            return {
+                "ok": True,
+                "message": "If an unverified account exists for this email, a verification email has been sent.",
+            }
+
+        if acct.email_verified:
+            return {
+                "ok": True,
+                "message": "This email is already verified. You can log in.",
+            }
+
+        verification_token = uuid.uuid4().hex
+        acct.verification_token = verification_token
+        session.add(acct)
+        session.commit()
+
+    verify_link = f"{BASE_URL}/auth/verify-email?token={verification_token}"
+
+    html = f"""
+<div>
+  <p>Welcome back to Black Within.</p>
+  <p>Please verify your email address to activate your account.</p>
+  <p>
+    <a href="{verify_link}" style="display:inline-block;padding:12px 16px;border-radius:10px;background:#0a5;color:#fff;text-decoration:none;font-weight:700;">
+      Verify Email
+    </a>
+  </p>
+  <p>If you did not request this email, you can ignore it.</p>
+</div>
+"""
+
+    try:
+        _send_email_sendgrid_one(email, "Verify your Black Within email", html)
+    except Exception as e:
+        print("Resend verification email error:", str(e))
+
+    return {
+        "ok": True,
+        "message": "If an unverified account exists for this email, a verification email has been sent.",
+    }
+
+
 
 @app.post("/auth/login")
 def login(payload: LoginPayload):
