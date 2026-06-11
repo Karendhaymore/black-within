@@ -1890,16 +1890,20 @@ def signup(payload: LoginPayload):
                 detail="An account with this email already exists."
             )
 
-        # 3️⃣ Create new user
+        # 3 Create new user
         user = User(id=str(uuid.uuid4()))
         session.add(user)
         session.flush()
 
-       new_auth = AuthAccount(
-           user_id=user.id,
-           email=email,
-           password_hash=hash_password(password)
-       )
+        verification_token = uuid.uuid4().hex
+
+        new_auth = AuthAccount(
+            user_id=user.id,
+            email=email,
+            password_hash=hash_password(password),
+            email_verified=False,
+            verification_token=verification_token,
+        )
 
         session.add(new_auth)
         session.commit()
