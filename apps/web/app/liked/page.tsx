@@ -43,7 +43,8 @@ export default function LikedProfilesPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
-
+  const router = useRouter();
+  
   function showToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2200);
@@ -73,12 +74,17 @@ export default function LikedProfilesPage() {
     }
   }
 
-  useEffect(() => {
-    const uid = getOrCreateUserId();
-    setUserId(uid);
-    refresh(uid);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+ useEffect(() => {
+  const uid = localStorage.getItem("bw_user_id");
+
+  if (!uid) {
+    router.replace("/auth/login");
+    return;
+  }
+
+  setUserId(uid);
+  refresh(uid);
+}, [router]);
 
   const visible = useMemo(() => {
     return (items || []).filter((p) => p.isAvailable);
