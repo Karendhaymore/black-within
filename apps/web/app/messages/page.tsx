@@ -214,6 +214,15 @@ function MessagesInner() {
   const withProfileId = sp.get("withProfileId") || "";
 
   const userId = useMemo(() => getLoggedInUserId(), []);
+  useEffect(() => {
+    const loggedIn = localStorage.getItem("bw_logged_in");
+    const uid = localStorage.getItem("bw_user_id");
+
+    if (loggedIn !== "1" || !uid) {
+      router.replace("/auth/login");
+      return;
+    }
+  }, [router]);
 
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [access, setAccess] = useState<MessagingAccessResponse | null>(null);
