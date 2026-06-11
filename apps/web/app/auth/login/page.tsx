@@ -156,10 +156,6 @@ export default function LoginPage() {
     }
   }
 
-  const showVerificationButton =
-    error.toLowerCase().includes("verify") ||
-    error.toLowerCase().includes("verification");
-
   return (
     <main
       style={{
