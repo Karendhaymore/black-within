@@ -21,7 +21,7 @@ import stripe
 from fastapi import FastAPI, HTTPException, Query, Request, Header, UploadFile, File, BackgroundTasks
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from fastapi import UploadFile, File, Form
 
