@@ -1923,12 +1923,12 @@ def signup(payload: LoginPayload):
             _send_email_sendgrid_one(email, "Verify your Black Within email", html)
          except Exception as e:
              print("Verification email send error:", str(e))
-    return {
+   return {
         "ok": True,
         "user_id": new_user.id,
-        "email": email
-    }
-
+        "email": email,
+        "message": "Account created. Please check your email to verify your account."
+   }
 
 @app.post("/auth/login")
 def login(payload: LoginPayload):
