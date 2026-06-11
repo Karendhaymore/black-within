@@ -1993,10 +1993,7 @@ def login(payload: LoginPayload):
                 detail="Please verify your email before logging in."
             )
 
-        # 3) Check ban status from Profile (this is what your admin suspend updates)
-
-        p = session.execute(
-        
+       
         # 3) Check ban status from Profile (this is what your admin suspend updates)
         p = session.execute(
             select(Profile).where(Profile.owner_user_id == acct.user_id)
