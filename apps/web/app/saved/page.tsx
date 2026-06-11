@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { getOrCreateUserId } from "../lib/user";
 import { useRouter } from "next/navigation";
 
 type ApiProfile = {
@@ -55,18 +54,16 @@ async function apiUnsaveProfile(userId: string, profileId: string) {
 }
 
 export default function SavedPage() {
-  const [userId, setUserId] = useState<string>("");
+  const router = useRouter();
 
+  const [userId, setUserId] = useState<string>("");
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // For broken images → fallback to initials
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
 
-  // Only show profiles that are available + saved
   const savedProfiles = useMemo(() => {
     const set = new Set(savedIds);
     return profiles.filter((p) => p.isAvailable && set.has(p.id));
@@ -106,25 +103,23 @@ export default function SavedPage() {
     }
   }
 
-   useEffect(() => {
-  const loggedIn = localStorage.getItem("bw_logged_in");
-  const uid = localStorage.getItem("bw_user_id");
+  useEffect(() => {
+    const loggedIn = localStorage.getItem("bw_logged_in");
+    const uid = localStorage.getItem("bw_user_id");
 
-  if (loggedIn !== "1" || !uid) {
-    router.replace("/auth/login");
-    return;
-  }
+    if (loggedIn !== "1" || !uid) {
+      router.replace("/auth/login");
+      return;
+    }
 
-  setUserId(uid);
-  refresh(uid);
-}, [router]);
+    setUserId(uid);
+    refresh(uid);
+  }, [router]);
 
   async function onRemove(profileId: string) {
     if (!userId) return;
 
     const prev = savedIds;
-
-    // optimistic
     setSavedIds((curr) => curr.filter((id) => id !== profileId));
 
     try {
@@ -162,104 +157,33 @@ export default function SavedPage() {
               Saved Profiles
             </h1>
             <p style={{ color: "#555" }}>
-              Saved profiles stay here until you remove them (or the profile is
-              no longer available).
+              Saved profiles stay here until you remove them.
             </p>
           </div>
 
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-            <Link
-              href="/discover"
-              style={{
-                padding: "0.65rem 1rem",
-                border: "1px solid #ccc",
-                borderRadius: 10,
-                textDecoration: "none",
-                color: "inherit",
-              }}
-            >
+            <Link href="/discover" style={navBtn}>
               Back to Discover
             </Link>
 
-            <Link
-              href="/notifications"
-              style={{
-                padding: "0.65rem 1rem",
-                border: "1px solid #ccc",
-                borderRadius: 10,
-                textDecoration: "none",
-                color: "inherit",
-              }}
-            >
+            <Link href="/notifications" style={navBtn}>
               Notifications
             </Link>
           </div>
         </div>
 
         {apiError && (
-          <div
-            style={{
-              marginTop: "0.9rem",
-              padding: "0.85rem",
-              borderRadius: 12,
-              border: "1px solid #f0c9c9",
-              background: "#fff7f7",
-              color: "#7a2d2d",
-            }}
-          >
+          <div style={errorBox}>
             <b>API notice:</b> {apiError}
           </div>
         )}
 
-        {toast && (
-          <div
-            style={{
-              marginTop: "1rem",
-              padding: "0.75rem",
-              borderRadius: 10,
-              border: "1px solid #cfe7cf",
-              background: "#f6fff6",
-            }}
-          >
-            {toast}
-          </div>
-        )}
-
-        <div
-          style={{
-            marginTop: "1.25rem",
-            padding: "0.85rem",
-            borderRadius: 12,
-            border: "1px solid #eee",
-            color: "#555",
-          }}
-        >
-          You’re viewing saved preview profiles while Black Within opens
-          intentionally.
-        </div>
+        {toast && <div style={toastBox}>{toast}</div>}
 
         {loading ? (
-          <div
-            style={{
-              marginTop: "1.5rem",
-              padding: "1.25rem",
-              borderRadius: 14,
-              border: "1px solid #eee",
-              color: "#555",
-            }}
-          >
-            Loading your saved profiles…
-          </div>
+          <div style={emptyBox}>Loading your saved profiles…</div>
         ) : savedProfiles.length === 0 ? (
-          <div
-            style={{
-              marginTop: "1.5rem",
-              padding: "1.25rem",
-              borderRadius: 14,
-              border: "1px solid #eee",
-              color: "#555",
-            }}
-          >
+          <div style={emptyBox}>
             <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>
               No saved profiles yet.
             </div>
@@ -268,17 +192,7 @@ export default function SavedPage() {
             </div>
 
             <div style={{ marginTop: "1rem" }}>
-              <Link
-                href="/discover"
-                style={{
-                  padding: "0.65rem 1rem",
-                  border: "1px solid #ccc",
-                  borderRadius: 10,
-                  textDecoration: "none",
-                  color: "inherit",
-                  display: "inline-block",
-                }}
-              >
+              <Link href="/discover" style={navBtn}>
                 Go to Discover
               </Link>
             </div>
@@ -288,7 +202,7 @@ export default function SavedPage() {
             style={{
               marginTop: "1.5rem",
               display: "grid",
-              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
               gap: "1rem",
             }}
           >
@@ -296,57 +210,12 @@ export default function SavedPage() {
               const showFallback = !p.photo || brokenImages[p.id];
 
               return (
-                <div
-                  key={p.id}
-                  style={{
-                    border: "1px solid #cfe7cf",
-                    borderRadius: 14,
-                    overflow: "hidden",
-                    boxShadow: "0 0 0 2px rgba(207,231,207,0.35) inset",
-                    background: "white",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "100%",
-                      aspectRatio: "4 / 3",
-                      background: "#f3f3f3",
-                      position: "relative",
-                    }}
-                  >
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 10,
-                        right: 10,
-                        zIndex: 2,
-                        padding: "0.25rem 0.55rem",
-                        borderRadius: 999,
-                        border: "1px solid #cfe7cf",
-                        background: "rgba(246, 255, 246, 0.95)",
-                        color: "#256b36",
-                        fontSize: "0.8rem",
-                        fontWeight: 600,
-                      }}
-                    >
-                      Saved
-                    </div>
+                <div key={p.id} style={cardStyle}>
+                  <div style={imageWrap}>
+                    <div style={savedBadge}>Saved</div>
 
                     {showFallback ? (
-                      <div
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          display: "grid",
-                          placeItems: "center",
-                          background: "#f2f2f2",
-                          color: "#555",
-                          fontSize: "1.5rem",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {getInitials(p.displayName)}
-                      </div>
+                      <div style={fallbackStyle}>{getInitials(p.displayName)}</div>
                     ) : (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -386,16 +255,7 @@ export default function SavedPage() {
                       }}
                     >
                       {(p.tags || []).slice(0, 3).map((t) => (
-                        <span
-                          key={t}
-                          style={{
-                            fontSize: "0.85rem",
-                            padding: "0.25rem 0.5rem",
-                            border: "1px solid #ddd",
-                            borderRadius: 999,
-                            color: "#444",
-                          }}
-                        >
+                        <span key={t} style={tagStyle}>
                           {t}
                         </span>
                       ))}
@@ -409,29 +269,11 @@ export default function SavedPage() {
                         flexWrap: "wrap",
                       }}
                     >
-                      <Link
-                        href={`/profiles/${p.id}`}
-                        style={{
-                          padding: "0.6rem 0.9rem",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          textDecoration: "none",
-                          color: "inherit",
-                        }}
-                      >
+                      <Link href={`/profiles/${p.id}`} style={navBtn}>
                         View
                       </Link>
 
-                      <button
-                        onClick={() => onRemove(p.id)}
-                        style={{
-                          padding: "0.6rem 0.9rem",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
-                          cursor: "pointer",
-                          background: "white",
-                        }}
-                      >
+                      <button onClick={() => onRemove(p.id)} style={buttonStyle}>
                         Remove
                       </button>
                     </div>
@@ -451,13 +293,99 @@ export default function SavedPage() {
             })}
           </div>
         )}
-
-        <div style={{ marginTop: "2rem", color: "#777", fontSize: "0.95rem" }}>
-          MVP note: Saved Profiles are stored in the database so they survive
-          refresh and redeploys. Full cross-device syncing will be automatic once
-          login is fully wired.
-        </div>
       </div>
     </main>
   );
 }
+
+const navBtn: React.CSSProperties = {
+  padding: "0.65rem 1rem",
+  border: "1px solid #ccc",
+  borderRadius: 10,
+  textDecoration: "none",
+  color: "inherit",
+  display: "inline-block",
+  background: "white",
+};
+
+const buttonStyle: React.CSSProperties = {
+  padding: "0.6rem 0.9rem",
+  borderRadius: 10,
+  border: "1px solid #ccc",
+  cursor: "pointer",
+  background: "white",
+};
+
+const errorBox: React.CSSProperties = {
+  marginTop: "0.9rem",
+  padding: "0.85rem",
+  borderRadius: 12,
+  border: "1px solid #f0c9c9",
+  background: "#fff7f7",
+  color: "#7a2d2d",
+};
+
+const toastBox: React.CSSProperties = {
+  marginTop: "1rem",
+  padding: "0.75rem",
+  borderRadius: 10,
+  border: "1px solid #cfe7cf",
+  background: "#f6fff6",
+};
+
+const emptyBox: React.CSSProperties = {
+  marginTop: "1.5rem",
+  padding: "1.25rem",
+  borderRadius: 14,
+  border: "1px solid #eee",
+  color: "#555",
+  background: "white",
+};
+
+const cardStyle: React.CSSProperties = {
+  border: "1px solid #cfe7cf",
+  borderRadius: 14,
+  overflow: "hidden",
+  boxShadow: "0 0 0 2px rgba(207,231,207,0.35) inset",
+  background: "white",
+};
+
+const imageWrap: React.CSSProperties = {
+  width: "100%",
+  aspectRatio: "4 / 3",
+  background: "#f3f3f3",
+  position: "relative",
+};
+
+const savedBadge: React.CSSProperties = {
+  position: "absolute",
+  top: 10,
+  right: 10,
+  zIndex: 2,
+  padding: "0.25rem 0.55rem",
+  borderRadius: 999,
+  border: "1px solid #cfe7cf",
+  background: "rgba(246, 255, 246, 0.95)",
+  color: "#256b36",
+  fontSize: "0.8rem",
+  fontWeight: 600,
+};
+
+const fallbackStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  display: "grid",
+  placeItems: "center",
+  background: "#f2f2f2",
+  color: "#555",
+  fontSize: "1.5rem",
+  fontWeight: 600,
+};
+
+const tagStyle: React.CSSProperties = {
+  fontSize: "0.85rem",
+  padding: "0.25rem 0.5rem",
+  border: "1px solid #ddd",
+  borderRadius: 999,
+  color: "#444",
+};
