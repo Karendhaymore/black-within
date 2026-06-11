@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getOrCreateUserId } from "../lib/user";
+import { useRouter } from "next/navigation";
 
 type ApiProfile = {
   id: string;
