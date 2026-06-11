@@ -1911,17 +1911,17 @@ def signup(payload: LoginPayload):
         verify_link = f"{BASE_URL}/auth/verify-email?token={verification_token}"
 
         html = f"""
-        <div>
-          <p>Welcome to Black Within.</p>
-          <p>Please verify your email address to activate your account.</p>
-          <p>
-            <a href="{verify_link}" style="display:inline-block;padding:12px 16px;border-radius:10px;background:#0a5;color:#fff;text-decoration:none;font-weight:700;">
-              Verify Email
-            </a>
-          </p>
-          <p>If you did not create this account, you can ignore this email.</p>
-         </div>
-         """
+<div>
+  <p>Welcome to Black Within.</p>
+  <p>Please verify your email address to activate your account.</p>
+  <p>
+    <a href="{verify_link}" style="display:inline-block;padding:12px 16px;border-radius:10px;background:#0a5;color:#fff;text-decoration:none;font-weight:700;">
+      Verify Email
+    </a>
+  </p>
+  <p>If you did not create this account, you can ignore this email.</p>
+</div>
+"""
 
          try:
             _send_email_sendgrid_one(email, "Verify your Black Within email", html)
