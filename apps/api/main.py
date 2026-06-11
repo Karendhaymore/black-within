@@ -1934,6 +1934,32 @@ def signup(payload: LoginPayload):
             "email": email,
             "message": "Account created. Please check your email to verify your account.",
         }
+@app.get("/auth/verify-email")
+def verify_email(token: str):
+    token = (token or "").strip()
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Verification token is required.")
+
+    with Session(engine) as session:
+        account = session.execute(
+            select(AuthAccount).where(AuthAccount.verification_token == token)
+        ).scalar_one_or_none()
+
+        if not account:
+            raise HTTPException(status_code=400, detail="This verification link is invalid or expired.")
+
+        account.email_verified = True
+        account.verification_token = None
+        session.add(account)
+        session.commit()
+
+    return {
+        "ok": True,
+        "message": "Your email has been verified. You can now log in.",
+    }
+
+
 @app.post("/auth/login")
 def login(payload: LoginPayload):
     email = _normalize_email(payload.email)
