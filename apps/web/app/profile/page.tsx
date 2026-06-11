@@ -335,11 +335,11 @@ export default function MyProfilePage() {
   useEffect(() => {
     const uid = getLoggedInUserId();
     if (!uid) {
-      window.location.href = "/auth";
+      router.replace("/auth/login");
       return;
     }
     setUserId(uid);
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!userId) return;
