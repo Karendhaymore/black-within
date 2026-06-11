@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getOrCreateUserId } from "../lib/user";
+import { useRouter } from "next/navigation";
 
 type ApiProfile = {
   id: string;
@@ -105,12 +106,18 @@ export default function SavedPage() {
     }
   }
 
-  useEffect(() => {
-    const uid = getOrCreateUserId();
-    setUserId(uid);
-    refresh(uid);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+   useEffect(() => {
+  const loggedIn = localStorage.getItem("bw_logged_in");
+  const uid = localStorage.getItem("bw_user_id");
+
+  if (loggedIn !== "1" || !uid) {
+    router.replace("/auth/login");
+    return;
+  }
+
+  setUserId(uid);
+  refresh(uid);
+}, [router]);
 
   async function onRemove(profileId: string) {
     if (!userId) return;
