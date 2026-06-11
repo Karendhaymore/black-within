@@ -251,7 +251,6 @@ export default function LoginPage() {
        >
           {sendingVerification ? "Sending..." : "Resend Verification Email"}
        </button>
-        )}
 
         <button
           type="submit"
