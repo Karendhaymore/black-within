@@ -1895,11 +1895,11 @@ def signup(payload: LoginPayload):
         session.add(user)
         session.flush()
 
-        new_auth = AuthAccount(
-            user_id=user.id,
-            email=email,
-            password_hash=_hash_password(password)
-        )
+       new_auth = AuthAccount(
+           user_id=user.id,
+           email=email,
+           password_hash=hash_password(password)
+       )
 
         session.add(new_auth)
         session.commit()
