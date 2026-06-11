@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
@@ -246,6 +247,7 @@ function buildIdentityPreview(args: {
 
 export default function MyProfilePage() {
   const [userId, setUserId] = useState<string>("");
+  const router = useRouter();
 
   const [loadingExisting, setLoadingExisting] = useState<boolean>(true);
   const [saving, setSaving] = useState(false);
