@@ -1954,10 +1954,10 @@ def verify_email(token: str):
         session.add(account)
         session.commit()
 
-    return {
-        "ok": True,
-        "message": "Your email has been verified. You can now log in.",
-    }
+    return RedirectResponse(
+        url=f"{APP_WEB_BASE_URL}/auth/login?verified=1",
+        status_code=302,
+   )
 
 
 @app.post("/auth/login")
