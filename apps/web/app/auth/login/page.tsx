@@ -239,27 +239,22 @@ export default function LoginPage() {
           </div>
         )}
 
-        {error && (
-          <button
-            type="button"
-            onClick={resendVerificationEmail}
-            disabled={sendingVerification}
-            style={{
-              padding: "0.8rem",
-              borderRadius: 10,
-              border: "1px solid #0a5",
-              background: "#fff",
-              color: "#0a5",
-              fontWeight: 700,
-              cursor: sendingVerification
-                ? "not-allowed"
-                : "pointer",
-            }}
-          >
-            {sendingVerification
-              ? "Sending..."
-              : "Resend Verification Email"}
-          </button>
+        <button
+          type="button"
+          onClick={resendVerificationEmail}
+          disabled={sendingVerification}
+          style={{
+            padding: "0.8rem",
+            borderRadius: 10,
+            border: "1px solid #0a5",
+            background: "#fff",
+            color: "#0a5",
+            fontWeight: 700,
+            cursor: sendingVerification ? "not-allowed" : "pointer",
+         }}
+       >
+          {sendingVerification ? "Sending..." : "Resend Verification Email"}
+       </button>
         )}
 
         <button
