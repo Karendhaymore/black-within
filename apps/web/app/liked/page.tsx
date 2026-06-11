@@ -74,10 +74,11 @@ export default function LikedProfilesPage() {
     }
   }
 
- useEffect(() => {
+  useEffect(() => {
+  const loggedIn = localStorage.getItem("bw_logged_in");
   const uid = localStorage.getItem("bw_user_id");
 
-  if (!uid) {
+  if (loggedIn !== "1" || !uid) {
     router.replace("/auth/login");
     return;
   }
