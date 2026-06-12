@@ -189,7 +189,7 @@ export default function LikedProfilesPage() {
         )}
 
         {loading ? (
-          <div style={noticeStyle}>Loading liked profiles…</div>
+          <div style={noticeStyle}>Loading connection activity…</div>
         ) : visible.length === 0 ? (
           <div style={noticeStyle}>
             <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>
