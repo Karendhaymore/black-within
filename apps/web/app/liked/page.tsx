@@ -230,7 +230,7 @@ export default function LikedProfilesPage() {
                         position: "relative",
                       }}
                     >
-                      <div style={badgeStyle}>Liked you</div>
+                      <div style={badgeStyle}>Interested</div>
 
                       {showFallback ? (
                         <div style={fallbackStyle}>{getInitials(p.displayName)}</div>
