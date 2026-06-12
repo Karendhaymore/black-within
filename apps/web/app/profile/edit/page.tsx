@@ -86,7 +86,7 @@ export default function EditProfilePage() {
     const uid = localStorage.getItem("bw_user_id");
 
    if (loggedIn !== "1" || !uid) {
-     router.replace("/auth/login");
+     window.location.href = "/auth/login";
      return;
   }
 
