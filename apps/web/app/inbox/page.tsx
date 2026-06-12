@@ -206,7 +206,7 @@ export default function InboxPage() {
       setErr("");
 
       try {
-        const threads = await fetchThreads(userId);
+        const threads = await fetchThreads(uid);
         if (cancelled) return;
 
         // Sort newest first (best-effort)
