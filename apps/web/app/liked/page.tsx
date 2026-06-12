@@ -114,12 +114,12 @@ export default function LikedProfilesPage() {
                 fontSize: "clamp(2rem, 8vw, 3.2rem)",
                 marginBottom: "0.25rem",
               }}
-            >
-              Liked Profiles
-            </h1>
-            <p style={{ color: "#555", fontSize: "1rem" }}>
-              These are people who liked your profile.
-            </p>
+           >
+             Connection Activity
+           </h1>
+           <p style={{ color: "#555", fontSize: "1rem" }}>
+             These are people who have expressed interest in exploring a meaningful connection with you.
+           </p>
           </div>
 
           <div
