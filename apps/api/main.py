@@ -1415,11 +1415,12 @@ def _ensure_user(user_id: str) -> str:
     user_id = (user_id or "").strip()
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
+
     with Session(engine) as session:
         user = session.get(User, user_id)
         if not user:
-            session.add(User(id=user_id))
-            session.commit()
+            raise HTTPException(status_code=401, detail="Invalid user.")
+
     return user_id
 
 
