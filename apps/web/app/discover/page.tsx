@@ -646,7 +646,7 @@ setProfiles(items);
     try {
       await apiLikeProfile(userId, profile.id);
       await Promise.all([refreshSavedAndLikes(userId), refreshLikesStatus(userId)]);
-      showToast("Like sent.");
+      showToast("Connection explored.");
     } catch (e: any) {
       setLikedIds(prev);
 
@@ -658,8 +658,8 @@ setProfiles(items);
         msg.includes("429") ||
         msg.toLowerCase().includes("like limit")
       ) {
-        showToast("Upgrade to Premium for unlimited likes.");
-        setApiError("Upgrade to Premium for unlimited likes.");
+        showToast("Upgrade to Premium for unlimited Explore Connections.");
+        setApiError("Upgrade to Premium for unlimited Explore Connections.");
       } else {
         showToast(msg || "Could not like right now. Please try again.");
         setApiError(msg || "Like failed.");
@@ -828,10 +828,10 @@ setProfiles(items);
 
             <div style={{ fontSize: 13, color: "#444" }}>
               {loadingLikesStatus ? (
-                <span>Likes today: loading…</span>
+                <span>Explore connections today: loading…</span>
               ) : likesStatus ? (
                 <span>
-                  Likes left: <strong>{likesStatus.likesLeft}</strong> / <strong>{likesStatus.limit}</strong>
+                  Explore Connections left: <strong>{likesStatus.likesLeft}</strong> / <strong>{likesStatus.limit}</strong>
                   {resetHint ? (
                     <span style={{ color: "#666" }}>
                       {" "}
@@ -840,7 +840,7 @@ setProfiles(items);
                   ) : null}
                 </span>
               ) : (
-                <span>Likes today: unavailable</span>
+                <span>Explore connections today: unavailable</span>
               )}
             </div>
           </div>
@@ -853,7 +853,7 @@ setProfiles(items);
               <Icon name="bookmark" /> Saved
             </Link>
             <Link href="/liked" style={navBtnStyle}>
-              <Icon name="heart" /> Liked
+              <Icon name="heart" /> Connections
             </Link>
             <Link href="/notifications" style={navBtnStyle}>
               <Icon name="bell" /> Notifications
@@ -987,6 +987,23 @@ setProfiles(items);
        </div>
        
         </div>
+        <div
+          style={{
+            marginTop: 14,
+            padding: "12px 14px",
+            borderRadius: 16,
+            border: "1px solid rgba(10,84,17,0.18)",
+            background: "rgba(255,255,255,0.88)",
+            boxShadow: "0 10px 24px rgba(0,0,0,0.06)",
+            color: "#374151",
+            fontSize: 14,
+            lineHeight: 1.45,
+            fontWeight: 600,
+          }}
+        >
+          Take a moment to read each profile. Black Within is designed to help you discover alignment, values, and genuine connection—not just attraction.
+        </div>
+
         <div style={{ marginTop: 18 }}>
           {loadingProfiles ? (
             <div
@@ -1040,7 +1057,7 @@ setProfiles(items);
                 const isLiked = likedIds.includes(p.id);
                 const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
                 const likeDisabled = isLiked || loadingLikesStatus || isLimitReached;
-                const likeLabel = isLiked ? "Liked" : isLimitReached ? "Limit reached" : "Like";
+                const likeLabel = isLiked ? "Connection Explored" : isLimitReached ? "Limit reached" : "Explore Connection";
                 const notMe = p.owner_user_id !== userId;
 
                 return (
@@ -1185,7 +1202,7 @@ setProfiles(items);
 
                         <button
                           onClick={() => {
-                            showToast("Passed.");
+                            showToast("Not aligned.");
                             setActiveProfileIndex((i) => i + 1);
                           }}
                          style={{
@@ -1193,7 +1210,7 @@ setProfiles(items);
                            cursor: "pointer",
                          }}
                        >
-                         ✕ Pass
+                         ↪ Not Aligned
                        </button>
 
                        <button
