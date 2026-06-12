@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getOrCreateUserId } from "../lib/user";
+import { useRouter } from "next/navigation";
 
 type ApiProfile = {
   id: string;
@@ -88,6 +89,7 @@ async function apiStartPremiumCheckout(userId: string): Promise<string> {
 }
 
 export default function LikesPage() {
+  const router = useRouter();
   const [userId, setUserId] = useState("");
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [likedIds, setLikedIds] = useState<string[]>([]);
