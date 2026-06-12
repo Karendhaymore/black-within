@@ -153,11 +153,17 @@ export default function LikesPage() {
   }
 
   useEffect(() => {
-    const uid = getOrCreateUserId();
-    setUserId(uid);
-    load(uid);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const loggedIn = localStorage.getItem("bw_logged_in");
+    const uid = localStorage.getItem("bw_user_id");
+
+  if (loggedIn !== "1" || !uid) {
+    router.replace("/auth/login");
+    return;
+  }
+
+  setUserId(uid);
+  load(uid);
+}, [router]);
 
   async function onGoPremium() {
     if (!userId) return;
