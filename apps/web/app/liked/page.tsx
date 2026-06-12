@@ -193,10 +193,10 @@ export default function LikedProfilesPage() {
         ) : visible.length === 0 ? (
           <div style={noticeStyle}>
             <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>
-              No likes yet.
+              No connection activity yet.
             </div>
             <div style={{ color: "#666" }}>
-              Once someone likes your profile, they’ll show up here.
+              Once someone expresses interest in exploring a connection with you, they’ll appear here.
             </div>
           </div>
         ) : (
