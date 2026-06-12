@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const TAGS = [
   "Afrocentric Spirituality",
@@ -51,6 +52,7 @@ export default function EditProfilePage() {
   const [city, setCity] = useState("");
   const [stateUS, setStateUS] = useState("");
   const [intention, setIntention] = useState<string>("");
+  const router = useRouter();
 
   // Photos (MVP: links)
   const [photo1, setPhoto1] = useState("");
