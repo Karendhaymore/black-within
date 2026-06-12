@@ -141,6 +141,112 @@ export default function HomePage() {
           you, choose to Explore Connection and begin a conversation.
         </p>
 
+        <h2 style={sectionTitle}>Membership & Messaging</h2>
+
+        <p style={paragraph}>
+          Joining Black Within is completely free.
+        </p>
+
+        <p style={paragraph}>
+          Create your profile, browse the community, and discover aligned
+          connections at no cost. We believe meaningful relationships should
+          be accessible while supporting a safe, intentional, and culturally
+          aligned space for our community.
+        </p>
+
+        <div
+          style={{
+            marginTop: "1rem",
+            marginBottom: "1rem",
+            padding: "1.25rem",
+            borderRadius: 16,
+            background: "rgba(197,137,45,0.12)",
+            border: "1px solid rgba(0,0,0,0.12)",
+         }}
+       >
+        <h3
+          style={{
+            margin: "0 0 0.75rem",
+            color: "#111",
+            fontWeight: 800,
+        }}
+      >
+        Free Membership Includes:
+      </h3>
+
+      <ul
+       style={{
+         margin: 0,
+         paddingLeft: "1.25rem",
+         lineHeight: 1.8,
+         color: "#333",
+        }}
+      >
+         <li>Free account creation</li>
+         <li>Free profile creation</li>
+         <li>Browse community profiles</li>
+         <li>Receive messages from other members</li>
+         <li>5 Explore Connections per day</li>
+       </ul>
+    </div>
+
+    <div
+      style={{
+        marginTop: "1rem",
+        padding: "1.25rem",
+        borderRadius: 16,
+        background: "#111",
+        color: "#fff",
+      }}
+    >
+      <h3
+        style={{
+          margin: "0 0 0.75rem",
+          fontWeight: 800,
+        }}
+     >
+       Black Within Alignment Membership
+     </h3>
+
+     <p
+       style={{
+         margin: "0 0 1rem",
+         lineHeight: 1.7,
+         color: "rgba(255,255,255,0.9)",
+       }}
+     >
+       Ready to deepen the conversation? Unlock unlimited connection
+       opportunities and messaging.
+     </p>
+
+     <ul
+       style={{
+         margin: 0,
+         paddingLeft: "1.25rem",
+         lineHeight: 1.8,
+         color: "rgba(255,255,255,0.95)",
+       }}
+     >
+       <li>Single message: $1.99</li>
+       <li>Unlimited messaging: Included</li>
+       <li>Unlimited Explore Connections: Included</li>
+       <li>Only $11.22 per month</li>
+     </ul>
+  </div>
+
+  <p
+    style={{
+      marginTop: "1rem",
+      color: "#555",
+      lineHeight: 1.7,
+      fontSize: 14,
+     }}
+   >
+    We intentionally limit free connection requests to encourage
+    thoughtful engagement rather than endless swiping. Black Within was
+    built for quality connections, not quantity.
+  </p>
+
         <h2 style={sectionTitle}>A Different Kind of Dating Experience</h2>
 
         <p style={paragraph}>
