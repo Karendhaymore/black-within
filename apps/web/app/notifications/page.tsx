@@ -65,6 +65,7 @@ export default function NotificationsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [clearing, setClearing] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const router = useRouter();
 
   // broken photos → initials fallback
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
