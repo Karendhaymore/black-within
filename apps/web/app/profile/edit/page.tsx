@@ -82,7 +82,15 @@ export default function EditProfilePage() {
 
   // Load on mount
   useEffect(() => {
-    // Account (displayName + email)
+    const loggedIn = localStorage.getItem("bw_logged_in");
+    const uid = localStorage.getItem("bw_user_id");
+
+   if (loggedIn !== "1" || !uid) {
+     router.replace("/auth/login");
+     return;
+  }
+
+  // Account (displayName + email)
     const account = safeParse<{ displayName?: string; email?: string; is18?: boolean }>(
       localStorage.getItem("bw_account")
     );
