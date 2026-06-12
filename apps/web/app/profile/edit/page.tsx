@@ -148,7 +148,7 @@ export default function EditProfilePage() {
     if (priv?.visionAlignment?.va1) setVa1(priv.visionAlignment.va1);
     if (priv?.visionAlignment?.va2) setVa2(priv.visionAlignment.va2);
     if (priv?.visionAlignment?.va3) setVa3(priv.visionAlignment.va3);
- }, [router]);
+}, []);
 
   const isPreferNot = useMemo(() => tags.includes("Prefer not to say"), [tags]);
 
