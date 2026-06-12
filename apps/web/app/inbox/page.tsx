@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
@@ -180,6 +181,7 @@ function fmtTime(iso?: string | null): string {
 }
 
 export default function InboxPage() {
+  const router = useRouter();
   const userId = useMemo(() => getLoggedInUserId(), []);
 
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">(
@@ -189,14 +191,17 @@ export default function InboxPage() {
   const [err, setErr] = useState<string>("");
 
   useEffect(() => {
-    if (!userId) {
-      window.location.href = "/auth";
-      return;
-    }
+    const loggedIn = localStorage.getItem("bw_logged_in");
+    const uid = localStorage.getItem("bw_user_id");
 
-    let cancelled = false;
+  if (loggedIn !== "1" || !uid) {
+    router.replace("/auth/login");
+    return;
+  }
 
-    (async () => {
+  let cancelled = false;
+
+  (async () => {
       setStatus("loading");
       setErr("");
 
@@ -223,7 +228,7 @@ export default function InboxPage() {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [router]);
 
   // ---- Style (matches your homepage vibe) ----
   const bg = {
