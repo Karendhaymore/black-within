@@ -1582,7 +1582,46 @@ const profileCompletion = Math.round(
          <option value="College graduate">College graduate</option>
          <option value="Advanced degree">Advanced degree</option>
        </select>
-     </label>
+     </label
+
+           <div
+             style={{
+               marginTop: "1rem",
+               padding: "1rem",
+               borderRadius: 12,
+               border: "1px solid #e5e7eb",
+               background: "#fafafa",
+               fontSize: "0.9rem",
+               lineHeight: 1.5,
+             }}
+         >
+           <div style={{ fontWeight: 700, marginBottom: 8 }}>
+             Community Commitment
+           </div>
+
+           <div>
+             Black Within is a respectful community built on authenticity,
+             integrity, and meaningful connection.
+           </div>
+
+           <div style={{ marginTop: 8 }}>
+             Harassment, scams, hate speech, bullying, sexual misconduct,
+             fraudulent profiles, or other harmful behavior may result in
+             immediate account removal.
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontWeight: 700,
+              color: "#8b0000",
+           }}
+        >
+          Never send money to someone you have met online and report
+          suspicious behavior immediately.
+       </div>
+    </div> 
+
             <button
               onClick={onSave}
               disabled={saving || loadingExisting || uploadingPhoto}
