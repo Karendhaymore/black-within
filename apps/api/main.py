@@ -622,6 +622,7 @@ def _auto_migrate_profiles_table():
         conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE;"))
         conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();"))
         conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();"))
+        conn.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP;"))
         conn.execute(text("UPDATE profiles SET is_available = TRUE WHERE is_available IS NULL;"))
 
 
