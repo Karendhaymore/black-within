@@ -1582,7 +1582,7 @@ const profileCompletion = Math.round(
          <option value="College graduate">College graduate</option>
          <option value="Advanced degree">Advanced degree</option>
        </select>
-     </label
+    </label>
 
            <div
              style={{
