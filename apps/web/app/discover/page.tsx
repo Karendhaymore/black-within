@@ -277,10 +277,23 @@ function formatResetHint(status: LikesStatusResponse | null, nowMs: number) {
 function getLastActiveLabel(lastActiveAt?: string | null): string {
   if (!lastActiveAt) return "Recently active";
 
-  const last = new Date(lastActiveAt);
+  const raw = lastActiveAt.trim();
+
+  // Treat backend timestamps without timezone as UTC.
+  const safeTimestamp =
+    raw.endsWith("Z") || raw.includes("+") ? raw : `${raw}Z`;
+
+  const last = new Date(safeTimestamp);
   const now = new Date();
 
-  const diffMinutes = Math.floor((now.getTime() - last.getTime()) / 60000);
+  if (Number.isNaN(last.getTime())) return "Recently active";
+
+  const diffMinutes = Math.floor(
+    (now.getTime() - last.getTime()) / 60000
+  );
+
+  // If the timestamp is accidentally slightly in the future, do not show active now forever.
+  if (diffMinutes < 0) return "Active today";
 
   if (diffMinutes < 10) return "🟢 Active now";
 
