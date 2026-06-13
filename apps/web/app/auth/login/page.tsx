@@ -38,6 +38,20 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
   return `Request failed (${res.status}).`;
 }
 
+async function pingLastActive(userId: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/activity/ping`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ user_id: userId }),
+    });
+  } catch {
+    // Do not block login if last active update fails.
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -101,6 +115,8 @@ export default function LoginPage() {
           String(data.session_token)
         );
       }
+
+      await pingLastActive(userId);
 
       router.replace("/discover");
     } catch (err: any) {
