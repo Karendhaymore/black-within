@@ -1314,10 +1314,16 @@ setProfiles(items);
   By participating in Black Within, you agree to uphold our Community
   Commitment and help maintain a respectful environment for all members.
 
-  <div style={{ marginTop: 8 }}>
-    Never send money to someone you have met online and report suspicious
-    behavior immediately.
-  </div>
+  <div
+  style={{
+    marginTop: 8,
+    fontWeight: 700,
+    color: "#8b0000",
+  }}
+>
+  Never send money to someone you have met online and report suspicious
+  behavior immediately.
+</div>
 </div>
     </main>
   );
