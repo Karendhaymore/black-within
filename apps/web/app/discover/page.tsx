@@ -282,7 +282,7 @@ function getLastActiveLabel(lastActiveAt?: string | null): string {
 
   const diffMinutes = Math.floor((now.getTime() - last.getTime()) / 60000);
 
-  if (diffMinutes < 15) return "🟢 Active now";
+  if (diffMinutes < 10) return "🟢 Active now";
 
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) return "Active today";
