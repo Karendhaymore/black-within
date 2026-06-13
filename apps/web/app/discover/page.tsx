@@ -274,6 +274,24 @@ function formatResetHint(status: LikesStatusResponse | null, nowMs: number) {
   return `${hh}h ${mm}m ${ss}s`;
 }
 
+function getLastActiveLabel(lastActiveAt?: string | null): string {
+  if (!lastActiveAt) return "Recently active";
+
+  const last = new Date(lastActiveAt);
+  const now = new Date();
+
+  const diffMinutes = Math.floor((now.getTime() - last.getTime()) / 60000);
+
+  if (diffMinutes < 15) return "🟢 Active now";
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return "Active today";
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "Active yesterday";
+
+  return `Active ${diffDays} days ago`;
+}
 function parseIdentityPreview(preview: string): { culturalIdentity: string; spiritualFramework: string } {
   const text = (preview || "").replace(/\s+/g, " ").trim();
 
