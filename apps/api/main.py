@@ -2303,7 +2303,11 @@ def get_profile(profile_id: str):
             smokes=getattr(p, "smokes", None),
             drinks=getattr(p, "drinks", None),
             educationLevel=getattr(p, "education_level", None),
-            
+            lastActiveAt=(
+                p.last_active_at.isoformat()
+                if getattr(p, "last_active_at", None)
+                else None
+            ),
             gender=getattr(p, "gender", None),
             lookingForGender=getattr(p, "looking_for_gender", None),
         )
