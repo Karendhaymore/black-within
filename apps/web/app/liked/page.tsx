@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { getOrCreateUserId } from "../lib/user";
 import { useRouter } from "next/navigation";
 
 type ApiProfile = {
@@ -20,6 +19,7 @@ type ApiProfile = {
 };
 
 type ProfilesResponse = { items: ApiProfile[] };
+type IdListResponse = { ids: string[] };
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
@@ -31,20 +31,36 @@ async function apiGetLikedYou(userId: string): Promise<ApiProfile[]> {
     `${API_BASE}/likes/received?user_id=${encodeURIComponent(userId)}&limit=200`,
     { cache: "no-store" }
   );
-  if (!res.ok) throw new Error("Failed to load liked profiles.");
+
+  if (!res.ok) throw new Error("Failed to load connection activity.");
+
   const json = (await res.json()) as ProfilesResponse;
   return Array.isArray(json?.items) ? json.items : [];
 }
 
+async function apiGetMyLikes(userId: string): Promise<string[]> {
+  const res = await fetch(
+    `${API_BASE}/likes?user_id=${encodeURIComponent(userId)}`,
+    { cache: "no-store" }
+  );
+
+  if (!res.ok) throw new Error("Failed to load your explored connections.");
+
+  const json = (await res.json()) as IdListResponse;
+  return Array.isArray(json?.ids) ? json.ids : [];
+}
+
 export default function LikedProfilesPage() {
+  const router = useRouter();
+
   const [userId, setUserId] = useState<string>("");
   const [items, setItems] = useState<ApiProfile[]>([]);
+  const [myLikedIds, setMyLikedIds] = useState<string[]>([]);
   const [apiError, setApiError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
-  const router = useRouter();
-  
+
   function showToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2200);
@@ -64,28 +80,34 @@ export default function LikedProfilesPage() {
     try {
       setApiError(null);
       setLoading(true);
-      const rows = await apiGetLikedYou(uid);
+
+      const [rows, myLikes] = await Promise.all([
+        apiGetLikedYou(uid),
+        apiGetMyLikes(uid),
+      ]);
+
       setItems(rows);
+      setMyLikedIds(myLikes);
     } catch (e: any) {
       setApiError(e?.message || `Could not reach API at ${API_BASE}`);
-      showToast("Could not load likes right now.");
+      showToast("Could not load connection activity right now.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-  const loggedIn = localStorage.getItem("bw_logged_in");
-  const uid = localStorage.getItem("bw_user_id");
+    const loggedIn = localStorage.getItem("bw_logged_in");
+    const uid = localStorage.getItem("bw_user_id");
 
-  if (loggedIn !== "1" || !uid) {
-    router.replace("/auth/login");
-    return;
-  }
+    if (loggedIn !== "1" || !uid) {
+      router.replace("/auth/login");
+      return;
+    }
 
-  setUserId(uid);
-  refresh(uid);
-}, [router]);
+    setUserId(uid);
+    refresh(uid);
+  }, [router]);
 
   const visible = useMemo(() => {
     return (items || []).filter((p) => p.isAvailable);
@@ -102,24 +124,21 @@ export default function LikedProfilesPage() {
       }}
     >
       <div style={{ width: "100%", maxWidth: 1100 }}>
-        <div
-          style={{
-            display: "grid",
-            gap: "1rem",
-          }}
-        >
+        <div style={{ display: "grid", gap: "1rem" }}>
           <div>
             <h1
               style={{
                 fontSize: "clamp(2rem, 8vw, 3.2rem)",
                 marginBottom: "0.25rem",
               }}
-           >
-             Connection Activity
-           </h1>
-           <p style={{ color: "#555", fontSize: "1rem" }}>
-             These are people who have expressed interest in exploring a meaningful connection with you.
-           </p>
+            >
+              Connection Activity
+            </h1>
+
+            <p style={{ color: "#555", fontSize: "1rem" }}>
+              These are people who have expressed interest in exploring a
+              meaningful connection with you.
+            </p>
           </div>
 
           <div
@@ -195,8 +214,10 @@ export default function LikedProfilesPage() {
             <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>
               No connection activity yet.
             </div>
+
             <div style={{ color: "#666" }}>
-              Once someone expresses interest in exploring a connection with you, they’ll appear here.
+              Once someone expresses interest in exploring a connection with
+              you, they’ll appear here.
             </div>
           </div>
         ) : (
@@ -211,6 +232,7 @@ export default function LikedProfilesPage() {
           >
             {visible.map((p) => {
               const showFallback = !p.photo || brokenImages[p.id];
+              const isMutual = myLikedIds.includes(p.id);
 
               return (
                 <div key={p.id} style={cardStyle}>
@@ -230,10 +252,14 @@ export default function LikedProfilesPage() {
                         position: "relative",
                       }}
                     >
-                      <div style={badgeStyle}>Interested</div>
+                      <div style={isMutual ? mutualBadgeStyle : badgeStyle}>
+                        {isMutual ? "Mutual Connection" : "Interested"}
+                      </div>
 
                       {showFallback ? (
-                        <div style={fallbackStyle}>{getInitials(p.displayName)}</div>
+                        <div style={fallbackStyle}>
+                          {getInitials(p.displayName)}
+                        </div>
                       ) : (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -272,7 +298,10 @@ export default function LikedProfilesPage() {
                         gap: "0.6rem",
                       }}
                     >
-                      <Link href={`/profiles/${p.id}`} style={primaryButtonStyle}>
+                      <Link
+                        href={`/profiles/${p.id}`}
+                        style={primaryButtonStyle}
+                      >
                         View Profile
                       </Link>
 
@@ -364,6 +393,13 @@ const badgeStyle: React.CSSProperties = {
   color: "#333",
   fontSize: "0.85rem",
   fontWeight: 700,
+};
+
+const mutualBadgeStyle: React.CSSProperties = {
+  ...badgeStyle,
+  border: "1px solid rgba(10, 85, 0, 0.35)",
+  background: "rgba(232, 255, 232, 0.95)",
+  color: "#064",
 };
 
 const fallbackStyle: React.CSSProperties = {
