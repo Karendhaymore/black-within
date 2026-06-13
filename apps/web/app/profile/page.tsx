@@ -459,28 +459,31 @@ export default function MyProfilePage() {
     try {
       const url = await apiUploadProfilePhoto(userId, file);
 
+      const nextForm = {
+        ...form,
+        photo: slot === 1 ? url : form.photo,
+        photo2: slot === 2 ? url : form.photo2,
+      };
+
+      setForm(nextForm);
+
       if (slot === 1) {
-        setForm((p) => ({ ...p, photo: url }));
         setPhotoPreview("");
         setPhotoFile(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
       } else {
-        setForm((p) => ({ ...p, photo2: url }));
         setPhotoPreview2("");
         setPhotoFile2(null);
         if (fileInputRef2.current) fileInputRef2.current.value = "";
       }
 
-      try {
-        await apiUpsertProfile(
-          buildUpsertPayload(
-            slot === 1 ? { photo: url } : { photo2: url }
-          )
-        );
-        showToast(`Photo ${slot} uploaded and saved.`);
-      } catch {
-        showToast(`Photo ${slot} uploaded, but please click Save profile to keep it.`);
-      }
+      await apiUpsertProfile({
+        ...buildUpsertPayload(),
+        photo: nextForm.photo || null,
+        photo2: nextForm.photo2 || null,
+      });
+
+      showToast(`Photo ${slot} uploaded and saved.`);
     } catch (e: any) {
       setApiError(e?.message || "Photo upload failed.");
       showToast("Upload failed.");
