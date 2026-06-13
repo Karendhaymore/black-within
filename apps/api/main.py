@@ -199,6 +199,7 @@ class Profile(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    last_active_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
 
 
 class SavedProfile(Base):
@@ -962,6 +963,7 @@ class ProfileItem(BaseModel):
     smokes: Optional[str] = None
     drinks: Optional[str] = None
     educationLevel: Optional[str] = None
+    lastActiveAt: Optional[str] = None 
 
 
 class ProfilesResponse(BaseModel):
