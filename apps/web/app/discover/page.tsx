@@ -33,6 +33,7 @@ type ApiProfile = {
   spiritualFramework?: string[];
   gender?: string | null;
   lookingForGender?: string | null;
+  lastActiveAt?: string | null;
 };
 
 type IdListResponse = { ids: string[] };
