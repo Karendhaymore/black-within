@@ -29,6 +29,7 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
 export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
+  const [acceptedCommitment, setAcceptedCommitment] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -41,6 +42,12 @@ export default function SignupPage() {
     const e2 = email.trim().toLowerCase();
     if (!e2) return setErr("Please enter your email.");
     if (!pw) return setErr("Please enter a password.");
+
+    if (!acceptedCommitment) {
+      return setErr(
+        "Please read and agree to the Black Within Community Commitment before creating your account."
+      );
+    }
 
     setLoading(true);
 
@@ -62,6 +69,7 @@ export default function SignupPage() {
       }
 
       setPw("");
+      setAcceptedCommitment(false);
       setSuccess(
         "Account created. Please check your email to verify your account before logging in."
       );
@@ -85,7 +93,7 @@ export default function SignupPage() {
       <div
         style={{
           width: "100%",
-          maxWidth: 420,
+          maxWidth: 460,
           background: "white",
           borderRadius: 14,
           padding: 18,
@@ -166,9 +174,75 @@ export default function SignupPage() {
               autoComplete="new-password"
             />
 
+            <div
+              style={{
+                marginTop: 4,
+                padding: 12,
+                borderRadius: 12,
+                border: "1px solid #e5e7eb",
+                background: "#fafafa",
+                fontSize: 13,
+                lineHeight: 1.45,
+              }}
+            >
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>
+                Black Within Community Commitment
+              </div>
+
+              <div>
+                Black Within was created to foster meaningful, respectful, and culturally
+                conscious connections. Members are expected to engage with honesty,
+                integrity, kindness, and mutual respect.
+              </div>
+
+              <div style={{ marginTop: 8 }}>
+                Harassment, discrimination, hate speech, bullying, threats, sexual
+                misconduct, scams, fraudulent profiles, solicitation, or any behavior that
+                compromises the safety and well-being of our community will not be tolerated.
+              </div>
+
+              <div
+                style={{
+                  marginTop: 8,
+                  fontWeight: 800,
+                  color: "#8b0000",
+                }}
+              >
+                Never send money to someone you have met online and report suspicious
+                behavior immediately.
+              </div>
+
+              <div style={{ marginTop: 8 }}>
+                Violations of these standards may result in immediate suspension or
+                permanent removal from the platform without warning or refund.
+              </div>
+
+              <label
+                style={{
+                  marginTop: 12,
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={acceptedCommitment}
+                  onChange={(e) => setAcceptedCommitment(e.target.checked)}
+                  required
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  I have read and agree to the Black Within Community Commitment.
+                </span>
+              </label>
+            </div>
+
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !acceptedCommitment}
               style={{
                 marginTop: 4,
                 padding: "12px 12px",
@@ -177,8 +251,8 @@ export default function SignupPage() {
                 background: "#111",
                 color: "white",
                 fontWeight: 800,
-                cursor: loading ? "not-allowed" : "pointer",
-                opacity: loading ? 0.75 : 1,
+                cursor: loading || !acceptedCommitment ? "not-allowed" : "pointer",
+                opacity: loading || !acceptedCommitment ? 0.65 : 1,
               }}
             >
               {loading ? "Creating..." : "Create account"}
