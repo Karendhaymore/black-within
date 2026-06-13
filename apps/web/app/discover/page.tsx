@@ -1301,6 +1301,24 @@ setProfiles(items);
           </div>
         )}
       </div>
+      <div
+  style={{
+    marginTop: 30,
+    padding: 16,
+    textAlign: "center",
+    fontSize: 12,
+    color: "#666",
+    borderTop: "1px solid rgba(0,0,0,0.08)",
+  }}
+>
+  By participating in Black Within, you agree to uphold our Community
+  Commitment and help maintain a respectful environment for all members.
+
+  <div style={{ marginTop: 8 }}>
+    Never send money to someone you have met online and report suspicious
+    behavior immediately.
+  </div>
+</div>
     </main>
   );
 }
