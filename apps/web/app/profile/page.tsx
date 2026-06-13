@@ -471,7 +471,16 @@ export default function MyProfilePage() {
         if (fileInputRef2.current) fileInputRef2.current.value = "";
       }
 
-      showToast(`Photo ${slot} uploaded. Wait for upload to finish, then click Save profile.`);
+      try {
+        await apiUpsertProfile(
+          buildUpsertPayload(
+            slot === 1 ? { photo: url } : { photo2: url }
+          )
+        );
+        showToast(`Photo ${slot} uploaded and saved.`);
+      } catch {
+        showToast(`Photo ${slot} uploaded, but please click Save profile to keep it.`);
+      }
     } catch (e: any) {
       setApiError(e?.message || "Photo upload failed.");
       showToast("Upload failed.");
