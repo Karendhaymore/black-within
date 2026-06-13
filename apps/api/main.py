@@ -2062,10 +2062,6 @@ def login(payload: LoginPayload):
         if p and getattr(p, "is_banned", False):
             raise HTTPException(status_code=403, detail="Your account has been suspended.")
 
-        if p:
-            p.last_active_at = datetime.utcnow()
-            session.add(p)
-            session.commit()    
 
     _ensure_user(acct.user_id)
     return {"ok": True, "userId": acct.user_id, "user_id": acct.user_id, "email": email}
