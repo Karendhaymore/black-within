@@ -1859,6 +1859,22 @@ def me(user_id: str = Query(...)):
     user_id = _ensure_user(user_id)
     return MeResponse(user_id=user_id)
 
+@app.post("/activity/ping")
+def activity_ping(payload: MeResponse):
+    user_id = _ensure_user(payload.user_id)
+
+    with Session(engine) as session:
+        p = session.execute(
+            select(Profile).where(Profile.owner_user_id == user_id)
+        ).scalar_one_or_none()
+
+        if p:
+            p.last_active_at = datetime.utcnow()
+            p.updated_at = datetime.utcnow()
+            session.add(p)
+            session.commit()
+
+    return {"ok": True}
 
 @app.post("/auth/signup")
 def signup(payload: LoginPayload):
