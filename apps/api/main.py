@@ -3001,6 +3001,11 @@ def get_likes_received(user_id: str = Query(...), limit: int = Query(default=50,
                     smokes=getattr(p, "smokes", None),
                     drinks=getattr(p, "drinks", None),
                     educationLevel=getattr(p, "education_level", None),
+                    lastActiveAt=(
+                        p.last_active_at.isoformat()
+                        if getattr(p, "last_active_at", None)
+                        else None
+                    ),
                 )
             )
 
