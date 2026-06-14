@@ -1037,24 +1037,47 @@ const profileCompletion = Math.round(
             }}
          />
 
-         <button
-           type="button"
-           onClick={() => (!photoFile ? fileInputRef.current?.click() : onUploadPhoto(1))}
-           disabled={loadingExisting || uploadingPhoto}
-           style={{
-             marginTop: 10,
-             padding: "0.6rem 0.9rem",
-             borderRadius: 10,
-             border: "1px solid #111",
-             background: "#111",
-             color: "white",
-             cursor: loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
-             fontWeight: 900,
-             opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
-           }}
-         >
-           {uploadingPhoto ? "Uploading..." : photoFile ? "Upload Photo" : "Choose Photo"}
-         </button>
+         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+           <button
+             type="button"
+             onClick={() => fileInputRef.current?.click()}
+             disabled={loadingExisting || uploadingPhoto}
+             style={{
+               marginTop: 10,
+               padding: "0.6rem 0.9rem",
+               borderRadius: 10,
+               border: "1px solid #111",
+               background: "#111",
+               color: "white",
+               cursor: loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+               fontWeight: 900,
+               opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+             }}
+           >
+             Choose Photo
+           </button>
+
+           {photoFile && (
+             <button
+               type="button"
+               onClick={() => onUploadPhoto(1)}
+               disabled={uploadingPhoto}
+               style={{
+                 marginTop: 10,
+                 padding: "0.6rem 0.9rem",
+                 borderRadius: 10,
+                 border: "1px solid #0a5",
+                 background: "#0a5",
+                 color: "white",
+                 fontWeight: 900,
+                 cursor: uploadingPhoto ? "not-allowed" : "pointer",
+                 opacity: uploadingPhoto ? 0.7 : 1,
+               }}
+             >
+               {uploadingPhoto ? "Uploading & Saving..." : "Upload & Save Photo"}
+             </button>
+           )}
+         </div>
        </div>
 
        <div style={{ marginTop: 22 }}>
@@ -1108,24 +1131,47 @@ const profileCompletion = Math.round(
        }}
      />
 
-     <button
+     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+       <button
+         type="button"
+         onClick={() => fileInputRef2.current?.click()}
+         disabled={loadingExisting || uploadingPhoto}
+         style={{
+           marginTop: 10,
+           padding: "0.6rem 0.9rem",
+           borderRadius: 10,
+           border: "1px solid #111",
+           background: "#111",
+           color: "white",
+           cursor: loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
+           fontWeight: 900,
+           opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+         }}
+       >
+         Choose Photo
+       </button>
+
+       {photoFile2 && (
+         <button
            type="button"
-           onClick={() => (!photoFile2 ? fileInputRef2.current?.click() : onUploadPhoto(2))}
-           disabled={loadingExisting || uploadingPhoto}
+           onClick={() => onUploadPhoto(2)}
+           disabled={uploadingPhoto}
            style={{
              marginTop: 10,
              padding: "0.6rem 0.9rem",
              borderRadius: 10,
-             border: "1px solid #111",
-             background: "#111",
+             border: "1px solid #0a5",
+             background: "#0a5",
              color: "white",
-             cursor: loadingExisting || uploadingPhoto ? "not-allowed" : "pointer",
              fontWeight: 900,
-             opacity: loadingExisting || uploadingPhoto ? 0.7 : 1,
+             cursor: uploadingPhoto ? "not-allowed" : "pointer",
+             opacity: uploadingPhoto ? 0.7 : 1,
            }}
          >
-       {uploadingPhoto ? "Uploading..." : photoFile2 ? "Upload Photo" : "Choose Photo"}
-     </button>
+           {uploadingPhoto ? "Uploading & Saving..." : "Upload & Save Photo"}
+         </button>
+       )}
+     </div>
    </div> 
 
               <div style={{ fontWeight: 700, marginBottom: 10 }}>Photo Gallery</div>
