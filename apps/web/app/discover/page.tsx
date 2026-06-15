@@ -436,12 +436,14 @@ export default function DiscoverPage() {
   const culturalIdentityOptions = useMemo(
     () => [
       "All",
-      "African-Centered",
-      "Pan-African",
-      "Ancestrally Rooted",
-      "Culturally Sovereign",
-      "Black (Conscious Use)",
-      "African American",
+        "African American - Retrieves cultural identity from the American experience.",
+        "African Diasporic",
+        "African-Centered - Lives and thinks from African worldviews",
+        "Ancestrally Rooted - Identity defined by lineage consciousness, not geography alone",
+        "Black (Conscious Use) - Uses 'Black' intentionally as a political and cultural identity, not default",
+        "Culturally Sovereign - Rejects Western cultural authority",
+        "Pan-African - Identifies with the global African family, regardless of nationality",
+];
     ],
     []
   );
