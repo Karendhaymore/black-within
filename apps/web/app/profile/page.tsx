@@ -77,36 +77,40 @@ const RELATIONSHIP_INTENTS = [
 ];
 
 const CULTURAL_IDENTITY_OPTIONS = [
-  "African-Centered - Lives and thinks from African worldviews",
-  "Pan-African - Identifies with the global African family, regardless of nationality",
-  "Ancestrally Rooted - Identity defined by lineage consciousness, not geography alone",
-  "Culturally Sovereign - Rejects Western cultural authority",
-  "Black (Conscious Use) - Uses “Black” intentionally as a political and cultural identity, not default",
   "African American - Retrieves cultural identity from the American experience.",
+  "African Diasporic",
+  "African-Centered - Lives and thinks from African worldviews",
+  "Ancestrally Rooted - Identity defined by lineage consciousness, not geography alone",
+  "Black (Conscious Use) - Uses “Black” intentionally as a political and cultural identity, not default",
+  "Culturally Sovereign - Rejects Western cultural authority",
+  "Pan-African - Identifies with the global African family, regardless of nationality",
 ];
 
 const SPIRITUAL_FRAMEWORK_OPTIONS = [
+  "African-Centered Holistic Healing",
   "Afrocentric Spirituality",
-  "Dogon",
-  "Kemetic Philosophy",
-  "Ubuntu",
-  "Sankofa",
-  "Ifa / Orisha Traditions (Yoruba)",
-  "Vodun / Vodou",
-  "Hoodoo / Rootwork",
-  "Hebrew Israelite",
+  "Afrofuturist Spirituality",
+  "Ancient African Philosophical Systems",
+  "Ancestral Veneration Systems",
+  "Astrologically Based",
+  "Bible Based Christian",
   "Candomblé",
+  "Dogon",
+  "Hebrew Israelite",
+  "Hoodoo / Rootwork",
+  "Ifa / Orisha Traditions (Yoruba)",
+  "Islam",
+  "Kemetic Philosophy",
+  "Kemeticism",
+  "Liberated Christianity",
+  "Metaphysical Science (African-centered variants)",
+  "New Age Spirituality",
   "Obeah",
   "Pan African Spiritual Movements",
-  "African-Centered Holistic Healing",
-  "Bible Based Christian",
-  "Ancestral Veneration Systems",
-  "Liberated Christianity",
-  "Islam",
-  "New Age Spirituality",
-  "Afrofuturist Spirituality",
-  "Metaphysical Science (African-centered variants)",
   "Quantum Spirituality",
+  "Sankofa",
+  "Ubuntu",
+  "Vodun / Vodou",
 ];
 
 function getLoggedInUserId(): string | null {
@@ -208,14 +212,20 @@ function Chip({
       type="button"
       onClick={onToggle}
       style={{
-        padding: "0.45rem 0.7rem",
-        borderRadius: 999,
+        width: "100%",
+        minHeight: 46,
+        padding: "0.65rem 0.8rem",
+        borderRadius: 12,
         border: "1px solid #ccc",
         background: selected ? "#111" : "white",
         color: selected ? "white" : "#111",
         cursor: "pointer",
-        fontSize: "0.92rem",
+        fontSize: "0.9rem",
+        fontWeight: 700,
+        lineHeight: 1.25,
         textAlign: "left",
+        display: "flex",
+        alignItems: "center",
       }}
     >
       {label}
@@ -1468,7 +1478,14 @@ const profileCompletion = Math.round(
               <div style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}>
                 Choose what describes your cultural identity. You can select multiple.
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+                  gap: "0.6rem",
+                  alignItems: "stretch",
+                }}
+              >
                 {CULTURAL_IDENTITY_OPTIONS.map((label) => (
                   <Chip
                     key={label}
@@ -1487,7 +1504,14 @@ const profileCompletion = Math.round(
               <div style={{ color: "#666", fontSize: "0.92rem", marginBottom: 10 }}>
                 Choose what guides your life and love. You can select multiple.
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+                  gap: "0.6rem",
+                  alignItems: "stretch",
+                }}
+              >
                 {SPIRITUAL_FRAMEWORK_OPTIONS.map((label) => (
                   <Chip
                     key={label}
