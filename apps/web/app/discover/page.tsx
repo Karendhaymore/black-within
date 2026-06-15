@@ -443,7 +443,6 @@ export default function DiscoverPage() {
         "Black (Conscious Use) - Uses 'Black' intentionally as a political and cultural identity, not default",
         "Culturally Sovereign - Rejects Western cultural authority",
         "Pan-African - Identifies with the global African family, regardless of nationality",
-];
     ],
     []
   );
