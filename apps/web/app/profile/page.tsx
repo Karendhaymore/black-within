@@ -89,7 +89,6 @@ const CULTURAL_IDENTITY_OPTIONS = [
 const SPIRITUAL_FRAMEWORK_OPTIONS = [
   "African-Centered Holistic Healing",
   "Afrocentric Spirituality",
-  "Afrofuturist Spirituality",
   "Ancient African Philosophical Systems",
   "Ancestral Veneration Systems",
   "Astrologically Based",
@@ -101,7 +100,6 @@ const SPIRITUAL_FRAMEWORK_OPTIONS = [
   "Ifa / Orisha Traditions (Yoruba)",
   "Islam",
   "Kemetic Philosophy",
-  "Kemeticism",
   "Liberated Christianity",
   "Metaphysical Science (African-centered variants)",
   "New Age Spirituality",
@@ -109,6 +107,7 @@ const SPIRITUAL_FRAMEWORK_OPTIONS = [
   "Pan African Spiritual Movements",
   "Quantum Spirituality",
   "Sankofa",
+  "Spiritual Science",
   "Ubuntu",
   "Vodun / Vodou",
 ];
