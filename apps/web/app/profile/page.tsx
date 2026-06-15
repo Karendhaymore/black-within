@@ -106,6 +106,7 @@ const SPIRITUAL_FRAMEWORK_OPTIONS = [
   "Obeah",
   "Pan African Spiritual Movements",
   "Quantum Spirituality",
+  "Rastafari",
   "Sankofa",
   "Spiritual Science",
   "Ubuntu",
