@@ -208,6 +208,39 @@ export default function ReportButton() {
                 />
               </label>
 
+              <div
+                style={{
+                  marginTop: 12,
+                  marginBottom: 12,
+                  padding: 12,
+                  borderRadius: 10,
+                  background: "#fff7f7",
+                  border: "1px solid #f2c7c7",
+                  fontSize: 13,
+                  lineHeight: 1.5,
+               }}
+            >
+              <div
+                style={{
+                  fontWeight: 800,
+                  color: "#8b0000",
+                  marginBottom: 6,
+               }}
+            >
+              Need immediate assistance?
+            </div>
+
+            <div>
+              Call or Text: <strong>(214) 771-9701</strong>
+            </div>
+
+            <div style={{ marginTop: 6 }}>
+              If you believe someone is engaging in harassment, requesting money,
+              threatening behavior, impersonation, scams, or any activity that
+              compromises member safety, contact us immediately.
+            </div>
+          </div>
+
               {err && <div style={{ color: "#b00020", fontWeight: 700 }}>{err}</div>}
               {ok && <div style={{ color: "#0a7a2f", fontWeight: 700 }}>{ok}</div>}
 
