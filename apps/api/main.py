@@ -3070,8 +3070,8 @@ def like(payload: ProfileAction):
             user_id=liker_user_id,
             profile_id=profile_id,
             created_at=datetime.utcnow()
-       )
-       session.add(new_like)
+        )
+        session.add(new_like)
 
         if not counter.window_started_at:
             counter.window_started_at = datetime.utcnow()
