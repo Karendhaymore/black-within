@@ -3066,7 +3066,12 @@ def like(payload: ProfileAction):
         if (prof.owner_user_id or "").strip() == liker_user_id:
             raise HTTPException(status_code=400, detail="You cannot like yourself.")
 
-        session.add(Like(user_id=liker_user_id, profile_id=profile_id, created_at=datetime.utcnow()))
+        new_like = Like(
+            user_id=liker_user_id,
+            profile_id=profile_id,
+            created_at=datetime.utcnow()
+       )
+       session.add(new_like)
 
         if not counter.window_started_at:
             counter.window_started_at = datetime.utcnow()
