@@ -3101,6 +3101,28 @@ def like(payload: ProfileAction):
                     actor_profile_id=(actor_profile.id if actor_profile else None),
                 )
             )
+                recipient_account = session.execute(
+                    select(AuthAccount).where(AuthAccount.user_id == recipient_user_id)
+               ).scalar_one_or_none()
+
+               if recipient_account and getattr(recipient_account, "email", None):
+                   try:
+                       _send_email_sendgrid(
+                           [recipient_account.email],
+                           "Someone liked your profile on Black Within",
+                           """
+                           <p>You have a new connection interest on Black Within.</p>
+                           <p>Log in to view your Connection Activity.</p>
+                           <p>
+                             <a href="https://meetblackwithin.com/liked">
+                               View Connections
+                             </a>
+                           </p>
+                           """,
+                       )
+                   except Exception as e:
+                       print("Like notification email failed:", str(e))
+            
             recipient_account = session.get(AuthAccount, recipient_user_id)
 
             if recipient_account and getattr(recipient_account, "email", None):
