@@ -4,13 +4,6 @@ import React, { useEffect, useMemo, useRef, useState, type CSSProperties } from 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-
-/**
- * IMPORTANT:
- * Your API returns profiles in this shape (camelCase fields):
- *   displayName, stateUS, identityPreview, isAvailable, tags (array)
- */
-
 type ApiProfile = {
   id: string;
   owner_user_id: string;
@@ -20,7 +13,6 @@ type ApiProfile = {
   stateUS: string;
   photo?: string | null;
   photo2?: string | null;
-
   photo_position_x?: number;
   photo_position_y?: number;
   photo2_position_x?: number;
@@ -278,23 +270,16 @@ function getLastActiveLabel(lastActiveAt?: string | null): string {
   if (!lastActiveAt) return "Recently active";
 
   const raw = lastActiveAt.trim();
-
-  // Treat backend timestamps without timezone as UTC.
-  const safeTimestamp =
-    raw.endsWith("Z") || raw.includes("+") ? raw : `${raw}Z`;
+  const safeTimestamp = raw.endsWith("Z") || raw.includes("+") ? raw : `${raw}Z`;
 
   const last = new Date(safeTimestamp);
   const now = new Date();
 
   if (Number.isNaN(last.getTime())) return "Recently active";
 
-  const diffMinutes = Math.floor(
-    (now.getTime() - last.getTime()) / 60000
-  );
+  const diffMinutes = Math.floor((now.getTime() - last.getTime()) / 60000);
 
-  // If the timestamp is accidentally slightly in the future, do not show active now forever.
   if (diffMinutes < 0) return "Active today";
-
   if (diffMinutes < 10) return "🟢 Active now";
 
   const diffHours = Math.floor(diffMinutes / 60);
@@ -304,20 +289,6 @@ function getLastActiveLabel(lastActiveAt?: string | null): string {
   if (diffDays === 1) return "Active yesterday";
 
   return `Active ${diffDays} days ago`;
-}
-function parseIdentityPreview(preview: string): { culturalIdentity: string; spiritualFramework: string } {
-  const text = (preview || "").replace(/\s+/g, " ").trim();
-
-  const getField = (label: string) => {
-    const re = new RegExp(`${label}\\s*:\\s*([^·|]+?)(?=\\s*(?:·|\\||$))`, "i");
-    const m = text.match(re);
-    return (m?.[1] || "").trim();
-  };
-
-  const culturalIdentity = getField("Cultural Identity");
-  const spiritualFramework = getField("Spiritual Framework");
-
-  return { culturalIdentity, spiritualFramework };
 }
 
 function Icon({
@@ -415,117 +386,98 @@ export default function DiscoverPage() {
   const availableProfileIds = useMemo(() => new Set(availableProfiles.map((p) => p.id)), [availableProfiles]);
 
   const intentionOptions = useMemo(
-  () => [
-    "All",
-    "Intentional partnership",
-    "Marriage-minded",
-    "Conscious companionship",
-    "Community-first connection",
-  ],
-  []
-);
-
-  const stateOptions = useMemo(() => {
-  const set = new Set<string>();
-  availableProfiles.forEach((p) => {
-    if (p.stateUS) set.add(p.stateUS);
-  });
-  return ["All", ...Array.from(set).sort()];
-}, [availableProfiles]);
-  
-  const culturalIdentityOptions = useMemo(
     () => [
       "All",
-        "African American - Retrieves cultural identity from the American experience.",
-        "African Diasporic",
-        "African-Centered - Lives and thinks from African worldviews",
-        "Ancestrally Rooted - Identity defined by lineage consciousness, not geography alone",
-        "Black (Conscious Use) - Uses 'Black' intentionally as a political and cultural identity, not default",
-        "Culturally Sovereign - Rejects Western cultural authority",
-        "Pan-African - Identifies with the global African family, regardless of nationality",
+      "Intentional partnership",
+      "Marriage-minded",
+      "Conscious companionship",
+      "Community-first connection",
     ],
     []
   );
 
-const spiritualFrameworkOptions = useMemo(
-  () => [
-   
-    "All",
-  "African-Centered Holistic Healing",
-  "Afrocentric Spirituality",
-  "Ancient African Philosophical Systems",
-  "Ancestral Veneration Systems",
-  "Astrologically Based",
-  "Bible Based Christian",
-  "Candomblé",
-  "Dogon",
-  "Hebrew Israelite",
-  "Hoodoo / Rootwork",
-  "Ifa / Orisha Traditions (Yoruba)",
-  "Islam",
-  "Kemetic Philosophy",
-  "Liberated Christianity",
-  "Metaphysical Science (African-centered variants)",
-  "New Age Spirituality",
-  "Obeah",
-  "Pan African Spiritual Movements",
-  "Quantum Spirituality",
-  "Sankofa",
-  "Spiritual Science",
-  "Ubuntu",
-  "Vodun / Vodou",
-  ],
-  []
-);
+  const stateOptions = useMemo(() => {
+    const set = new Set<string>();
+    availableProfiles.forEach((p) => {
+      if (p.stateUS) set.add(p.stateUS);
+    });
+    return ["All", ...Array.from(set).sort()];
+  }, [availableProfiles]);
+
+  const culturalIdentityOptions = useMemo(
+    () => [
+      "All",
+      "African American - Retrieves cultural identity from the American experience.",
+      "African Diasporic",
+      "African-Centered - Lives and thinks from African worldviews",
+      "Ancestrally Rooted - Identity defined by lineage consciousness, not geography alone",
+      "Black (Conscious Use) - Uses 'Black' intentionally as a political and cultural identity, not default",
+      "Culturally Sovereign - Rejects Western cultural authority",
+      "Pan-African - Identifies with the global African family, regardless of nationality",
+    ],
+    []
+  );
+
+  const spiritualFrameworkOptions = useMemo(
+    () => [
+      "All",
+      "African-Centered Holistic Healing",
+      "Afrocentric Spirituality",
+      "Ancient African Philosophical Systems",
+      "Ancestral Veneration Systems",
+      "Astrologically Based",
+      "Bible Based Christian",
+      "Candomblé",
+      "Dogon",
+      "Hebrew Israelite",
+      "Hoodoo / Rootwork",
+      "Ifa / Orisha Traditions (Yoruba)",
+      "Islam",
+      "Kemetic Philosophy",
+      "Liberated Christianity",
+      "Metaphysical Science (African-centered variants)",
+      "New Age Spirituality",
+      "Obeah",
+      "Pan African Spiritual Movements",
+      "Quantum Spirituality",
+      "Sankofa",
+      "Spiritual Science",
+      "Ubuntu",
+      "Vodun / Vodou",
+    ],
+    []
+  );
 
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
       const intentionMatch = intentionFilter === "All" || p.intention === intentionFilter;
 
-      const culturalValues = Array.isArray(p.culturalIdentity)
-        ? p.culturalIdentity
-        : [];
+      const culturalValues = Array.isArray(p.culturalIdentity) ? p.culturalIdentity : [];
+      const spiritualValues = Array.isArray(p.spiritualFramework) ? p.spiritualFramework : [];
 
-      const spiritualValues = Array.isArray(p.spiritualFramework)
-        ? p.spiritualFramework
-        : [];
+      const culturalMatch = culturalIdentityFilter === "All" || culturalValues.includes(culturalIdentityFilter);
+      const spiritualMatch = spiritualFrameworkFilter === "All" || spiritualValues.includes(spiritualFrameworkFilter);
+      const stateMatch = stateFilter === "All" || p.stateUS === stateFilter;
 
-      const culturalMatch =
-        culturalIdentityFilter === "All" ||
-        culturalValues.includes(culturalIdentityFilter);
-
-      const spiritualMatch =
-        spiritualFrameworkFilter === "All" ||
-        spiritualValues.includes(spiritualFrameworkFilter);
-      
-      const stateMatch =
-        stateFilter === "All" || p.stateUS === stateFilter;
-     
       const currentUserGender = myProfile?.gender || "";
       const currentLookingFor = myProfile?.lookingForGender || "";
 
-      const preferenceMatch =
-        !currentLookingFor || p.gender === currentLookingFor;
-
-      const reciprocalMatch =
-         !p.lookingForGender || !currentUserGender || p.lookingForGender === currentUserGender;
-
+      const preferenceMatch = !currentLookingFor || p.gender === currentLookingFor;
+      const reciprocalMatch = !p.lookingForGender || !currentUserGender || p.lookingForGender === currentUserGender;
       const notMe = p.owner_user_id !== userId;
-      
-      return (
-        notMe &&
-        intentionMatch &&
-        culturalMatch &&
-        spiritualMatch &&
-        stateMatch &&
-        preferenceMatch &&
-        reciprocalMatch
-      );
+
+      return notMe && intentionMatch && culturalMatch && spiritualMatch && stateMatch && preferenceMatch && reciprocalMatch;
     });
- }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter, stateFilter, myProfile, userId]);
+  }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter, stateFilter, myProfile, userId]);
+
   function showToast(msg: unknown) {
     setToast(typeof msg === "string" ? msg : toNiceString(msg));
     window.setTimeout(() => setToast(null), 2400);
+  }
+
+  function goToNextProfile() {
+    setActiveProfileIndex((i) => i + 1);
+    showToast("Next profile.");
   }
 
   async function refreshSavedAndLikes(uid: string) {
@@ -621,12 +573,12 @@ const spiritualFrameworkOptions = useMemo(
         setApiError(null);
         setLoadingProfiles(true);
 
-const allItems = await apiListProfiles();
-const mine = allItems.find((p) => p.owner_user_id === uid) || null;
-setMyProfile(mine);
+        const allItems = await apiListProfiles();
+        const mine = allItems.find((p) => p.owner_user_id === uid) || null;
+        setMyProfile(mine);
 
-const items = allItems.filter((p) => p.owner_user_id !== uid);
-setProfiles(items);
+        const items = allItems.filter((p) => p.owner_user_id !== uid);
+        setProfiles(items);
       } catch (e: any) {
         setApiError(toNiceString(e?.message || e));
         setProfiles([]);
@@ -757,10 +709,22 @@ setProfiles(items);
     background: "rgba(255,255,255,0.92)",
     display: "inline-flex",
     alignItems: "center",
+    justifyContent: "center",
     gap: 8,
     fontWeight: 900,
     boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
     backdropFilter: "blur(8px)",
+  };
+
+  const nextProfileBtn: CSSProperties = {
+    ...pillBtn,
+    width: "100%",
+    gridColumn: "1 / -1",
+    marginTop: 8,
+    padding: "0.8rem 1rem",
+    borderTop: "1px solid rgba(10,84,17,0.18)",
+    background: "rgba(255,255,255,0.96)",
+    cursor: "pointer",
   };
 
   const pillBtnGlow: React.CSSProperties = {
@@ -810,36 +774,36 @@ setProfiles(items);
 
   return (
     <main
-  style={{
-    minHeight: "auto",
-    padding: "1.5rem",
-    display: "grid",
-    placeItems: "start center",
-    color: "#111827",
-    WebkitTextFillColor: "#111827",
-  }}
->
+      style={{
+        minHeight: "auto",
+        padding: "1.5rem",
+        display: "grid",
+        placeItems: "start center",
+        color: "#111827",
+        WebkitTextFillColor: "#111827",
+      }}
+    >
       <div style={{ width: "100%", maxWidth: 1100, overflowX: "hidden" }}>
-       <div
-  style={{
-    display: "flex",
-    justifyContent: "space-between",
-    overflowX: "auto",
-    maxWidth: "100%",
-    gap: 12,
-    alignItems: "center",
-    flexWrap: "wrap",
-    marginBottom: 10,
-    position: "sticky",
-    top: 0,
-    zIndex: 50,
-    paddingTop: 8,
-    paddingBottom: 8,
-    background: "rgba(255,255,255,0.92)",
-    backdropFilter: "blur(10px)",
-    borderBottom: "1px solid rgba(0,0,0,0.08)",
-  }}
->
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            overflowX: "auto",
+            maxWidth: "100%",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+            marginBottom: 10,
+            position: "sticky",
+            top: 0,
+            zIndex: 50,
+            paddingTop: 8,
+            paddingBottom: 8,
+            background: "rgba(255,255,255,0.92)",
+            backdropFilter: "blur(10px)",
+            borderBottom: "1px solid rgba(0,0,0,0.08)",
+          }}
+        >
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <h1 style={{ margin: 0 }}>Discover</h1>
@@ -964,26 +928,18 @@ setProfiles(items);
 
           <div style={filterWrapStyle}>
             <span style={filterLabelStyle}>Intention:</span>
+            <select value={intentionFilter} onChange={(e) => setIntentionFilter(e.target.value)} style={selectIntention}>
+              {intentionOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <select
-            value={intentionFilter}
-            onChange={(e) => setIntentionFilter(e.target.value)}
-            style={selectIntention}
-          >
-            {intentionOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-        </div>
           <div style={filterWrapStyle}>
             <span style={filterLabelStyle}>Cultural:</span>
-            <select
-              value={culturalIdentityFilter}
-              onChange={(e) => setCulturalIdentityFilter(e.target.value)}
-              style={selectCultural}
-            >
+            <select value={culturalIdentityFilter} onChange={(e) => setCulturalIdentityFilter(e.target.value)} style={selectCultural}>
               {culturalIdentityOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -994,11 +950,7 @@ setProfiles(items);
 
           <div style={filterWrapStyle}>
             <span style={filterLabelStyle}>Spiritual:</span>
-            <select
-              value={spiritualFrameworkFilter}
-              onChange={(e) => setSpiritualFrameworkFilter(e.target.value)}
-              style={selectSpiritual}
-            >
+            <select value={spiritualFrameworkFilter} onChange={(e) => setSpiritualFrameworkFilter(e.target.value)} style={selectSpiritual}>
               {spiritualFrameworkOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -1006,23 +958,19 @@ setProfiles(items);
               ))}
             </select>
           </div>
+
           <div style={filterWrapStyle}>
             <span style={filterLabelStyle}>State:</span>
-
-            <select
-             value={stateFilter}
-             onChange={(e) => setStateFilter(e.target.value)}
-             style={selectBase}
-          >
-             {stateOptions.map((opt) => (
-               <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-       </div>
-       
+            <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)} style={selectBase}>
+              {stateOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
+
         <div
           style={{
             marginTop: 14,
@@ -1054,7 +1002,7 @@ setProfiles(items);
             >
               Loading profiles…
             </div>
-          ) : filteredProfiles.length === 0 ? (
+          ) : filteredProfiles.length === 0 || activeProfileIndex >= filteredProfiles.length ? (
             <div
               style={{
                 padding: 14,
@@ -1071,227 +1019,227 @@ setProfiles(items);
 
               <div style={{ color: "#374151", marginBottom: 12 }}>
                 Check back later as more members join Black Within, or adjust your filters.
-            </div>
+              </div>
 
-            <button
-              onClick={() => setActiveProfileIndex(0)}
-              style={{
-                ...pillBtn,
-                cursor: "pointer",
-              }}
-            >
-              Start Over
-            </button>
+              <button onClick={() => setActiveProfileIndex(0)} style={{ ...pillBtn, cursor: "pointer" }}>
+                Start Over
+              </button>
             </div>
           ) : (
             <div className="discover-card-grid">
-             {filteredProfiles
-              .slice(activeProfileIndex, activeProfileIndex + 3)
-              .filter(Boolean)
-              .map((p) => {
-                const isSaved = savedIds.includes(p.id);
-                const isLiked = likedIds.includes(p.id);
-                const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
-                const likeDisabled = isLiked || loadingLikesStatus || isLimitReached;
-                const likeLabel = isLiked ? "Connection Explored" : isLimitReached ? "Limit reached" : "Explore Connection";
-                const notMe = p.owner_user_id !== userId;
+              {filteredProfiles
+                .slice(activeProfileIndex, activeProfileIndex + 3)
+                .filter(Boolean)
+                .map((p) => {
+                  const isSaved = savedIds.includes(p.id);
+                  const isLiked = likedIds.includes(p.id);
+                  const isLimitReached = !loadingLikesStatus && !!likesStatus && likesStatus.likesLeft <= 0;
+                  const likeDisabled = isLiked || loadingLikesStatus || isLimitReached;
+                  const likeLabel = isLiked ? "Connection Explored" : isLimitReached ? "Limit reached" : "Explore Connection";
 
-                return (
-                  <div
-                    key={p.id}
-                    className="card"
-                     style={{
-                       maxWidth: "100%",
-                       width: "100%",
-                       margin: "0 auto",
-                       borderRadius: 18,
-                       overflow: "hidden",
-                       border: "1px solid rgba(0,0,0,0.10)",
-                       background: "#ffffff",
-                       color: "#111827",
-                       WebkitTextFillColor: "#111827",
-                       boxShadow: "0 14px 34px rgba(0,0,0,0.12)",
-                       backdropFilter: "blur(10px)",
-                     }}
-                   >
-                    <Link href={`/profiles/${p.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
-                      {p.photo && !brokenImages[p.id] ? (
-                        <img
-                          src={p.photo}
-                          alt={p.displayName}
-                          style={{
-                            width: "100%",
-                            height: "clamp(240px, 35vw, 320px)",
-                            objectFit: "contain",
-                            objectPosition: `${p.photo_position_x ?? 50}% ${p.photo_position_y ?? 50}%`,
-                            background: "#f4f1e8",
-                          }}
-                          onError={() => setBrokenImages((curr) => ({ ...curr, [p.id]: true }))}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: "100%",
-                            height: "clamp(240px, 35vw, 320px)",
-                            background: "#f2f2f2",
-                            display: "grid",
-                            placeItems: "center",
-                            fontSize: 44,
-                            fontWeight: 900,
-                            color: "#444",
-                          }}
-                        >
-                          {(p.displayName || "")
-                            .trim()
-                            .split(" ")
-                            .filter(Boolean)
-                            .map((w) => w[0])
-                            .join("")
-                            .slice(0, 2)
-                            .toUpperCase()}
-                        </div>
-                      )}
-                    </Link>
-
-                    <div style={{ padding: 14 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
-                        <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1.1 }}>{p.displayName}</div>
-                        <div style={{ color: "#666", fontWeight: 800 }}>{p.age}</div>
-                      </div>
-
-                      <div style={{ marginTop: 6, color: "#374151", fontSize: 13, fontWeight: 600 }}>
-                        {p.city}, {p.stateUS}
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 6,
-                          color: "#0a5411",
-                          fontSize: 12,
-                          fontWeight: 900,
-                        }}
-                      >
-                        {getLastActiveLabel(p.lastActiveAt)}
-                      </div>
-                      
-                      <div style={{ marginTop: 10, fontSize: 13, color: "#111827", fontWeight: 500 }}>
-                        <strong>Identity:</strong> {p.identityPreview}
-                      </div>
-
-                      <div style={{ marginTop: 8, fontSize: 13, color: "#111827", fontWeight: 500 }}>
-                        <strong>Intention:</strong> {p.intention}
-                      </div>
-
-                      {Array.isArray(p.tags) && p.tags.length > 0 && (
-                        <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          {p.tags.slice(0, 10).map((t, idx) => (
-                            <span
-                              key={`${p.id}-tag-${idx}`}
-                              style={{
-                                fontSize: 12,
-                                padding: "4px 8px",
-                                border: "1px solid rgba(0,0,0,0.12)",
-                                borderRadius: 999,
-                                background: "rgba(250,250,250,0.9)",
-                              }}
-                            >
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      <div
-                        style={{
-                          marginTop: 12,
-                          display: "grid",
-                          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                          gap: 8,
-                        }}
-                       >
-                        <Link href={`/profiles/${p.id}`} style={pillBtn}>
-                          <Icon name="user" /> View
-                        </Link>
-
-                        <button
-                          onClick={async () => {
-                            if (!userId) return;
-                            const currentlySaved = savedIds.includes(p.id);
-                            const prev = savedIds;
-
-                            setSavedIds((curr) => (curr.includes(p.id) ? curr.filter((x) => x !== p.id) : [p.id, ...curr]));
-
-                            try {
-                              if (currentlySaved) {
-                                await apiUnsaveProfile(userId, p.id);
-                                showToast("Removed from Saved Profiles.");
-                              } else {
-                                await apiSaveProfile(userId, p.id);
-                                showToast("Saved. You can view it later in Saved Profiles.");
-                              }
-                              await refreshSavedAndLikes(userId);
-                            } catch (e: any) {
-                              setSavedIds(prev);
-                              const msg = toNiceString(e?.message || e) || "Could not update saved status right now.";
-                              setApiError(msg);
-                              showToast(msg);
-                            }
-                          }}
-                          disabled={loadingSets}
-                          style={{
-                            ...pillBtn,
-                            cursor: loadingSets ? "not-allowed" : "pointer",
-                            opacity: loadingSets ? 0.8 : 1,
-                          }}
-                        >
-                          <Icon name="bookmark" /> {isSaved ? "Unsave" : "Save"}
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            showToast("Not aligned.");
-                            setActiveProfileIndex((i) => i + 1);
-                          }}
-                         style={{
-                           ...pillBtn,
-                           cursor: "pointer",
-                         }}
-                       >
-                         ↪ Not Aligned
-                       </button>
-
-                       <button
-                        onClick={async () => {
-                          await onLike(p);
-                          setActiveProfileIndex((i) => i + 1);
-                       }}
-                       disabled={likeDisabled}
-                       style={{
-                         ...pillBtn,
-                         cursor: likeDisabled ? "not-allowed" : "pointer",
-                         opacity: likeDisabled ? 0.7 : 1,
-                       }}
-                     >
-                      <Icon name="heart" /> {likeLabel}
-                     </button>
-
-                     <button
-                       onClick={() => onMessage(p)}
-                       disabled={loadingSets}
-                       style={{
-                         ...pillBtn,
-                         cursor: loadingSets ? "not-allowed" : "pointer",
-                         opacity: loadingSets ? 0.8 : 1,
+                  return (
+                    <div
+                      key={p.id}
+                      className="card"
+                      style={{
+                        maxWidth: "100%",
+                        width: "100%",
+                        margin: "0 auto",
+                        borderRadius: 18,
+                        overflow: "hidden",
+                        border: "1px solid rgba(0,0,0,0.10)",
+                        background: "#ffffff",
+                        color: "#111827",
+                        WebkitTextFillColor: "#111827",
+                        boxShadow: "0 14px 34px rgba(0,0,0,0.12)",
+                        backdropFilter: "blur(10px)",
                       }}
                     >
-                  
-                          <Icon name="chat" /> Message
-                        </button>
+                      <Link href={`/profiles/${p.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
+                        {p.photo && !brokenImages[p.id] ? (
+                          <img
+                            src={p.photo}
+                            alt={p.displayName}
+                            style={{
+                              width: "100%",
+                              height: "clamp(240px, 35vw, 320px)",
+                              objectFit: "contain",
+                              objectPosition: `${p.photo_position_x ?? 50}% ${p.photo_position_y ?? 50}%`,
+                              background: "#f4f1e8",
+                            }}
+                            onError={() => setBrokenImages((curr) => ({ ...curr, [p.id]: true }))}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: "100%",
+                              height: "clamp(240px, 35vw, 320px)",
+                              background: "#f2f2f2",
+                              display: "grid",
+                              placeItems: "center",
+                              fontSize: 44,
+                              fontWeight: 900,
+                              color: "#444",
+                            }}
+                          >
+                            {(p.displayName || "")
+                              .trim()
+                              .split(" ")
+                              .filter(Boolean)
+                              .map((w) => w[0])
+                              .join("")
+                              .slice(0, 2)
+                              .toUpperCase()}
+                          </div>
+                        )}
+                      </Link>
+
+                      <div style={{ padding: 14 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                          <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1.1 }}>{p.displayName}</div>
+                          <div style={{ color: "#666", fontWeight: 800 }}>{p.age}</div>
+                        </div>
+
+                        <div style={{ marginTop: 6, color: "#374151", fontSize: 13, fontWeight: 600 }}>
+                          {p.city}, {p.stateUS}
+                        </div>
+
+                        <div
+                          style={{
+                            marginTop: 6,
+                            color: "#0a5411",
+                            fontSize: 12,
+                            fontWeight: 900,
+                          }}
+                        >
+                          {getLastActiveLabel(p.lastActiveAt)}
+                        </div>
+
+                        <div style={{ marginTop: 10, fontSize: 13, color: "#111827", fontWeight: 500 }}>
+                          <strong>Identity:</strong> {p.identityPreview}
+                        </div>
+
+                        <div style={{ marginTop: 8, fontSize: 13, color: "#111827", fontWeight: 500 }}>
+                          <strong>Intention:</strong> {p.intention}
+                        </div>
+
+                        {Array.isArray(p.tags) && p.tags.length > 0 && (
+                          <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            {p.tags.slice(0, 10).map((t, idx) => (
+                              <span
+                                key={`${p.id}-tag-${idx}`}
+                                style={{
+                                  fontSize: 12,
+                                  padding: "4px 8px",
+                                  border: "1px solid rgba(0,0,0,0.12)",
+                                  borderRadius: 999,
+                                  background: "rgba(250,250,250,0.9)",
+                                }}
+                              >
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div
+                          style={{
+                            marginTop: 12,
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                            gap: 8,
+                          }}
+                        >
+                          <Link href={`/profiles/${p.id}`} style={pillBtn}>
+                            <Icon name="user" /> View
+                          </Link>
+
+                          <button
+                            onClick={async () => {
+                              if (!userId) return;
+                              const currentlySaved = savedIds.includes(p.id);
+                              const prev = savedIds;
+
+                              setSavedIds((curr) => (curr.includes(p.id) ? curr.filter((x) => x !== p.id) : [p.id, ...curr]));
+
+                              try {
+                                if (currentlySaved) {
+                                  await apiUnsaveProfile(userId, p.id);
+                                  showToast("Removed from Saved Profiles.");
+                                } else {
+                                  await apiSaveProfile(userId, p.id);
+                                  showToast("Saved. You can view it later in Saved Profiles.");
+                                }
+                                await refreshSavedAndLikes(userId);
+                              } catch (e: any) {
+                                setSavedIds(prev);
+                                const msg = toNiceString(e?.message || e) || "Could not update saved status right now.";
+                                setApiError(msg);
+                                showToast(msg);
+                              }
+                            }}
+                            disabled={loadingSets}
+                            style={{
+                              ...pillBtn,
+                              cursor: loadingSets ? "not-allowed" : "pointer",
+                              opacity: loadingSets ? 0.8 : 1,
+                            }}
+                          >
+                            <Icon name="bookmark" /> {isSaved ? "Unsave" : "Save"}
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              showToast("Not aligned.");
+                              setActiveProfileIndex((i) => i + 1);
+                            }}
+                            style={{
+                              ...pillBtn,
+                              cursor: "pointer",
+                            }}
+                          >
+                            ↪ Not Aligned
+                          </button>
+
+                          <button
+                            onClick={async () => {
+                              await onLike(p);
+                              setActiveProfileIndex((i) => i + 1);
+                            }}
+                            disabled={likeDisabled}
+                            style={{
+                              ...pillBtn,
+                              cursor: likeDisabled ? "not-allowed" : "pointer",
+                              opacity: likeDisabled ? 0.7 : 1,
+                            }}
+                          >
+                            <Icon name="heart" /> {likeLabel}
+                          </button>
+
+                          <button
+                            onClick={() => onMessage(p)}
+                            disabled={loadingSets}
+                            style={{
+                              ...pillBtn,
+                              cursor: loadingSets ? "not-allowed" : "pointer",
+                              opacity: loadingSets ? 0.8 : 1,
+                            }}
+                          >
+                            <Icon name="chat" /> Message
+                          </button>
+
+                          <button
+                            onClick={goToNextProfile}
+                            type="button"
+                            style={nextProfileBtn}
+                          >
+                            Next Profile →
+                          </button>
+                        </div>
                       </div>
                     </div>
-                 </div>   
-                );
-              })}
+                  );
+                })}
             </div>
           )}
         </div>
@@ -1318,30 +1266,29 @@ setProfiles(items);
           </div>
         )}
       </div>
-      <div
-  style={{
-    marginTop: 30,
-    padding: 16,
-    textAlign: "center",
-    fontSize: 12,
-    color: "#666",
-    borderTop: "1px solid rgba(0,0,0,0.08)",
-  }}
->
-  By participating in Black Within, you agree to uphold our Community
-  Commitment and help maintain a respectful environment for all members.
 
-  <div
-  style={{
-    marginTop: 8,
-    fontWeight: 700,
-    color: "#8b0000",
-  }}
->
-  Never send money to someone you have met online and report suspicious
-  behavior immediately.
-</div>
-</div>
+      <div
+        style={{
+          marginTop: 30,
+          padding: 16,
+          textAlign: "center",
+          fontSize: 12,
+          color: "#666",
+          borderTop: "1px solid rgba(0,0,0,0.08)",
+        }}
+      >
+        By participating in Black Within, you agree to uphold our Community Commitment and help maintain a respectful environment for all members.
+
+        <div
+          style={{
+            marginTop: 8,
+            fontWeight: 700,
+            color: "#8b0000",
+          }}
+        >
+          Never send money to someone you have met online and report suspicious behavior immediately.
+        </div>
+      </div>
     </main>
   );
 }
