@@ -460,14 +460,10 @@ export default function DiscoverPage() {
     []
   );
 
-  const stateOptions = useMemo(() => {
-    const set = new Set<string>();
-    availableProfiles.forEach((p) => {
-      const state = normalizeState(p.stateUS);
-      if (state && state.toLowerCase() !== "state") set.add(state);
-    });
-    return ["All", ...Array.from(set).sort()];
-  }, [availableProfiles]);
+  const stateOptions = useMemo(
+    () => ["All", ...Object.values(US_STATE_NAMES).sort()],
+    []
+  );
 
   const culturalIdentityOptions = useMemo(
     () => [
