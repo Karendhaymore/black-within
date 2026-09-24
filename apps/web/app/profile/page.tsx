@@ -69,6 +69,59 @@ type UploadPhotoResponse = {
   ok?: boolean;
 };
 
+const US_STATES = [
+  "Alabama",
+  "Alaska",
+  "Arizona",
+  "Arkansas",
+  "California",
+  "Colorado",
+  "Connecticut",
+  "Delaware",
+  "Florida",
+  "Georgia",
+  "Hawaii",
+  "Idaho",
+  "Illinois",
+  "Indiana",
+  "Iowa",
+  "Kansas",
+  "Kentucky",
+  "Louisiana",
+  "Maine",
+  "Maryland",
+  "Massachusetts",
+  "Michigan",
+  "Minnesota",
+  "Mississippi",
+  "Missouri",
+  "Montana",
+  "Nebraska",
+  "Nevada",
+  "New Hampshire",
+  "New Jersey",
+  "New Mexico",
+  "New York",
+  "North Carolina",
+  "North Dakota",
+  "Ohio",
+  "Oklahoma",
+  "Oregon",
+  "Pennsylvania",
+  "Rhode Island",
+  "South Carolina",
+  "South Dakota",
+  "Tennessee",
+  "Texas",
+  "Utah",
+  "Vermont",
+  "Virginia",
+  "Washington",
+  "West Virginia",
+  "Wisconsin",
+  "Wyoming",
+] as const;
+
 const RELATIONSHIP_INTENTS = [
   "Intentional partnership",
   "Marriage-minded",
@@ -981,7 +1034,7 @@ const profileCompletion = Math.round(
 
               <label>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>State</div>
-                <input
+                <select
                   value={form.stateUS}
                   onChange={(e) => onChange("stateUS", e.target.value)}
                   style={{
@@ -990,9 +1043,20 @@ const profileCompletion = Math.round(
                     borderRadius: 10,
                     border: "1px solid #ccc",
                   }}
-                  placeholder="e.g., GA"
                   disabled={loadingExisting}
-                />
+                >
+                  <option value="">Select a state</option>
+                  {form.stateUS && !US_STATES.some((state) => state === form.stateUS) && (
+                    <option value={form.stateUS} disabled>
+                      Current value: {form.stateUS} — please select a state
+                    </option>
+                  )}
+                  {US_STATES.map((state) => (
+                    <option key={state} value={state}>
+                      {state}
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
 
