@@ -74,6 +74,70 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "https://black-within-api.onrender.com";
 
+const US_STATE_NAMES: Record<string, string> = {
+  AL: "Alabama",
+  AK: "Alaska",
+  AZ: "Arizona",
+  AR: "Arkansas",
+  CA: "California",
+  CO: "Colorado",
+  CT: "Connecticut",
+  DE: "Delaware",
+  FL: "Florida",
+  GA: "Georgia",
+  HI: "Hawaii",
+  ID: "Idaho",
+  IL: "Illinois",
+  IN: "Indiana",
+  IA: "Iowa",
+  KS: "Kansas",
+  KY: "Kentucky",
+  LA: "Louisiana",
+  ME: "Maine",
+  MD: "Maryland",
+  MA: "Massachusetts",
+  MI: "Michigan",
+  MN: "Minnesota",
+  MS: "Mississippi",
+  MO: "Missouri",
+  MT: "Montana",
+  NE: "Nebraska",
+  NV: "Nevada",
+  NH: "New Hampshire",
+  NJ: "New Jersey",
+  NM: "New Mexico",
+  NY: "New York",
+  NC: "North Carolina",
+  ND: "North Dakota",
+  OH: "Ohio",
+  OK: "Oklahoma",
+  OR: "Oregon",
+  PA: "Pennsylvania",
+  RI: "Rhode Island",
+  SC: "South Carolina",
+  SD: "South Dakota",
+  TN: "Tennessee",
+  TX: "Texas",
+  UT: "Utah",
+  VT: "Vermont",
+  VA: "Virginia",
+  WA: "Washington",
+  WV: "West Virginia",
+  WI: "Wisconsin",
+  WY: "Wyoming",
+};
+
+function normalizeState(value: string | null | undefined): string {
+  const state = (value || "").trim();
+  if (!state) return "";
+  if (state.toLowerCase() === "georga") return "Georgia";
+  return (
+    US_STATE_NAMES[state.toUpperCase()] ||
+    Object.values(US_STATE_NAMES).find((name) => name.toLowerCase() === state.toLowerCase()) ||
+    state
+  );
+}
+
 function getLoggedInUserId(): string | null {
   if (typeof window === "undefined") return null;
   try {
@@ -399,7 +463,8 @@ export default function DiscoverPage() {
   const stateOptions = useMemo(() => {
     const set = new Set<string>();
     availableProfiles.forEach((p) => {
-      if (p.stateUS) set.add(p.stateUS);
+      const state = normalizeState(p.stateUS);
+      if (state && state.toLowerCase() !== "state") set.add(state);
     });
     return ["All", ...Array.from(set).sort()];
   }, [availableProfiles]);
@@ -457,7 +522,7 @@ export default function DiscoverPage() {
 
       const culturalMatch = culturalIdentityFilter === "All" || culturalValues.includes(culturalIdentityFilter);
       const spiritualMatch = spiritualFrameworkFilter === "All" || spiritualValues.includes(spiritualFrameworkFilter);
-      const stateMatch = stateFilter === "All" || p.stateUS === stateFilter;
+      const stateMatch = stateFilter === "All" || normalizeState(p.stateUS) === stateFilter;
 
       const currentUserGender = myProfile?.gender || "";
       const currentLookingFor = myProfile?.lookingForGender || "";
