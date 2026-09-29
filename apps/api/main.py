@@ -2433,16 +2433,16 @@ def _coerce_upsert_fields(payload):
 
 
 def _coerce_alignment_fields(payload: UpsertMyProfilePayload):
-    cultural = payload.culturalIdentity if payload.culturalIdentity is not None else payload.cultural_identity
-    spiritual = payload.spiritualFramework if payload.spiritualFramework is not None else payload.spiritual_framework
+    cultural = payload.culturalIdentity if payload.culturalIdentity is not None else getattr(payload, "cultural_identity", None)
+    spiritual = payload.spiritualFramework if payload.spiritualFramework is not None else getattr(payload, "spiritual_framework", None)
 
     cultural_list = _coerce_str_list(cultural)[:50]
     spiritual_list = _coerce_str_list(spiritual)[:50]
 
-    rel_intent = (payload.relationshipIntent or payload.relationship_intent or "").strip() or None
+    rel_intent = (payload.relationshipIntent or getattr(payload, "relationship_intent", None) or "").strip() or None
 
-    dating_challenge = payload.datingChallenge if payload.datingChallenge is not None else payload.dating_challenge_text
-    personal_truth = payload.personalTruth if payload.personalTruth is not None else payload.personal_truth_text
+    dating_challenge = payload.datingChallenge if payload.datingChallenge is not None else getattr(payload, "dating_challenge_text", None)
+    personal_truth = payload.personalTruth if payload.personalTruth is not None else getattr(payload, "personal_truth_text", None)
 
     dating_challenge = (dating_challenge or "").strip() or None
     personal_truth = (personal_truth or "").strip() or None
