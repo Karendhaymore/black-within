@@ -53,6 +53,8 @@ type MessagingAccessResponse = {
 
 type ProfileGateResponse = {
   hasPhoto?: boolean;
+  isComplete?: boolean;
+  missingFields?: string[];
 };
 
 type ThreadListItem = {
@@ -231,9 +233,9 @@ async function apiLikeProfile(userId: string, profileId: string) {
   if (!res.ok) throw new Error(await getFriendlyApiError(res));
 }
 
-async function apiListProfiles(excludeOwnerUserId?: string): Promise<ApiProfile[]> {
+async function apiListProfiles(userId: string, excludeOwnerUserId?: string): Promise<ApiProfile[]> {
   const url =
-    `${API_BASE}/profiles?limit=50` +
+    `${API_BASE}/profiles?limit=50&user_id=${encodeURIComponent(userId)}` +
     (excludeOwnerUserId ? `&exclude_owner_user_id=${encodeURIComponent(excludeOwnerUserId)}` : "");
 
   const res = await fetch(url, { cache: "no-store" });
@@ -620,21 +622,21 @@ export default function DiscoverPage() {
       try {
         setGateLoading(true);
         const gate = await apiProfileGate(uid);
-        if (!gate?.hasPhoto) {
-          router.replace("/profile?reason=photo_required");
+        if (!gate?.isComplete) {
+          router.replace("/profile?reason=profile_incomplete");
           return;
         }
       } catch {
-        // fail-open
-      } finally {
-        setGateLoading(false);
+        router.replace("/profile?reason=profile_incomplete");
+        return;
       }
+      setGateLoading(false);
 
       try {
         setApiError(null);
         setLoadingProfiles(true);
 
-        const allItems = await apiListProfiles();
+        const allItems = await apiListProfiles(uid);
         const mine = allItems.find((p) => p.owner_user_id === uid) || null;
         setMyProfile(mine);
 
