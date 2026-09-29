@@ -85,8 +85,8 @@ async function safeReadErrorDetail(res: Response): Promise<string> {
   return `Request failed (${res.status}).`;
 }
 
-async function apiListProfiles(): Promise<ApiProfile[]> {
-  const res = await fetch(`${API_BASE}/profiles?limit=200`, {
+async function apiListProfiles(userId: string): Promise<ApiProfile[]> {
+  const res = await fetch(`${API_BASE}/profiles?limit=200&user_id=${encodeURIComponent(userId)}`, {
     cache: "no-store",
   });
   if (!res.ok) {
@@ -368,7 +368,17 @@ export default function ProfileDetailPage() {
         setApiError(null);
         setLoading(true);
 
-        const items = await apiListProfiles();
+        const gateResponse = await fetch(`${API_BASE}/profiles/gate?user_id=${encodeURIComponent(uid)}`, { cache: "no-store" });
+        if (!gateResponse.ok) {
+          router.replace("/profile?reason=profile_incomplete");
+          return;
+        }
+        const gate = (await gateResponse.json()) as { isComplete?: boolean };
+        if (!gate.isComplete) {
+          router.replace("/profile?reason=profile_incomplete");
+          return;
+        }
+        const items = await apiListProfiles(uid);
         setProfiles(items);
       } catch (e: any) {
         console.error("Profile detail load error:", e);
