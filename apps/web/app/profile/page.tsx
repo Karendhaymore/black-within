@@ -206,9 +206,10 @@ async function apiListProfiles(
 }
 
 async function apiGetMyProfile(userId: string): Promise<ProfileItem | null> {
-  const all = await apiListProfiles();
-  const mine = all.find((p) => p.owner_user_id === userId);
-  return mine || null;
+  const res = await fetch(`${API_BASE}/profiles/mine?user_id=${encodeURIComponent(userId)}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await safeReadErrorDetail(res));
+  const data = (await res.json()) as ProfilesResponse;
+  return Array.isArray(data.items) ? data.items[0] || null : null;
 }
 
 async function apiUpsertProfile(payload: any) {
@@ -310,6 +311,7 @@ function buildIdentityPreview(args: {
 
 export default function MyProfilePage() {
   const [userId, setUserId] = useState<string>("");
+  const [completionRequired, setCompletionRequired] = useState(false);
   const router = useRouter();
 
   const [loadingExisting, setLoadingExisting] = useState<boolean>(true);
@@ -402,6 +404,7 @@ export default function MyProfilePage() {
       return;
     }
     setUserId(uid);
+    setCompletionRequired(new URLSearchParams(window.location.search).get("reason") === "profile_incomplete");
   }, [router]);
 
   useEffect(() => {
@@ -815,6 +818,11 @@ const profileCompletion = Math.round(
         background: "#fff",
       }}
     >
+      {completionRequired && (
+        <div role="status" style={{ padding: "1rem", marginBottom: "1rem", border: "1px solid #b7791f", borderRadius: 10, background: "#fff8e6", color: "#111827" }}>
+          Please complete and save your profile before viewing other profiles. Add your display name, age (18+), city, state, gender, who you are looking for, at least one photo, relationship intention, cultural identity, and spiritual framework.
+        </div>
+      )}
       <div style={{ width: "100%", maxWidth: 980 }}>
         <div
           style={{
