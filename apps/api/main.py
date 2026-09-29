@@ -2274,8 +2274,117 @@ def likes_status(user_id: str = Query(...)):
         }
 
 
+def _profile_missing_fields(p) -> List[str]:
+    if p is None:
+        return ["saved profile"]
+    missing = []
+    for attr, label in (
+        ("display_name", "display name"), ("city", "city"),
+        ("state_us", "state"), ("gender", "gender"),
+        ("looking_for_gender", "who you are looking for"),
+    ):
+        if not str(getattr(p, attr, "") or "").strip():
+            missing.append(label)
+    if not getattr(p, "age", None) or p.age < 18:
+        missing.append("valid age (18+)")
+    if not str(getattr(p, "photo", "") or "").strip() and not str(getattr(p, "photo2", "") or "").strip():
+        missing.append("at least one photo")
+    if not str(getattr(p, "relationship_intent", None) or getattr(p, "intention", "") or "").strip():
+        missing.append("relationship intention")
+    if not _parse_json_list(getattr(p, "cultural_identity_csv", "[]")):
+        missing.append("cultural identity")
+    if not _parse_json_list(getattr(p, "spiritual_framework_csv", "[]")):
+        missing.append("spiritual framework")
+    return missing
+
+
+def _require_complete_profile(session: Session, user_id: str) -> None:
+    uid = _ensure_user(user_id)
+    p = session.execute(select(Profile).where(Profile.owner_user_id == uid)).scalar_one_or_none()
+    if p and getattr(p, "is_banned", False):
+        raise HTTPException(status_code=403, detail="Your account has been suspended.")
+    missing = _profile_missing_fields(p)
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail="Please complete and save your profile before viewing other profiles. Missing: " + ", ".join(missing) + ".",
+        )
+
+
+def _profile_to_item(p: Profile) -> ProfileItem:
+    tags = _parse_json_list(p.tags_csv)
+    cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
+    spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
+
+    return ProfileItem(
+        id=p.id,
+        owner_user_id=p.owner_user_id,
+        displayName=p.display_name,
+        age=p.age,
+        city=p.city,
+        stateUS=p.state_us,
+        photo=p.photo,
+        photo2=getattr(p, "photo2", None),
+        photo_position_x=getattr(p, "photo_position_x", 50),
+        photo_position_y=getattr(p, "photo_position_y", 50),
+        photo2_position_x=getattr(p, "photo2_position_x", 50),
+        photo2_position_y=getattr(p, "photo2_position_y", 50),
+        identityPreview=p.identity_preview,
+        intention=p.intention,
+        tags=tags,
+        isAvailable=bool(p.is_available),
+        culturalIdentity=cultural,
+        spiritualFramework=spiritual,
+        relationshipIntent=getattr(p, "relationship_intent", None),
+        datingChallenge=getattr(p, "dating_challenge_text", None),
+        personalTruth=getattr(p, "personal_truth_text", None),
+
+        mateQualities=getattr(p, "mate_qualities", None),
+        funActivities=getattr(p, "fun_activities", None),
+        smokes=getattr(p, "smokes", None),
+        drinks=getattr(p, "drinks", None),
+        educationLevel=getattr(p, "education_level", None),
+        lastActiveAt=(
+            p.last_active_at.isoformat()
+            if getattr(p, "last_active_at", None)
+            else None
+        ),
+        gender=getattr(p, "gender", None),
+        lookingForGender=getattr(p, "looking_for_gender", None),
+    )
+
+class ProfileGateResponse(BaseModel):
+    hasProfile: bool
+    hasPhoto: bool
+    profileId: Optional[str] = None
+    isComplete: bool = False
+    missingFields: List[str] = []
+
+
+@app.get("/profiles/gate", response_model=ProfileGateResponse)
+def profiles_gate(user_id: str = Query(...)):
+    user_id = _ensure_user(user_id)
+
+    with Session(engine) as session:
+        p = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
+        if not p:
+            return ProfileGateResponse(hasProfile=False, hasPhoto=False, profileId=None, isComplete=False, missingFields=["saved profile"])
+
+        has_photo = bool((p.photo or "").strip() or (getattr(p, "photo2", "") or "").strip())
+        missing = _profile_missing_fields(p)
+        return ProfileGateResponse(hasProfile=True, hasPhoto=has_photo, profileId=p.id, isComplete=not missing, missingFields=missing)
+
+
+@app.get("/profiles/mine", response_model=ProfilesResponse)
+def get_my_profile(user_id: str = Query(...)):
+    uid = _ensure_user(user_id)
+    with Session(engine) as session:
+        p = session.execute(select(Profile).where(Profile.owner_user_id == uid)).scalar_one_or_none()
+        return ProfilesResponse(items=[_profile_to_item(p)] if p else [])
+
+
 @app.get("/profiles/{profile_id}", response_model=ProfileItem)
-def get_profile(profile_id: str):
+def get_profile(profile_id: str, user_id: Optional[str] = Query(default=None)):
     profile_id = (profile_id or "").strip()
     if not profile_id:
         raise HTTPException(status_code=400, detail="profile_id is required")
@@ -2286,46 +2395,9 @@ def get_profile(profile_id: str):
             raise HTTPException(status_code=404, detail="Profile not found")
 
 
-        tags = _parse_json_list(p.tags_csv)
-        cultural = _parse_json_list(getattr(p, "cultural_identity_csv", "[]"))
-        spiritual = _parse_json_list(getattr(p, "spiritual_framework_csv", "[]"))
-
-        return ProfileItem(
-            id=p.id,
-            owner_user_id=p.owner_user_id,
-            displayName=p.display_name,
-            age=p.age,
-            city=p.city,
-            stateUS=p.state_us,
-            photo=p.photo,
-            photo2=getattr(p, "photo2", None),
-            photo_position_x=getattr(p, "photo_position_x", 50),
-            photo_position_y=getattr(p, "photo_position_y", 50),
-            photo2_position_x=getattr(p, "photo2_position_x", 50),
-            photo2_position_y=getattr(p, "photo2_position_y", 50),
-            identityPreview=p.identity_preview,
-            intention=p.intention,
-            tags=tags,
-            isAvailable=bool(p.is_available),
-            culturalIdentity=cultural,
-            spiritualFramework=spiritual,
-            relationshipIntent=getattr(p, "relationship_intent", None),
-            datingChallenge=getattr(p, "dating_challenge_text", None),
-            personalTruth=getattr(p, "personal_truth_text", None),
-
-            mateQualities=getattr(p, "mate_qualities", None),
-            funActivities=getattr(p, "fun_activities", None),
-            smokes=getattr(p, "smokes", None),
-            drinks=getattr(p, "drinks", None),
-            educationLevel=getattr(p, "education_level", None),
-            lastActiveAt=(
-                p.last_active_at.isoformat()
-                if getattr(p, "last_active_at", None)
-                else None
-            ),
-            gender=getattr(p, "gender", None),
-            lookingForGender=getattr(p, "looking_for_gender", None),
-        )
+        if user_id:
+            _require_complete_profile(session, user_id)
+        return _profile_to_item(p)
 
 
 def _coerce_upsert_fields(payload):
@@ -2397,8 +2469,10 @@ def _get_blocked_user_ids(session: Session, user_id: Optional[str]):
 
 
 @app.get("/profiles", response_model=ProfilesResponse)
-def list_profiles(exclude_owner_user_id: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=200)):
+def list_profiles(exclude_owner_user_id: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=200), user_id: Optional[str] = Query(default=None)):
     with Session(engine) as session:
+        if user_id:
+            _require_complete_profile(session, user_id)
         blocked_user_ids = _get_blocked_user_ids(session, exclude_owner_user_id)
 
         q = (
@@ -2736,25 +2810,6 @@ def delete_photo(req: DeletePhotoRequest):
         pass
 
     return {"ok": True}
-
-
-class ProfileGateResponse(BaseModel):
-    hasProfile: bool
-    hasPhoto: bool
-    profileId: Optional[str] = None
-
-
-@app.get("/profiles/gate", response_model=ProfileGateResponse)
-def profiles_gate(user_id: str = Query(...)):
-    user_id = _ensure_user(user_id)
-
-    with Session(engine) as session:
-        p = session.execute(select(Profile).where(Profile.owner_user_id == user_id)).scalar_one_or_none()
-        if not p:
-            return ProfileGateResponse(hasProfile=False, hasPhoto=False, profileId=None)
-
-        has_photo = bool((p.photo or "").strip() or (getattr(p, "photo2", "") or "").strip())
-        return ProfileGateResponse(hasProfile=True, hasPhoto=has_photo, profileId=p.id)
 
 
 @app.get("/saved", response_model=IdListResponse)
