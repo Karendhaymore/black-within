@@ -645,9 +645,6 @@ function MessagesInner() {
                 </div>
               ) : null}
 
-              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.6 }}>
-                <strong>API:</strong> {API_BASE}
-              </div>
             </div>
 
             <div style={headerRight}>
