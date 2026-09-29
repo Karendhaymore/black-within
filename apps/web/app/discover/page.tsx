@@ -140,6 +140,11 @@ function normalizeState(value: string | null | undefined): string {
   );
 }
 
+function isWithinAgeRange(age: number, minAge: number | null, maxAge: number | null): boolean {
+  if (minAge === null && maxAge === null) return true;
+  return Number.isFinite(age) && (minAge === null || age >= minAge) && (maxAge === null || age <= maxAge);
+}
+
 function getLoggedInUserId(): string | null {
   if (typeof window === "undefined") return null;
   try {
@@ -443,6 +448,8 @@ export default function DiscoverPage() {
   const [culturalIdentityFilter, setCulturalIdentityFilter] = useState<string>("All");
   const [spiritualFrameworkFilter, setSpiritualFrameworkFilter] = useState<string>("All");
   const [stateFilter, setStateFilter] = useState<string>("All");
+  const [minAgeFilter, setMinAgeFilter] = useState<string>("");
+  const [maxAgeFilter, setMaxAgeFilter] = useState<string>("");
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
   const [activeProfileIndex, setActiveProfileIndex] = useState(0);
   const [nowMs, setNowMs] = useState<number>(Date.now());
@@ -511,6 +518,16 @@ export default function DiscoverPage() {
     []
   );
 
+  const minAgeValue = minAgeFilter === "" ? null : Number(minAgeFilter);
+  const maxAgeValue = maxAgeFilter === "" ? null : Number(maxAgeFilter);
+  const ageRangeError =
+    (minAgeValue !== null && (!Number.isInteger(minAgeValue) || minAgeValue < 18)) ||
+    (maxAgeValue !== null && (!Number.isInteger(maxAgeValue) || maxAgeValue < 18))
+      ? "Please enter whole-number ages of 18 or older."
+      : minAgeValue !== null && maxAgeValue !== null && minAgeValue > maxAgeValue
+        ? "Minimum age must be less than or equal to maximum age."
+        : "";
+
   const filteredProfiles = useMemo(() => {
     return availableProfiles.filter((p) => {
       const intentionMatch = intentionFilter === "All" || p.intention === intentionFilter;
@@ -521,6 +538,7 @@ export default function DiscoverPage() {
       const culturalMatch = culturalIdentityFilter === "All" || culturalValues.includes(culturalIdentityFilter);
       const spiritualMatch = spiritualFrameworkFilter === "All" || spiritualValues.includes(spiritualFrameworkFilter);
       const stateMatch = stateFilter === "All" || normalizeState(p.stateUS) === stateFilter;
+      const ageMatch = !ageRangeError && isWithinAgeRange(p.age, minAgeValue, maxAgeValue);
 
       const currentUserGender = myProfile?.gender || "";
       const currentLookingFor = myProfile?.lookingForGender || "";
@@ -529,9 +547,9 @@ export default function DiscoverPage() {
       const reciprocalMatch = !p.lookingForGender || !currentUserGender || p.lookingForGender === currentUserGender;
       const notMe = p.owner_user_id !== userId;
 
-      return notMe && intentionMatch && culturalMatch && spiritualMatch && stateMatch && preferenceMatch && reciprocalMatch;
+      return notMe && intentionMatch && culturalMatch && spiritualMatch && stateMatch && ageMatch && preferenceMatch && reciprocalMatch;
     });
-  }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter, stateFilter, myProfile, userId]);
+  }, [availableProfiles, intentionFilter, culturalIdentityFilter, spiritualFrameworkFilter, stateFilter, minAgeValue, maxAgeValue, ageRangeError, myProfile, userId]);
 
   function showToast(msg: unknown) {
     setToast(typeof msg === "string" ? msg : toNiceString(msg));
@@ -1032,6 +1050,54 @@ export default function DiscoverPage() {
               ))}
             </select>
           </div>
+
+          <div style={{ ...filterWrapStyle, flexWrap: "wrap" }}>
+            <span style={filterLabelStyle}>Age:</span>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span style={filterLabelStyle}>Min</span>
+              <input
+                type="number"
+                min={18}
+                step={1}
+                value={minAgeFilter}
+                onChange={(e) => { setMinAgeFilter(e.target.value); setActiveProfileIndex(0); }}
+                placeholder="Any"
+                aria-label="Minimum age"
+                aria-invalid={!!ageRangeError}
+                aria-describedby={ageRangeError ? "age-filter-error" : undefined}
+                style={{ ...selectBase, width: 76 }}
+              />
+            </label>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span style={filterLabelStyle}>Max</span>
+              <input
+                type="number"
+                min={18}
+                step={1}
+                value={maxAgeFilter}
+                onChange={(e) => { setMaxAgeFilter(e.target.value); setActiveProfileIndex(0); }}
+                placeholder="Any"
+                aria-label="Maximum age"
+                aria-invalid={!!ageRangeError}
+                aria-describedby={ageRangeError ? "age-filter-error" : undefined}
+                style={{ ...selectBase, width: 76 }}
+              />
+            </label>
+            {(minAgeFilter !== "" || maxAgeFilter !== "") && (
+              <button
+                type="button"
+                onClick={() => { setMinAgeFilter(""); setMaxAgeFilter(""); setActiveProfileIndex(0); }}
+                style={{ ...selectBase, cursor: "pointer" }}
+              >
+                Clear age
+              </button>
+            )}
+          </div>
+          {ageRangeError && (
+            <div id="age-filter-error" role="alert" style={{ flexBasis: "100%", color: "#9b1c1c", fontSize: 13 }}>
+              {ageRangeError}
+            </div>
+          )}
         </div>
 
         <div
