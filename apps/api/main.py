@@ -3652,7 +3652,7 @@ def send_message(payload: MessageCreatePayload):
         session.commit()
         session.refresh(m)
         # Send an email alert to the recipient after the message is saved successfully.
-           try:
+        try:
         recipient_user_id = (
             thread.user_high if user_id == thread.user_low else thread.user_low
         )
