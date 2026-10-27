@@ -3668,7 +3668,7 @@ def send_message(payload: MessageCreatePayload):
                     cooldown_start = now - datetime.timedelta(minutes=30)
 
                     recent_prior_message = session.execute(
-                        select(Message.id).where(
+                       select(Message.id).where(
                            Message.thread_id == thread_id,
                            Message.sender_user_id == user_id,
                            Message.created_at >= cooldown_start,
