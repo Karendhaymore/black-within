@@ -3663,7 +3663,21 @@ def send_message(payload: MessageCreatePayload):
                 ).scalar_one_or_none()
 
                 if recipient_account and recipient_account.email:
-                    _send_engagement_email(recipient_account.email, "message")
+                    # Avoid flooding the recipient with email alerts during an active conversation.
+                    # Send at most one message-notification email every 30 minutes per thread.
+                    cooldown_start = now - datetime.timedelta(minutes=30)
+
+                    recent_prior_message = session.execute(
+                        select(Message.id).where(
+                           Message.thread_id == thread_id,
+                           Message.sender_user_id == user_id,
+                           Message.created_at >= cooldown_start,
+                           Message.id != m.id,
+                       ).limit(1)
+                  ).scalar_one_or_none()
+
+                  if recent_prior_message is None:
+                      _send_engagement_email(recipient_account.email, "message")
         except Exception as e:
             print("Message notification email error:", str(e))
         return MessageItem(id=m.id, thread_id=m.thread_id, sender_user_id=m.sender_user_id, body=m.body, created_at=m.created_at.isoformat())
