@@ -3652,34 +3652,35 @@ def send_message(payload: MessageCreatePayload):
         session.commit()
         session.refresh(m)
         # Send an email alert to the recipient after the message is saved successfully.
-        try:
-            recipient_user_id = (
-                thread.user_high if user_id == thread.user_low else thread.user_low
-            )
+           try:
+        recipient_user_id = (
+            thread.user_high if user_id == thread.user_low else thread.user_low
+        )
 
-            if recipient_user_id and recipient_user_id != user_id:
-                recipient_account = session.execute(
-                    select(AuthAccount).where(AuthAccount.user_id == recipient_user_id)
+        if recipient_user_id and recipient_user_id != user_id:
+            recipient_account = session.execute(
+                select(AuthAccount).where(AuthAccount.user_id == recipient_user_id)
+            ).scalar_one_or_none()
+
+            if recipient_account and recipient_account.email:
+                # Avoid flooding the recipient with email alerts during an active conversation.
+                # Send at most one message-notification email every 30 minutes per thread.
+                cooldown_start = now - datetime.timedelta(minutes=30)
+
+                recent_prior_message = session.execute(
+                    select(Message.id).where(
+                        Message.thread_id == thread_id,
+                        Message.sender_user_id == user_id,
+                        Message.created_at >= cooldown_start,
+                        Message.id != m.id,
+                    ).limit(1)
                 ).scalar_one_or_none()
 
-                if recipient_account and recipient_account.email:
-                    # Avoid flooding the recipient with email alerts during an active conversation.
-                    # Send at most one message-notification email every 30 minutes per thread.
-                    cooldown_start = now - datetime.timedelta(minutes=30)
+                if recent_prior_message is None:
+                    _send_engagement_email(recipient_account.email, "message")
 
-                    recent_prior_message = session.execute(
-                       select(Message.id).where(
-                           Message.thread_id == thread_id,
-                           Message.sender_user_id == user_id,
-                           Message.created_at >= cooldown_start,
-                           Message.id != m.id,
-                       ).limit(1)
-                  ).scalar_one_or_none()
-
-                  if recent_prior_message is None:
-                      _send_engagement_email(recipient_account.email, "message")
-        except Exception as e:
-            print("Message notification email error:", str(e))
+    except Exception as e:
+        print("Message notification email error:", str(e))
         return MessageItem(id=m.id, thread_id=m.thread_id, sender_user_id=m.sender_user_id, body=m.body, created_at=m.created_at.isoformat())
 
 @app.get("/admin-messages", response_model=AdminMessagesOut)
