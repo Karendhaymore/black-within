@@ -1448,7 +1448,47 @@ def _send_email_sendgrid_one(to_email: str, subject: str, html: str) -> None:
     if resp.status_code not in (200, 202):
         raise RuntimeError(f"SendGrid send failed: {resp.status_code} {resp.body}")
 
+def _send_engagement_email(to_email: str, notification_type: str) -> None:
+    """
+    Sends privacy-friendly email alerts for likes and messages.
+    Email failures are logged so they do not interfere with the user's action.
+    """
+    if not to_email:
+        return
 
+    login_url = f"{APP_WEB_BASE_URL}/login"
+
+    if notification_type == "like":
+        subject = "Someone likes you on Meet Black Within ❤️"
+        heading = "Someone likes you ❤️"
+        body = "Someone liked your profile on Meet Black Within. Log in to see who it is."
+    elif notification_type == "message":
+        subject = "You have a new message on Meet Black Within 💬"
+        heading = "You have a new message 💬"
+        body = "Someone sent you a new message on Meet Black Within. Log in to read it."
+    else:
+        return
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111;">
+        <h2>{heading}</h2>
+        <p>{body}</p>
+        <p style="margin-top:24px;">
+            <a href="{login_url}"
+               style="display:inline-block;padding:12px 20px;border-radius:8px;background:#111;color:#fff;text-decoration:none;font-weight:700;">
+                Log In to Meet Black Within
+            </a>
+        </p>
+        <p style="margin-top:24px;font-size:13px;color:#666;">
+            Meet Black Within — where culturally conscious Black singles connect.
+        </p>
+    </div>
+    """
+
+    try:
+        _send_email_sendgrid_one(to_email, subject, html)
+    except Exception as e:
+        print(f"Engagement email send error ({notification_type}):", str(e))
 def _parse_json_list(s: Optional[str]) -> List[str]:
     try:
         v = json.loads(s or "[]")
