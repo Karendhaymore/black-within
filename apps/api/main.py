@@ -3203,7 +3203,17 @@ def like(payload: ProfileAction):
             session.rollback()
             likes_left_safe = max(0, FREE_LIKES_PER_DAY - int(counter.count))
             return {"ok": True, "likesLeft": likes_left_safe, "resetsAtUTC": reset_at.isoformat()}
+                 # Send an email alert only after a brand-new like was saved successfully.
+        if recipient_user_id and recipient_user_id != liker_user_id:
+            try:
+                recipient_account = session.execute(
+                    select(AuthAccount).where(AuthAccount.user_id == recipient_user_id)
+                ).scalar_one_or_none()
 
+                if recipient_account and recipient_account.email:
+                    _send_engagement_email(recipient_account.email, "like")
+            except Exception as e:
+                print("Like notification email error:", str(e)) 
         counter2, likes_left_final, reset_at2, window_type2 = _get_likes_window(session, liker_user_id)
         return {"ok": True, "likesLeft": likes_left_final, "resetsAtUTC": reset_at2.isoformat()}
 
