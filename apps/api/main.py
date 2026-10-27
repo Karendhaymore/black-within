@@ -1456,7 +1456,7 @@ def _send_engagement_email(to_email: str, notification_type: str) -> None:
     if not to_email:
         return
 
-    login_url = f"{APP_WEB_BASE_URL}/login"
+    login_url = APP_WEB_BASE_URL
 
     if notification_type == "like":
         subject = "Someone likes you on Meet Black Within ❤️"
