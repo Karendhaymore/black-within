@@ -668,7 +668,7 @@ export default function AdminDashboardPage() {
                   try {
                     await fetch(`${API_BASE}/admin/auth/logout`, {
                       method: "POST",
-                      headers: adminHeaders(),
+                      headers: buildAdminHeaders(token),
                     });
                   } catch (err) {
                     console.error("Admin logout error:", err);
