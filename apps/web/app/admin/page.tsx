@@ -664,11 +664,20 @@ export default function AdminDashboardPage() {
               <button
                 type="button"
                 style={dangerBtn}
-                onClick={() => {
-                  clearAdminToken();
-                  showToast("Signed out.");
-                  router.replace("/admin/login");
-                }}
+                onClick={async () => {
+                  try {
+                    await fetch(`${API_BASE}/admin/auth/logout`, {
+                      method: "POST",
+                      headers: adminHeaders(),
+                    });
+                  } catch (err) {
+                    console.error("Admin logout error:", err);
+                  } finally {
+                    clearAdminToken();
+                    showToast("Signed out.");
+                   router.replace("/admin/login");
+                }
+              }}
               >
                 Sign out
               </button>
