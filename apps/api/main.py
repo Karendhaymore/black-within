@@ -3782,7 +3782,7 @@ def admin_login(body: AdminLoginIn):
 
         return AdminLoginOut(token=token, role=au.role, email=au.email)
 
- @app.post("/admin/auth/logout")
+@app.post("/admin/auth/logout")
 def admin_logout(
     authorization: Optional[str] = Header(default=None),
     x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
