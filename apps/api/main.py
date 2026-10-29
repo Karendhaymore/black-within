@@ -3782,6 +3782,34 @@ def admin_login(body: AdminLoginIn):
 
         return AdminLoginOut(token=token, role=au.role, email=au.email)
 
+ @app.post("/admin/auth/logout")
+def admin_logout(
+    authorization: Optional[str] = Header(default=None),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    token = (x_admin_token or "").strip()
+
+    if not token and authorization:
+        auth = authorization.strip()
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Admin token required.")
+
+    token_hash = _hash_token(token)
+
+    with Session(engine) as session:
+        admin_session = session.execute(
+            select(AdminSession).where(AdminSession.token_hash == token_hash)
+        ).scalar_one_or_none()
+
+        if admin_session:
+            session.delete(admin_session)
+            session.commit()
+
+    return {"ok": True}            
+
 @app.post("/admin/users/message")
 def admin_send_message_to_user(
     req: AdminSendMessageRequest,
